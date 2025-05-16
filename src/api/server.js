@@ -4,6 +4,9 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAIEmbeddings } = require('@langchain/google-genai');
 const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
+const { ConversationChain } = require("langchain/chains");
+const { BufferWindowMemory } = require("langchain/memory");
+const { PromptTemplate } = require("@langchain/core/prompts");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -25,8 +28,36 @@ const embeddings = new GoogleGenerativeAIEmbeddings({
 });
 const chatModel = new ChatGoogleGenerativeAI({
     apiKey: geminiApiKey,
-    model: "gemini-1.5-flash-latest",
+    model: "gemini-2.0-flash",
     temperature: 0.7,
+});
+
+// 会話メモリの設定 (k=3 往復分の会話を記憶)
+// 注意: これは単一のグローバルメモリです。複数ユーザー対応のためにはセッション管理などが必要。
+const memory = new BufferWindowMemory({ k: 6, memoryKey: "chat_history", inputKey: "input" });
+
+// プロンプトテンプレートの定義 (会話履歴を考慮)
+const chatPrompt = PromptTemplate.fromTemplate(`
+あなたは親切なAIアシスタントです。ユーザーの質問に、提供された背景情報とこれまでの会話履歴を考慮して答えてください。
+もし背景情報だけでは答えられない場合は、その旨を伝えてください。
+
+これまでの会話履歴:
+{chat_history}
+
+背景情報:
+{context}
+
+ユーザーの質問:
+{input}
+
+あなたの回答:
+`);
+
+// ConversationChain の初期化
+const chain = new ConversationChain({
+    llm: chatModel,
+    memory: memory,
+    prompt: chatPrompt,
 });
 
 // ミドルウェアの設定
@@ -49,8 +80,8 @@ app.post('/api/qa', async (req, res) => {
     console.log("質問のベクトル化完了。");
 
     // 2. Supabase DB で類似チャンクを検索 (RPC呼び出し)
-    const matchThreshold = 0.7; // 類似度の閾値 (0.0 〜 1.0) 適宜調整
-    const matchCount = 5;     // 取得するチャンクの最大数
+    const matchThreshold = 0.7;
+    const matchCount = 3; // 参照するチャンク数を少し減らす (プロンプト長考慮)
     console.log(`類似チャンクを検索中 (threshold: ${matchThreshold}, count: ${matchCount})...`);
     const { data: chunks, error: rpcError } = await supabase.rpc('match_manual_chunks', {
       query_embedding: queryEmbedding,
@@ -63,25 +94,38 @@ app.post('/api/qa', async (req, res) => {
       return res.status(500).json({ error: 'データベース検索中にエラーが発生しました。' });
     }
 
-    if (!chunks || chunks.length === 0) {
+    let contextForLLM = "";
+    if (chunks && chunks.length > 0) {
+      console.log(`${chunks.length} 件の関連チャンクが見つかりました。`);
+      contextForLLM = chunks.map(chunk => chunk.chunk_text).join('\n\n---\n\n');
+    } else {
       console.log("関連するチャンクが見つかりませんでした。");
-      return res.status(404).json({ answer: '関連する情報が見つかりませんでした。', sources: [] });
+      contextForLLM = "関連する背景情報は見つかりませんでした。";
     }
-    console.log(`${chunks.length} 件の関連チャンクが見つかりました。`);
-
-    // 3. 取得したチャンクと質問を基にLLMで回答生成
-    const context = chunks.map(chunk => chunk.chunk_text).join('\n\n---\n\n');
-    const prompt = `以下の背景情報に基づいて、ユーザーの質問に答えてください。\n\n背景情報:\n${context}\n\n質問: ${query}\n\n回答:`;
     
-    console.log("LLMに回答生成をリクエスト中...");
-    const llmResponse = await chatModel.invoke(prompt);
-    const answer = llmResponse.content; // LangChainのバージョンにより .text や .content など異なる場合あり
+    // 3. ConversationChain を使って回答を生成 (会話履歴と背景情報を考慮)
+    console.log("LLMに回答生成をリクエスト中 (会話履歴と背景情報考慮)...");
+    const llmResponse = await chain.invoke({
+        input: query,
+        context: contextForLLM
+    });
+    
+    // ConversationChain の応答は通常 result.response や result.text に格納される
+    // chain.invoke の場合は直接文字列か、{ response: "..." } のようなオブジェクトで返る。
+    // ここでは llmResponse が { response: "AIの回答" } の形を期待。 LangChainのバージョンや設定で要確認。
+    const answer = llmResponse.response; // または llmResponse.output や llmResponse.text など、実際の構造に合わせる
+
+    if (!answer) {
+        console.error("LLMからの応答形式が予期したものではありません。", llmResponse);
+        return res.status(500).json({ error: 'AIからの回答取得に失敗しました。応答形式を確認してください。' });
+    }
+
     console.log("LLMからの回答受信完了。");
 
-    // 4. 回答と参照元を返す
-    res.status(200).json({ 
+    // 4. 回答と参照元を返す (参照元情報はベクトル検索の結果を使う)
+    res.status(200).json({
       answer: answer,
-      sources: chunks.map(c => ({ id: c.id, manual_id: c.manual_id, page_number: c.page_number, similarity: c.similarity, text_snippet: c.chunk_text.substring(0,100) + '...' })) 
+      sources: chunks && chunks.length > 0 ? chunks.map(c => ({ id: c.id, manual_id: c.manual_id, page_number: c.page_number, similarity: c.similarity, text_snippet: c.chunk_text.substring(0,100) + '...' })) : []
     });
 
   } catch (error) {
