@@ -120,6 +120,20 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
     const splitter = new RecursiveCharacterTextSplitter({
       chunkSize: 2500,
       chunkOverlap: 400,
+      separators: [
+        "\n\n",   // 段落区切り (元々のデフォルトでも最優先に近い)
+        "。\n",    // 日本語の文末＋改行 (文の区切りを意識)
+        "！\n",   // 感嘆符＋改行
+        "？\n",   // 疑問符＋改行
+        "\n",     // 改行
+        "。",       // 文末 (改行がない場合)
+        "！",       // 感嘆符 (改行がない場合)
+        "？",       // 疑問符 (改行がない場合)
+        "、",       // 読点
+        " ",       // 半角スペース
+        "　",     // 全角スペース (念のため)
+        ""         // 最終的な区切り文字
+      ],
     });
     const chunks = [];
     for (let i = 0; i < parsedDocs.length; i++) {
