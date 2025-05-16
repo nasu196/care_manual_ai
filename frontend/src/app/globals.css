@@ -119,4 +119,63 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* AIの回答メッセージのスタイル調整 */
+  .prose {
+    /* デフォルトのフォントサイズなどを維持しつつ、必要な部分を調整 */
+    @apply text-foreground; /* prose-invert を使わない場合や、ダークモード以外での基本色 */
+  }
+
+  .dark .prose {
+    @apply text-foreground; /* prose-invert があるので、ダークモード時の基本色 */
+  }
+
+  /* prose内のすべての要素の基本的な行間を少し広げる */
+  .prose :where(p, ul, ol, dl, pre, blockquote, figure, hr):not(:where([class~="not-prose"] *)) {
+    @apply mb-4; /* 要素間の下のマージンを少し広げる */
+  }
+  
+  .prose :where(h1, h2, h3, h4, h5, h6):not(:where([class~="not-prose"] *)) {
+    @apply mb-3 mt-6; /* 見出しの上下マージン調整 */
+  }
+
+  .prose :where(p):not(:where([class~="not-prose"] *)) {
+    @apply leading-relaxed; /* 段落の行間を広げる */
+  }
+
+  .prose :where(ul):not(:where([class~="not-prose"] *)) {
+    @apply list-disc list-inside pl-5 my-4; /* マーカー表示、位置、インデント、マージン */
+  }
+
+  .prose :where(ol):not(:where([class~="not-prose"] *)) {
+    @apply pl-5 my-4; /* ol は現状の ::before スタイルでマーカーを処理しているため、型指定は一旦保留 */
+    /* 必要であれば @apply list-decimal list-inside; などを追加 */
+  }
+
+  .prose :where(ul > li, ol > li):not(:where([class~="not-prose"] *)) {
+    @apply my-1; /* リストアイテム間のマージン */
+  }
+  
+  /* Tailwind Typographyのデフォルトマーカーを使用するため、以下の::beforeスタイルを削除またはコメントアウト */
+  /* 
+  .prose :where(ul > li):not(:where([class~="not-prose"] *))::before {
+    content: '•'; 
+    @apply text-foreground mr-2; 
+  }
+  .dark .prose :where(ul > li):not(:where([class~="not-prose"] *))::before {
+    content: '•'; 
+    @apply text-foreground; 
+  }
+  */
+
+  .prose :where(ol > li):not(:where([class~="not-prose"] *))::before {
+    @apply text-foreground pr-1; /* Number markerの色と右側のパディング */
+  }
+  .dark .prose :where(ol > li):not(:where([class~="not-prose"] *))::before {
+    @apply text-foreground; /* ダークモードでのNumber markerの色 */
+  }
+  
+  /* 参照元情報のスタイル調整 (もし必要であれば) */
+  /* .prose .text-xs.font-semibold { ... } */
+  /* .prose ul.list-disc.list-inside.text-xs { ... } */
 }

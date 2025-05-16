@@ -118,8 +118,8 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
     }
 
     const splitter = new RecursiveCharacterTextSplitter({
-      chunkSize: 1000,
-      chunkOverlap: 100,
+      chunkSize: 2500,
+      chunkOverlap: 400,
     });
     const chunks = [];
     for (let i = 0; i < parsedDocs.length; i++) {
