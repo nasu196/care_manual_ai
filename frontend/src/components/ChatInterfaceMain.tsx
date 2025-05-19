@@ -4,7 +4,6 @@ import { useState, FormEvent, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Message {
@@ -14,7 +13,7 @@ interface Message {
   sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number }>;
 }
 
-export default function ChatInterfaceMain() { // 関数名を変更
+export default function ChatInterfaceMain() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -78,14 +77,14 @@ export default function ChatInterfaceMain() { // 関数名を変更
   }, [messages]);
 
   return (
-    // このdivがChatInterfaceMainのルート要素になります
-    <div className="flex flex-col items-center justify-center h-full p-4"> 
-      <Card className="w-full max-w-2xl shadow-xl h-full flex flex-col">
-        <CardHeader>
-          <CardTitle className="text-center text-2xl font-bold">AIチャットボット</CardTitle>
-        </CardHeader>
-        <CardContent className="flex-grow overflow-hidden"> {/* flex-grow と overflow-hidden を追加 */}
-          <ScrollArea className="h-full w-full p-4 border rounded-md" ref={scrollAreaRef}> {/* mb-4 を削除し、h-full を適用 */}
+    <div className="h-full flex flex-col">
+      <div className="p-6 border-b">
+        <h2 className="text-center text-2xl font-bold">AIチャット</h2>
+      </div>
+      
+      <div className="flex-grow overflow-hidden px-6">
+        <ScrollArea className="h-full w-full" ref={scrollAreaRef}>
+          <div className="pt-4 pb-4">
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -94,8 +93,8 @@ export default function ChatInterfaceMain() { // 関数名を変更
                 <div
                   className={`p-3 rounded-lg max-w-[70%] ${ 
                     msg.sender === 'user'
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
                   }`}
                 >
                   {msg.sender === 'user' ? (
@@ -106,7 +105,7 @@ export default function ChatInterfaceMain() { // 関数名を変更
                     </div>
                   )}
                   {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-gray-300 dark:border-gray-600">
+                    <div className="mt-2 pt-2 border-t">
                       <p className="text-xs font-semibold mb-1">参照元:</p>
                       <ul className="list-disc list-inside text-xs">
                         {msg.sources.map(source => (
@@ -122,29 +121,30 @@ export default function ChatInterfaceMain() { // 関数名を変更
             ))}
             {isLoading && (
                 <div className="flex justify-start mb-3">
-                    <div className="p-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-gray-100 animate-pulse">
+                    <div className="p-3 rounded-lg bg-muted text-muted-foreground animate-pulse">
                         AIが考え中...
                     </div>
                 </div>
             )}
-          </ScrollArea>
-        </CardContent>
-        <CardFooter>
-          <form onSubmit={handleSubmit} className="flex w-full space-x-2">
-            <Input
-              type="text"
-              placeholder="質問を入力してください..."
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              className="flex-1"
-              disabled={isLoading}
-            />
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? '送信中...' : '送信'}
-            </Button>
-          </form>
-        </CardFooter>
-      </Card>
+          </div>
+        </ScrollArea>
+      </div>
+
+      <div className="p-6 border-t">
+        <form onSubmit={handleSubmit} className="flex w-full space-x-2">
+          <Input
+            type="text"
+            placeholder="質問を入力してください..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            className="flex-1"
+            disabled={isLoading}
+          />
+          <Button type="submit" disabled={isLoading}>
+            {isLoading ? '送信中...' : '送信'}
+          </Button>
+        </form>
+      </div>
     </div>
   );
 } 
