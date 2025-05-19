@@ -63,7 +63,7 @@
 | Supabaseプロジェクトセットアップ                                 |        |      | 完了     | Database, Storage, Edge Functions                              |
 | データベーススキーマ設計（マニュアル、メモ、設定など）             |        |      | 完了     | `manuals`, `manual_chunks`, `memos`, `settings` テーブル作成 |
 | ベクトル検索のためのpgvector拡張機能導入と設定                     |        |      | 完了     | `vector` 拡張機能有効化                                    |
-| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 未着手   |                                                                |
+| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 未着手   | ローカルテスト時、PowerShellのInvoke-WebRequestで日本語JSONを送信する場合は、-Bodyに渡すデータを [System.Text.Encoding]::UTF8.GetBytes() でバイト配列化し、-ContentType \'application/json;charset=utf-8\' を指定すること。 |
 
 ## 9. AI関連技術準備
 | タスク名                                                       | 担当者 | 期限 | 進捗状況 | 備考            |
