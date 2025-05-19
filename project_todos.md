@@ -41,7 +41,7 @@
 | 【初期】開発者によるマニュアルのSupabase Storageへの配置とベクトル化処理 |        |      | 完了     | 手動にて r6_koubover2_sogyo1.pdf を manuals バケットに配置 |
 | マニュアルアップロード機能（PDF, Word）                                  |        |      | 未着手   | Supabase Storage, ユーザーUI含む                         |
 | マニュアル一元管理システム（最新版主義）                                 |        |      | 未着手   | Supabase Database                                          |
-| 管理者主導型メモ機能バックエンド実装                                 |        |      | 未着手   | Supabase Database                                          |
+| 管理者主導型メモ機能バックエンド実装                                 | AI/USER |      | 完了     | Supabase Database, Edge Functions (CRUD API実装済み)         |
 | メモ化サジェスト機能（キーワードベース）実装検討・実装                 |        |      | 未着手   |                                        |
 | 研修資料作成支援機能（AI指示によるプロンプト生成）実装                 |        |      | 未着手   | 結果を「管理者作成メモ」に保存                           |
 | 練習問題・クイズ生成機能（AI指示）実装                               |        |      | 未着手   | 結果を「管理者作成メモ」に保存、採点手動                     |

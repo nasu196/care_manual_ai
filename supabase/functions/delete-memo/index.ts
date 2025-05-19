@@ -108,10 +108,10 @@ Deno.serve(async (req) => {
 
   } catch (e) {
     console.error('An unexpected error occurred in delete-memo:', e)
-    return new Response(
+  return new Response(
       JSON.stringify({ error: 'Internal Server Error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+  )
   }
 })
 
