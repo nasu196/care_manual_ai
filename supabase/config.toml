@@ -9,3 +9,14 @@ entrypoint = "./functions/create-memo/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/create-memo/*.html" ]
+
+[functions.list-memos]
+enabled = true
+verify_jwt = true
+import_map = "./functions/list-memos/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/list-memos/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/list-memos/*.html" ]

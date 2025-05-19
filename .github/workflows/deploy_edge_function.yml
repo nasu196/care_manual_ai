@@ -21,8 +21,8 @@ jobs:
         with:
           version: latest # もし特定のバージョンを指定したい場合は変更 (例: '1.167.4')
 
-      - name: Deploy Edge Function
+      - name: Deploy All Edge Functions
         run: |
-          echo "Deploying create-memo function..."
-          supabase functions deploy create-memo --project-ref $PROJECT_ID --no-verify-jwt
-          echo "Deployment attempted."
+          echo "Deploying all Edge Functions..."
+          supabase functions deploy --project-ref $PROJECT_ID --no-verify-jwt
+          echo "Deployment of all functions attempted."
