@@ -13,5 +13,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start:api": "node src/api/server.js"
+  },
+  "devDependencies": {
+    "supabase": "^2.22.12"
   }
 }

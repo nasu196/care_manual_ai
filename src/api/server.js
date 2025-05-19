@@ -195,10 +195,10 @@ app.post('/api/qa', async (req, res) => {
 
     for (const searchQuery of searchQueries) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') {
-        console.warn(`[Phase 2] スキップされた無効な検索クエリ: "${searchQuery}"`);
+        console.warn(`[Phase 2] スキップされた無効な検索クエリ: \"${searchQuery}\"`);
         continue;
       }
-      console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
+      console.log(`[Phase 2] 検索実行中: \"${searchQuery}\"`);
       const queryEmbedding = await embeddings.embedQuery(searchQuery);
       const { data: rpcData, error: rpcError } = await supabase.rpc('match_manual_chunks', {
         query_embedding: queryEmbedding,
@@ -207,7 +207,7 @@ app.post('/api/qa', async (req, res) => {
       });
 
       if (rpcError) {
-        console.warn(`[Phase 2] Supabase RPCエラー (クエリ: "${searchQuery}"):`, rpcError);
+        console.warn(`[Phase 2] Supabase RPCエラー (クエリ: \"${searchQuery}\"):`, rpcError);
         continue; 
       }
 
@@ -221,6 +221,10 @@ app.post('/api/qa', async (req, res) => {
       }
     }
     console.log(`[Phase 2] 合計 ${allChunks.length} 件のユニークなチャンクを取得しました。`);
+    // ★★★ allChunksの内容をコンソールに出力 ★★★
+    if (allChunks.length > 0) {
+      console.log('[Phase 2] allChunksの内容 (最初の1件):', JSON.stringify(allChunks[0], null, 2));
+    }
 
     let contextForLLM = "";
     if (allChunks.length > 0) {
