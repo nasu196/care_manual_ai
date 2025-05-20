@@ -269,6 +269,7 @@ const SourceManager: React.FC = () => {
           onChange={handleLocalFileChange} 
           className="hidden" 
           disabled={uploading}
+          accept=".pdf,.doc,.docx,.ppt,.pptx"
         />
       </div>
 
