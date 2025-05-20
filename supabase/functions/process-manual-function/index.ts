@@ -10,10 +10,11 @@ console.log("Hello from Functions!")
 
 import { serve, ConnInfo } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import { PDFLoader } from "npm:@langchain/community/document_loaders/fs/pdf";
+// import { PDFLoader } from "npm:@langchain/community/document_loaders/fs/pdf"; // ★ コメントアウトまたは削除
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 import { GoogleGenerativeAIEmbeddings } from "npm:@langchain/google-genai";
 import officeParser from "npm:officeparser";
+import pdfParse from "npm:pdf-parse"; // ★ pdf-parse を直接インポート
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -81,8 +82,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
     try {
       await fs.mkdir(appTmpDir, { recursive: true });
-    } catch (mkdirError: any) { // Denoでは型anyがより一般的
-      // ENOENT (No such file or directory) は無視しても良い場合があるが、他は警告
+    } catch (mkdirError: any) {
       if (mkdirError.code !== 'ENOENT' && mkdirError.code !== 'EEXIST') {
          console.warn(`一時サブディレクトリの作成に失敗: ${appTmpDir}`, mkdirError);
       } else if (mkdirError.code === 'EEXIST') {
@@ -97,10 +97,22 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     let docs: Array<{ pageContent: string; metadata: Record<string, any> }> = [];
 
     if (fileExtension === '.pdf') {
-      console.log("\nPDFLoaderでドキュメントを読み込み開始...");
-      const loader = new PDFLoader(actualTmpFilePath);
-      docs = await loader.load();
-      console.log(`ドキュメントの読み込み完了。合計 ${docs.length} ページ。`);
+      console.log("\npdf-parseでドキュメントを読み込み開始...");
+      const pdfData = await pdfParse(fileBuffer); // ★ PDFLoaderの代わりにpdfParseを使用
+      // pdfParseの結果からページごとの情報を取得するのは少し工夫が必要
+      // LangChainのPDFLoaderはページ単位でDocumentを生成するが、pdf-parseは主にテキスト全体とメタデータを返す
+      // ここではまずテキスト全体を1つのドキュメントとして扱う
+      // 必要であれば、ページ分割のロジックをpdfData.numpagesなどを使って自作することも検討
+      docs = [{
+        pageContent: pdfData.text,
+        metadata: { 
+            source: fileName, 
+            type: 'pdf',
+            totalPages: pdfData.numpages, // pdf-parseから総ページ数を取得
+            // loc: { pageNumber: 1 } // ページ単位ではないため、このような情報は付与しにくい
+        }
+      }];
+      console.log(`ドキュメントの読み込み完了。合計 ${pdfData.numpages} ページ (テキストは結合)。`);
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
       const data = await new Promise<string>((resolve, reject) => {
@@ -164,7 +176,7 @@ async function processAndStoreDocuments(
       manualId = existingManual.id;
       console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
     } else {
-      const totalPages = parsedDocs[0]?.metadata?.pdf?.totalPages ||
+      const totalPages = parsedDocs[0]?.metadata?.totalPages ||
                          (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length);
       const { data: newManual, error: insertError } = await supabaseClient
         .from('manuals')
@@ -172,7 +184,7 @@ async function processAndStoreDocuments(
           file_name: sourceFileName,
           storage_path: `${BUCKET_NAME}/${sourceFileName}`,
           metadata: { 
-            totalPages: Math.round(totalPages),
+            totalPages: totalPages,
             sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown'
           },
         })
@@ -283,6 +295,8 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
   }
 
   let tmpFilePathToDelete: string | null = null;
+  let receivedFileName: string | null = null; // エラー時のロールバック用にファイル名を保持
+
   try {
     if (!supabase) {
         throw new Error("Supabase client is not initialized. Check SUPABASE_URL and SUPABASE_ANON_KEY.");
@@ -293,46 +307,66 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
     const body = await req.json();
     const { fileName } = body;
+    receivedFileName = fileName; // ファイル名を変数に保存
 
-    if (!fileName || typeof fileName !== 'string') {
+    if (!receivedFileName || typeof receivedFileName !== 'string') {
       return new Response(JSON.stringify({ error: 'fileName (string) is required in the request body' }), { 
         status: 400, 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
       });
     }
-    console.log(`Function called for fileName: ${fileName}`);
+    console.log(`Function called for fileName: ${receivedFileName}`);
 
-    const processedFile = await downloadAndProcessFile(fileName, supabase);
+    const processedFile = await downloadAndProcessFile(receivedFileName, supabase);
     if (processedFile && processedFile.tmpFilePath) {
         tmpFilePathToDelete = processedFile.tmpFilePath;
     }
     
     if (processedFile) {
-      console.log("\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功 ---");
-      const success = await processAndStoreDocuments(processedFile, fileName, supabase, embeddings);
+      console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
+      const success = await processAndStoreDocuments(processedFile, receivedFileName, supabase, embeddings);
       if (success) {
-        console.log("\n--- 全体処理完了 (チャンク化とDB保存含む) 成功 ---");
-        return new Response(JSON.stringify({ message: `Successfully processed ${fileName}` }), { 
+        console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
+        return new Response(JSON.stringify({ message: `Successfully processed ${receivedFileName}` }), { 
           status: 200, 
           headers: { ...corsHeaders, "Content-Type": "application/json" } 
         });
       } else {
-        console.error("\n--- 全体処理失敗 (チャンク化またはDB保存でエラー) ---");
-        return new Response(JSON.stringify({ error: `Failed to process ${fileName} during storage/embedding.` }), { 
-          status: 500, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        });
+        console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${receivedFileName} ---`);
+        // このケースでもロールバックを試みる (下のcatchブロックで処理)
+        throw new Error(`Failed to process ${receivedFileName} during storage/embedding. Triggering rollback if applicable.`);
       }
     } else {
-      console.error("\n--- ファイル処理パイプライン (ダウンロードと抽出) 失敗 ---");
-      return new Response(JSON.stringify({ error: `Failed to download or parse ${fileName}.` }), { 
-        status: 500, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
+      console.error(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 失敗: ${receivedFileName} ---`);
+      // このケースでもロールバックを試みる (下のcatchブロックで処理)
+      throw new Error(`Failed to download or parse ${receivedFileName}. Triggering rollback if applicable.`);
     }
   } catch (error: unknown) {
-    console.error('Error in function handler:', error);
-    const message = error instanceof Error ? error.message : "Internal server error.";
+    console.error(`Error in function handler for file: ${receivedFileName || 'Unknown file'}:`, error);
+    
+    // ロールバック処理: Storageからファイルを削除
+    if (receivedFileName && supabase) {
+      console.warn(`処理中にエラーが発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
+      try {
+        const { error: deleteError } = await supabase.storage
+          .from(BUCKET_NAME)
+          .remove([receivedFileName]); // ファイル名の配列を渡す
+        if (deleteError) {
+          // removeはファイルが存在しない場合もエラーを返すことがあるので、エラー内容を確認
+          if (deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
+            console.log(`Storageにファイル ${receivedFileName} が見つからなかったため、削除はスキップされました。`);
+          } else {
+            console.error(`Storageからのファイル ${receivedFileName} の削除に失敗しました。`, deleteError);
+          }
+        } else {
+          console.log(`Storageからファイル ${receivedFileName} を削除しました。`);
+        }
+      } catch (storageDeleteError) {
+        console.error(`Storageからのファイル ${receivedFileName} の削除中に予期せぬエラー。`, storageDeleteError);
+      }
+    }
+
+    const message = error instanceof Error ? error.message : "Internal server error during file processing.";
     return new Response(JSON.stringify({ error: message }), { 
       status: 500, 
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
@@ -341,13 +375,13 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     if (tmpFilePathToDelete) {
         try {
             await fs.unlink(tmpFilePathToDelete);
-            console.log(`\n一時ファイルを削除しました: ${tmpFilePathToDelete}`);
+            console.log(`\n一時ファイルをクリーンアップしました: ${tmpFilePathToDelete}`);
         } catch (e: unknown) {
-            const error = e as { code?: string }; // 型アサーション
-            if (error.code !== 'ENOENT') { // ファイルが存在しないエラーは無視
-                 console.warn(`一時ファイルの削除中にエラーが発生しました: ${tmpFilePathToDelete}`, e);
+            const fileError = e as { code?: string }; 
+            if (fileError.code !== 'ENOENT') { 
+                 console.warn(`一時ファイルの削除中にエラーが発生しました (無視): ${tmpFilePathToDelete}`, e);
             } else {
-                 console.log(`一時ファイルは既に存在しませんでした: ${tmpFilePathToDelete}`);
+                 console.log(`一時ファイルは既に存在しませんでした (無視): ${tmpFilePathToDelete}`);
             }
         }
     }
@@ -363,12 +397,13 @@ console.log("Process manual function (Deno native HTTP) server running on port 8
   1. Make sure your .env file has SUPABASE_URL, SUPABASE_ANON_KEY, and GEMINI_API_KEY.
   2. Run this Deno script:
      deno run --allow-net --allow-env --allow-read=/tmp,./.env --allow-write=/tmp supabase/functions/process-manual-function/index.ts
+     (For Deno Deploy, these permissions are typically handled by the platform)
   3. Make an HTTP request:
 
-  curl -i --location --request POST 'http://localhost:8000/' \
-    --header 'Content-Type: application/json' \
-    --data '{"fileName":"your-file-in-storage.pdf"}'
+  curl -i --location --request POST 'http://localhost:8000/process-manual-function' \\\
+    --header 'Content-Type: application/json\' \\\
+    --data \'{"fileName":"your-file-in-storage.pdf"}\'
 
   Or using PowerShell:
-  Invoke-WebRequest -Uri 'http://localhost:8000/' -Method POST -ContentType 'application/json' -Body '{"fileName":"your-file-in-storage.pdf"}'
+  Invoke-WebRequest -Uri 'http://localhost:8000/process-manual-function' -Method POST -ContentType 'application/json\' -Body \'{"fileName":"your-file-in-storage.pdf"}\'
 */
