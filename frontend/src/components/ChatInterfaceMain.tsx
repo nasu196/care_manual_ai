@@ -5,6 +5,16 @@ import ReactMarkdown from 'react-markdown';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { SlidersHorizontal } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Message {
   id: string;
@@ -13,11 +23,14 @@ interface Message {
   sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number }>;
 }
 
+export type AiVerbosity = 'concise' | 'default' | 'detailed';
+
 export default function ChatInterfaceMain() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default');
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -38,7 +51,10 @@ export default function ChatInterfaceMain() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ query: userMessage.text }),
+        body: JSON.stringify({ 
+          query: userMessage.text,
+          verbosity: aiVerbosity,
+        }),
       });
 
       if (!response.ok) {
@@ -78,8 +94,26 @@ export default function ChatInterfaceMain() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 border-b flex justify-start items-center">
+      <div className="p-4 border-b flex justify-between items-center">
         <h2 className="text-lg font-semibold">AIチャット</h2>
+        
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon">
+              <SlidersHorizontal className="h-5 w-5" />
+              <span className="sr-only">回答の詳細度を設定</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="w-56">
+            <DropdownMenuLabel>回答の詳細度</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => setAiVerbosity(value as AiVerbosity)}>
+              <DropdownMenuRadioItem value="concise">簡潔に</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="default">デフォルト</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="detailed">より丁寧に</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       
       <div className="flex-grow overflow-hidden px-6 min-h-0">
