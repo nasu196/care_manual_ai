@@ -62,11 +62,19 @@ async function downloadAndProcessFile(fileName) {
         console.log("最初のページの内容抜粋 (最初の200文字):");
         console.log(docs[0].pageContent.substring(0, 200) + "...");
       }
-    } else if (['.doc', '.docx', '.ppt', '.pptx'].includes(fileExtension)) {
+    } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
-      const data = await officeParser.parse(tmpFilePath);
+      const data = await new Promise((resolve, reject) => {
+        officeParser.parseOffice(tmpFilePath, (content, err) => {
+          if (err) {
+            console.error(`officeParser.parseOffice エラー: ${fileExtension}`, err);
+            return reject(err);
+          }
+          resolve(content);
+        });
+      });
       docs = [{
-        pageContent: data.content || data,
+        pageContent: data,
         metadata: {
           source: fileName,
           type: fileExtension.substring(1),
@@ -246,4 +254,4 @@ async function main(targetFileName) {
   }
 }
 
-main(); 
+main("test.xlsx"); 
