@@ -256,7 +256,8 @@ async function processAndStoreDocuments(
 
 // Deno ネイティブ HTTP サーバーハンドラ
 async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { // _connInfo は現時点では未使用
-  console.log(`Request received: Method=${req.method}, URL=${req.url}, Pathname=${new URL(req.url).pathname}`);
+  const requestPathname = new URL(req.url).pathname; // Pathnameを先に取得
+  console.log(`Request received: Method=${req.method}, URL=${req.url}, Pathname=${requestPathname}`);
 
   // CORSヘッダーをすべてのレスポンスに追加
   const corsHeaders = {
@@ -271,8 +272,9 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     return new Response(null, { status: 204, headers: corsHeaders });
   }
   
-  if (req.method !== "POST" || new URL(req.url).pathname !== "/") {
-    console.log(`Invalid request: Method=${req.method}, Pathname=${new URL(req.url).pathname}. Responding 404.`);
+  // POSTリクエストとパスのチェックを修正 (クラウド環境のパスを期待)
+  if (req.method !== "POST" || requestPathname !== "/process-manual-function") {
+    console.log(`Invalid request: Method=${req.method}, Pathname=${requestPathname}. Expected POST to /process-manual-function. Responding 404.`);
     return new Response(JSON.stringify({ error: "Not Found" }), { 
       status: 404, 
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
