@@ -14,17 +14,17 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   return (
     <div className="grid h-screen grid-cols-12 gap-x-2 p-2 bg-muted/40">
       {/* 左カラム: ソース (3/12幅) */}
-      <div className="col-span-3 bg-card rounded-lg shadow">
+      <div className="col-span-3 bg-card rounded-lg shadow h-full overflow-hidden">
         {sourceSlot || <SourceManager />}
       </div>
 
       {/* 中央カラム: チャット (6/12幅) */}
-      <div className="col-span-6 bg-card rounded-lg shadow">
+      <div className="col-span-6 bg-card rounded-lg shadow h-full overflow-hidden">
         {chatSlot}
       </div>
 
       {/* 右カラム: メモ (3/12幅) */}
-      <div className="col-span-3 bg-card rounded-lg shadow">
+      <div className="col-span-3 bg-card rounded-lg shadow h-full overflow-hidden">
         {memoSlot || <MemoStudio />}
       </div>
     </div>

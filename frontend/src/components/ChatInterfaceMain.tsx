@@ -78,23 +78,23 @@ export default function ChatInterfaceMain() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-6 border-b">
-        <h2 className="text-center text-2xl font-bold">AIチャット</h2>
+      <div className="p-4 border-b flex justify-start items-center">
+        <h2 className="text-lg font-semibold">AIチャット</h2>
       </div>
       
-      <div className="flex-grow overflow-hidden px-6">
+      <div className="flex-grow overflow-hidden px-6 min-h-0">
         <ScrollArea className="h-full w-full" ref={scrollAreaRef}>
-          <div className="pt-4 pb-4">
+          <div className="pt-4 pb-4 pr-6">
             {messages.map((msg) => (
               <div
                 key={msg.id}
                 className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`p-3 rounded-lg max-w-[70%] ${ 
+                  className={`p-3 rounded-lg ${ 
                     msg.sender === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
+                      ? 'bg-primary text-primary-foreground max-w-[70%]'
+                      : 'bg-muted text-muted-foreground max-w-[95%]'
                   }`}
                 >
                   {msg.sender === 'user' ? (
