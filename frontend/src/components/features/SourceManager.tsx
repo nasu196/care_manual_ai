@@ -95,12 +95,24 @@ const SourceManager: React.FC = () => {
       return;
     }
 
+    // ファイル名バリデーション (handleRenameFileと同様)
+    const fileName = file.name;
+    const allowedCharsRegex = /^[\w\-\.]+$/;
+    if (!allowedCharsRegex.test(fileName)) {
+      setMessage({
+        type: 'error',
+        text: `ファイル名「${fileName}」には使用できない文字が含まれています。半角の英数字、ハイフン(-)、アンダースコア(_)、ピリオド(.)のみ使用できます。アップロードを中止しました。`
+      });
+      // fileInputRef.current.value = ''; // 必要に応じてファイル選択をリセット
+      setSelectedLocalFile(null); // 選択されているローカルファイルをクリア
+      return;
+    }
+
     setUploading(true);
-    setMessage({ type: 'info', text: `ファイル「${file.name}」のアップロードを開始します...` });
-    console.log(`[handleUpload] Uploading file: ${file.name}, size: ${file.size}, type: ${file.type}`);
+    setMessage({ type: 'info', text: `ファイル「${fileName}」のアップロードを開始します...` });
+    console.log(`[handleUpload] Uploading file: ${fileName}, size: ${file.size}, type: ${file.type}`);
 
     try {
-      const fileName = file.name;
       const bucketName = 'manuals';
 
       console.log(`[handleUpload] Calling supabase.storage.from('${bucketName}').upload('${fileName}')`);
@@ -185,32 +197,59 @@ const SourceManager: React.FC = () => {
   };
 
   const handleRenameFile = async (oldName: string) => {
-    const newName = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
-    if (newName && newName !== oldName) {
-      // setMessage({ type: 'info', text: `ファイル「${oldName}」を「${newName}」に変更しています...` });
-      // setUploading(true);
-      // try {
-      //   const { error } = await supabase.storage.from('manuals').move(oldName, newName);
-      //   if (error) {
-      //     console.error('Rename error:', error);
-      //     setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${error.message}` });
-      //   } else {
-      //     setMessage({ type: 'success', text: `ファイル「${oldName}」を「${newName}」に変更しました。` });
-      //     fetchUploadedFiles();
-      //     // 選択状態も更新 (必要であれば)
-      //     setSelectedSourceNames(prev => prev.map(name => name === oldName ? newName : name)); 
-      //   }
-      // } catch (err) {
-      //   console.error('Unexpected error during rename:', err);
-      //   setMessage({ type: 'error', text: 'ファイル名変更中に予期せぬエラーが発生しました。' });
-      // } 
-      // setUploading(false);
-      console.log(`Rename trigger: ${oldName} to ${newName}`);
-      alert(`「名前を変更」機能は現在開発中です。\n旧ファイル名: ${oldName}\n新ファイル名: ${newName}`);
-    } else if (newName === oldName) {
-      setMessage({ type: 'info', text: 'ファイル名は変更されませんでした。' });
-    } else {
+    const newNamePromptResult = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
+    console.log(`[handleRenameFile] Attempting to rename. Original name: '${oldName}', New name prompt result: '${newNamePromptResult}'`);
+
+    if (newNamePromptResult === null) { // ユーザーがキャンセルした場合
       setMessage({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
+      return;
+    }
+
+    const trimmedNewName = newNamePromptResult.trim();
+
+    if (trimmedNewName === '') {
+      setMessage({ type: 'error', text: 'ファイル名が空です。変更はキャンセルされました。' });
+      return;
+    }
+
+    if (trimmedNewName === oldName) {
+      setMessage({ type: 'info', text: 'ファイル名は変更されませんでした（同じ名前です）。' });
+      return;
+    }
+
+    // ASCII文字、数字、ハイフン、アンダースコア、ピリオドのみを許可する正規表現
+    const allowedCharsRegex = /^[\w\-\.]+$/;
+    if (!allowedCharsRegex.test(trimmedNewName)) {
+      setMessage({
+        type: 'error',
+        text: 'ファイル名には半角の英数字、ハイフン(-)、アンダースコア(_)、ピリオド(.)のみ使用できます。'
+      });
+      return;
+    }
+
+    // ここまできたらバリデーションOKなので、API呼び出しに進む
+    setUploading(true);
+    setMessage({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
+    console.log(`[handleRenameFile] Calling supabase.storage.from('manuals').move('${oldName}', '${trimmedNewName}')`);
+    try {
+      const { data, error } = await supabase.storage.from('manuals').move(oldName, trimmedNewName);
+      console.log('[handleRenameFile] Supabase move call returned. Error:', JSON.stringify(error, null, 2), 'Data:', JSON.stringify(data, null, 2));
+
+      if (error) {
+        console.error('[handleRenameFile] Detailed rename error object from Supabase:', error);
+        setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${error.message}` });
+      } else {
+        setMessage({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
+        await fetchUploadedFiles();
+        setSelectedSourceNames(prev =>
+          prev.map(name => name === oldName ? trimmedNewName : name)
+        );
+      }
+    } catch (err) {
+      console.error('[handleRenameFile] Unexpected error during rename catch block:', err);
+      setMessage({ type: 'error', text: 'ファイル名変更中に予期せぬエラーが発生しました。' });
+    } finally {
+      setUploading(false);
     }
   };
 
