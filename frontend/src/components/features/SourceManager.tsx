@@ -1,207 +1,322 @@
-import React, { useState, ChangeEvent, useEffect } from 'react';
+import React, { useState, ChangeEvent, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Terminal, CloudUpload, FileText, AlertCircle, CheckCircle2, Files, Loader2, RefreshCcw } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient'; // Supabaseクライアントをインポート
+import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2, Terminal } from 'lucide-react';
+import { supabase } from '@/lib/supabaseClient';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+interface SourceFile {
+  id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
+  name: string;
+  //必要に応じて他のプロパティ (type, size, etc.) を追加
+}
 
 const SourceManager: React.FC = () => {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedLocalFile, setSelectedLocalFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]); // アップロード済みファイルリスト
-  const [loadingFiles, setLoadingFiles] = useState<boolean>(false); // ファイルリスト取得中のローディング
+  
+  const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
 
-  // Supabase Storageからアップロード済みファイル一覧を取得する関数
+  const [selectAll, setSelectAll] = useState(false);
+  const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const fetchUploadedFiles = async () => {
-    console.log('[fetchUploadedFiles] Fetching files from BUCKET ROOT...'); // ログ変更
     setLoadingFiles(true);
-    setMessage(null); // 古いメッセージをクリア
+    console.log('[fetchUploadedFiles] Fetching file list...');
     try {
       const { data, error } = await supabase.storage
         .from('manuals')
-        .list('', { // ★★★ パスを 'public' から '' (ルート) に変更 ★★★
+        .list('', { 
           limit: 100,
           offset: 0,
           sortBy: { column: 'name', order: 'asc' },
         });
-
-      console.log('[fetchUploadedFiles] Supabase response (from root):', { data, error });
+      console.log('[fetchUploadedFiles] list() returned. Error:', error, 'Raw data:', data);
 
       if (error) {
         console.error('Error fetching uploaded files from root:', error);
-        setMessage({ type: 'error', text: `ファイル一覧の取得に失敗しました(ルート): ${error.message}` });
-        setUploadedFiles([]);
+        setMessage({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
+        setSourceFiles([]);
       } else {
-        // dataにはファイルとフォルダが含まれる。今回は名前だけ表示するので、そのまま表示。
-        // 必要であれば、file.type や file.metadata でファイルかフォルダか区別可能
-        const itemNames = data?.map(item => item.name) || [];
-        console.log('[fetchUploadedFiles] Fetched item names (from root):', itemNames);
-        setUploadedFiles(itemNames);
+        const files = data?.filter(item => item.id !== null).map(item => ({ name: item.name, id: item.name })) || [];
+        console.log('[fetchUploadedFiles] Mapped files for UI:', files);
+        setSourceFiles(files);
       }
     } catch (err) {
       console.error('Unexpected error fetching files:', err);
       setMessage({ type: 'error', text: 'ファイル一覧取得中に予期せぬエラーが発生しました。' });
-      setUploadedFiles([]);
+      setSourceFiles([]);
     } finally {
       setLoadingFiles(false);
     }
   };
 
-  // コンポーネントマウント時とアップロード成功時にファイル一覧を再取得
   useEffect(() => {
-    console.log('[useEffect] Initial fetch or message type success.'); // ★デバッグログ追加
     fetchUploadedFiles();
-  }, [message?.type === 'success']); // message.typeが'success'の時だけ再実行 (アップロード成功時)
+  }, []); // 初回マウント時のみ実行
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileTrigger = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleLocalFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setMessage(null);
     if (event.target.files && event.target.files.length > 0) {
-      setSelectedFile(event.target.files[0]);
+      setSelectedLocalFile(event.target.files[0]);
+      // 自動アップロードするか、別途アップロードボタンを設けるか検討。今回は選択即アップロードの準備。
+      // すぐにアップロード処理を呼び出す例:
+      handleUpload(event.target.files[0]); 
+      event.target.value = ''; // 同じファイルを選択できるようにリセット
     } else {
-      setSelectedFile(null);
+      setSelectedLocalFile(null);
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) {
+  const handleUpload = async (fileToUpload: File | null) => {
+    const file = fileToUpload || selectedLocalFile;
+    console.log('[handleUpload] Start. File to upload:', file);
+
+    if (!file) {
       setMessage({ type: 'error', text: 'アップロードするファイルを選択してください。' });
+      console.log('[handleUpload] No file selected.');
       return;
     }
 
     setUploading(true);
-    setMessage({ type: 'info', text: 'アップロードを開始します...' });
+    setMessage({ type: 'info', text: `ファイル「${file.name}」のアップロードを開始します...` });
+    console.log(`[handleUpload] Uploading file: ${file.name}, size: ${file.size}, type: ${file.type}`);
 
     try {
-      // ファイル名にタイムスタンプを付加して一意性を高める (オプション)
-      // const fileName = `${Date.now()}_${selectedFile.name}`;
-      const fileName = selectedFile.name; // まずは元のファイル名を使用
+      const fileName = file.name;
+      const bucketName = 'manuals';
 
-      // Supabase Storageのバケット名を指定します。事前に作成しておく必要があります。
-      const bucketName = 'manuals'; // 仮のバケット名
-
-      const { data, error } = await supabase.storage
+      console.log(`[handleUpload] Calling supabase.storage.from('${bucketName}').upload('${fileName}')`);
+      const { error } = await supabase.storage
         .from(bucketName)
-        .upload(`public/${fileName}`, selectedFile, { // public/ フォルダ配下に保存
+        .upload(`${fileName}`, file, {
           cacheControl: '3600',
-          upsert: false, // 同名ファイルが存在する場合、上書きしない (trueで上書き)
+          upsert: true,
         });
+      console.log('[handleUpload] Supabase upload call returned. Error:', error);
 
       if (error) {
-        console.error('Upload error:', error);
+        console.error('[handleUpload] Upload error details:', error);
         setMessage({ type: 'error', text: `アップロードに失敗しました: ${error.message}` });
       } else {
+        console.log('[handleUpload] Upload successful.');
         setMessage({
           type: 'success',
-          text: `ファイル「${selectedFile.name}」が正常にアップロードされました。パス: ${data?.path}`,
+          text: `ファイル「${file.name}」が正常にアップロードされました。`,
         });
-        setSelectedFile(null); // アップロード成功後、選択を解除
-        // fetchUploadedFiles(); // アップロード成功時に直接呼ぶ代わりにuseEffectの依存配列で対応
+        setSelectedLocalFile(null); 
+        await fetchUploadedFiles();
       }
     } catch (err) {
-      console.error('Unexpected error during upload:', err);
-      setMessage({ type: 'error', text: '予期せぬエラーが発生しました。コンソールを確認してください。' });
+      console.error('[handleUpload] Unexpected error during upload catch block:', err);
+      setMessage({ type: 'error', text: '予期せぬエラーが発生しました。' });
     } finally {
       setUploading(false);
+      console.log('[handleUpload] End.');
+    }
+  };
+
+  const handleSelectAllChange = (checked: boolean) => {
+    setSelectAll(checked);
+    if (checked) {
+      setSelectedSourceNames(sourceFiles.map(file => file.name));
+    } else {
+      setSelectedSourceNames([]);
+    }
+  };
+
+  const handleSourceSelectionChange = (fileName: string, checked: boolean) => {
+    if (checked) {
+      setSelectedSourceNames(prev => [...prev, fileName]);
+    } else {
+      setSelectedSourceNames(prev => prev.filter(name => name !== fileName));
+    }
+  };
+  
+  // selectedSourceNames が更新されたら selectAll の状態を更新
+  useEffect(() => {
+    if (sourceFiles.length > 0 && selectedSourceNames.length === sourceFiles.length) {
+      setSelectAll(true);
+    } else {
+      setSelectAll(false);
+    }
+  }, [selectedSourceNames, sourceFiles]);
+
+  const handleDeleteFile = async (fileName: string) => {
+    if (!window.confirm(`ファイル「${fileName}」を本当に削除しますか？`)) {
+      return;
+    }
+    setUploading(true);
+    // メッセージは処理完了後に設定するため、ここではクリアまたは変更しない
+    // setMessage({ type: 'info', text: `ファイル「${fileName}」を削除しています...` });
+    try {
+      const { error } = await supabase.storage.from('manuals').remove([fileName]);
+      if (error) {
+        console.error('Delete error:', error);
+        setMessage({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${error.message}` });
+      } else {
+        // 先にファイル一覧を確実に更新する
+        await fetchUploadedFiles(); // ファイル一覧を再取得 (await を追加)
+        setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // 選択状態からも削除
+        setMessage({ type: 'success', text: `ファイル「${fileName}」を削除しました。` }); // 更新後にメッセージ表示
+      }
+    } catch (err) {
+      console.error('Unexpected error during delete:', err);
+      setMessage({ type: 'error', text: 'ファイル削除中に予期せぬエラーが発生しました。' });
+    }
+    setUploading(false);
+  };
+
+  const handleRenameFile = async (oldName: string) => {
+    const newName = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
+    if (newName && newName !== oldName) {
+      // setMessage({ type: 'info', text: `ファイル「${oldName}」を「${newName}」に変更しています...` });
+      // setUploading(true);
+      // try {
+      //   const { error } = await supabase.storage.from('manuals').move(oldName, newName);
+      //   if (error) {
+      //     console.error('Rename error:', error);
+      //     setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${error.message}` });
+      //   } else {
+      //     setMessage({ type: 'success', text: `ファイル「${oldName}」を「${newName}」に変更しました。` });
+      //     fetchUploadedFiles();
+      //     // 選択状態も更新 (必要であれば)
+      //     setSelectedSourceNames(prev => prev.map(name => name === oldName ? newName : name)); 
+      //   }
+      // } catch (err) {
+      //   console.error('Unexpected error during rename:', err);
+      //   setMessage({ type: 'error', text: 'ファイル名変更中に予期せぬエラーが発生しました。' });
+      // } 
+      // setUploading(false);
+      console.log(`Rename trigger: ${oldName} to ${newName}`);
+      alert(`「名前を変更」機能は現在開発中です。\n旧ファイル名: ${oldName}\n新ファイル名: ${newName}`);
+    } else if (newName === oldName) {
+      setMessage({ type: 'info', text: 'ファイル名は変更されませんでした。' });
+    } else {
+      setMessage({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
     }
   };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-full">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-6">ソース管理</h2>
-
-      <div className="bg-white p-6 rounded-lg shadow-md mb-6">
-        <h3 className="text-lg font-medium text-gray-700 mb-4 flex items-center">
-          <CloudUpload className="mr-2 h-5 w-5 text-blue-500" />
-          マニュアルファイルアップロード
-        </h3>
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700 mb-1">
-              ファイルを選択してください (PDF, TXT, DOCX など)
-            </label>
-            <Input
-              id="file-upload"
-              type="file"
-              onChange={handleFileChange}
-              className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-              disabled={uploading}
-            />
-          </div>
-
-          {selectedFile && (
-            <div className="p-3 bg-gray-100 rounded-md text-sm text-gray-700 flex items-center">
-              <FileText className="mr-2 h-4 w-4 text-gray-500" />
-              選択中のファイル: <strong>{selectedFile.name}</strong> ({(selectedFile.size / 1024).toFixed(2)} KB)
-            </div>
-          )}
-
-          <Button onClick={handleUpload} disabled={!selectedFile || uploading} className="w-full sm:w-auto">
-            {uploading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                アップロード中...
-              </>
-            ) : (
-              'アップロード'
-            )}
-          </Button>
-        </div>
+    <div className="flex flex-col h-full p-4 space-y-4 bg-card text-card-foreground rounded-lg shadow">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-semibold">ソース</h2>
+        {/* 右上のアイコンは一旦省略 (例: <PanelRightClose className="h-5 w-5" />) */}
+        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={uploading}>
+          <PlusIcon className="mr-2 h-4 w-4" />
+          追加
+        </Button>
+        <Input 
+          type="file" 
+          ref={fileInputRef} 
+          onChange={handleLocalFileChange} 
+          className="hidden" 
+          disabled={uploading}
+        />
       </div>
 
-      {message && (
-        <Alert variant={message.type === 'error' ? "destructive" : "default"} className={
-          message.type === 'success' ? 'bg-green-50 border-green-300 text-green-800' :
-          message.type === 'error' ? 'bg-red-50 border-red-300 text-red-800' :
-          'bg-blue-50 border-blue-300 text-blue-800'
-        }>
-          {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
-          {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
-          {message.type === 'info' && <Terminal className="h-4 w-4" />} {/* InfoアイコンがないためTerminalで代用 */}
-          <AlertTitle>
-            {message.type === 'success' ? '成功' : message.type === 'error' ? 'エラー' : '情報'}
-          </AlertTitle>
-          <AlertDescription>
-            {message.text}
-          </AlertDescription>
-        </Alert>
+      {/* Select All Checkbox */}
+      {sourceFiles.length > 0 && (
+        <div className="flex items-center space-x-2 p-2 border-b">
+          <Checkbox
+            id="select-all-sources"
+            checked={selectAll}
+            onCheckedChange={handleSelectAllChange}
+          />
+          <label
+            htmlFor="select-all-sources"
+            className="text-sm font-medium leading-none"
+          >
+            すべてのソースを選択
+          </label>
+        </div>
       )}
 
-      {/* アップロード済みファイル一覧表示機能 */}
-      <div className="mt-8 bg-white p-6 rounded-lg shadow-md">
-        <h3 className="text-lg font-medium text-gray-700 mb-4 flex items-center">
-          <Files className="mr-2 h-5 w-5 text-green-500" />
-          アップロード済みファイル (Supabase Storage)
-        </h3>
+      {/* File List */}
+      <div className="flex-grow overflow-y-auto space-y-1 pr-1">
         {loadingFiles ? (
-          <div className="flex items-center justify-center py-4">
-            <Loader2 className="mr-2 h-6 w-6 animate-spin text-blue-500" />
-            <p className="text-gray-600">ファイル一覧を読み込み中...</p>
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="mr-2 h-6 w-6 animate-spin text-muted-foreground" />
+            <p className="text-muted-foreground">読み込み中...</p>
           </div>
-        ) : uploadedFiles.length > 0 ? (
-          <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700 max-h-60 overflow-y-auto">
-            {uploadedFiles.map((fileName, index) => (
-              <li key={index} className="hover:bg-gray-100 p-1 rounded-md">
-                <FileText className="inline-block mr-2 h-4 w-4 text-gray-400" />
-                {fileName}
-              </li>
-            ))}
-          </ul>
+        ) : sourceFiles.length > 0 ? (
+          sourceFiles.map((file) => (
+            <div key={file.id || file.name} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md">
+              <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+              <span className="flex-grow text-sm truncate" title={file.name}>{file.name}</span>
+              <Checkbox
+                id={`checkbox-${file.id || file.name}`}
+                checked={selectedSourceNames.includes(file.name)}
+                onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
+                className="ml-auto"
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuLabel>{file.name}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
+                    名前を変更
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleDeleteFile(file.name)} className="text-red-600">
+                    削除
+                  </DropdownMenuItem>
+                  {/* <DropdownMenuItem onClick={() => console.log('Details:', file.name)}>
+                    詳細
+                  </DropdownMenuItem> */}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ))
         ) : (
-          <p className="text-sm text-gray-500">アップロード済みのファイルはありません。</p>
+          <div className="flex items-center justify-center h-full">
+            <p className="text-sm text-muted-foreground">
+              アップロード済みのファイルはありません。「追加」ボタンからアップロードしてください。
+            </p>
+          </div>
         )}
-        <Button onClick={fetchUploadedFiles} disabled={loadingFiles} variant="outline" size="sm" className="mt-4">
-          {loadingFiles ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCcw className="mr-2 h-4 w-4" />
-          )}
-          一覧を再取得
-        </Button>
       </div>
+      
+      {/* Upload Status Message */}
+      {message && (
+        <div className="mt-auto pt-2">
+            <Alert variant={message.type === 'error' ? "destructive" : "default"} className={
+              message.type === 'success' ? 'bg-green-50 border-green-300 text-green-800' :
+              message.type === 'error' ? 'bg-red-50 border-red-300 text-red-800' :
+              'bg-blue-50 border-blue-300 text-blue-800'
+            }>
+              {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
+              {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
+              {message.type === 'info' && <Terminal className="h-4 w-4" />}
+              <AlertTitle>
+                {message.type === 'success' ? '成功' : message.type === 'error' ? 'エラー' : '情報'}
+              </AlertTitle>
+              <AlertDescription>{message.text}</AlertDescription>
+            </Alert>
+        </div>
+      )}
     </div>
   );
 };
