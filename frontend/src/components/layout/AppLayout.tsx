@@ -1,7 +1,7 @@
 import React from 'react';
 import type { ReactNode } from 'react';
 // import SourcePanel from '@/components/placeholders/SourcePanel'; // Remove if SourceManager is the new default
-import SourceManager from '@/components/source/SourceManager'; // Import the new SourceManager
+import SourceManager from '@/components/features/SourceManager'; // パスを修正
 import MemoStudio from '@/components/admin/MemoStudio';
 import TopHeader from './TopHeader'; // TopHeaderをインポート
 
