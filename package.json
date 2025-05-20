@@ -17,6 +17,6 @@
     "start:api": "node src/api/server.js"
   },
   "devDependencies": {
-    "supabase": "^2.22.12"
+    "supabase": "^2.23.4"
   }
 }
