@@ -8,6 +8,8 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "langchain": "^0.3.26",
+    "mammoth": "^1.9.0",
+    "officeparser": "^4.2.0",
     "pdf-parse": "^1.1.1"
   },
   "scripts": {

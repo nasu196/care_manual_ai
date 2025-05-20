@@ -5,6 +5,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { RecursiveCharacterTextSplitter } = require('langchain/text_splitter');
 const { GoogleGenerativeAIEmbeddings } = require('@langchain/google-genai');
+const officeParser = require('officeparser');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -26,20 +27,20 @@ const embeddings = new GoogleGenerativeAIEmbeddings({
 });
 
 const BUCKET_NAME = 'manuals';
-const FILE_NAME = 'r6_koubover2_sogyo1.pdf'; // ユーザーがアップロードしたファイル名
-const TMP_DIR = path.join(__dirname, '../../tmp'); // プロジェクトルート/tmp
+const TMP_DIR = path.join(__dirname, '../../tmp');
 
-async function downloadAndParsePdf() {
-  console.log(`Supabase Storageからファイル ${FILE_NAME} をダウンロード開始...`);
-  const tmpFilePath = path.join(TMP_DIR, FILE_NAME);
+async function downloadAndProcessFile(fileName) {
+  console.log(`Supabase Storageからファイル ${fileName} をダウンロード開始...`);
+  const tmpFilePath = path.join(TMP_DIR, fileName);
+  const fileExtension = path.extname(fileName).toLowerCase();
 
   try {
     const { data: blob, error: downloadError } = await supabase.storage
       .from(BUCKET_NAME)
-      .download(FILE_NAME);
+      .download(fileName);
 
     if (downloadError) {
-      console.error(`エラー: ファイルのダウンロードに失敗しました。 ${BUCKET_NAME}/${FILE_NAME}`, downloadError);
+      console.error(`エラー: ファイルのダウンロードに失敗しました。 ${BUCKET_NAME}/${fileName}`, downloadError);
       throw downloadError;
     }
     console.log("ファイルのダウンロード成功。");
@@ -49,16 +50,34 @@ async function downloadAndParsePdf() {
     await fs.writeFile(tmpFilePath, buffer);
     console.log(`一時ファイルとして保存: ${tmpFilePath}`);
 
-    console.log("\nPDFLoaderでドキュメントを読み込み開始...");
-    const loader = new PDFLoader(tmpFilePath, {});
+    let docs = [];
 
-    const docs = await loader.load();
-    console.log(`ドキュメントの読み込み完了。合計 ${docs.length} ページ (またはドキュメント数)。`);
-
-    if (docs.length > 0) {
-      console.log("\n最初のページのメタデータ:", docs[0].metadata);
-      console.log("最初のページの内容抜粋 (最初の200文字):");
-      console.log(docs[0].pageContent.substring(0, 200) + "...");
+    if (fileExtension === '.pdf') {
+      console.log("\nPDFLoaderでドキュメントを読み込み開始...");
+      const loader = new PDFLoader(tmpFilePath, {});
+      docs = await loader.load();
+      console.log(`ドキュメントの読み込み完了。合計 ${docs.length} ページ (またはドキュメント数)。`);
+      if (docs.length > 0) {
+        console.log("\n最初のページのメタデータ:", docs[0].metadata);
+        console.log("最初のページの内容抜粋 (最初の200文字):");
+        console.log(docs[0].pageContent.substring(0, 200) + "...");
+      }
+    } else if (['.doc', '.docx', '.ppt', '.pptx'].includes(fileExtension)) {
+      console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
+      const data = await officeParser.parse(tmpFilePath);
+      docs = [{
+        pageContent: data.content || data,
+        metadata: {
+          source: fileName,
+          type: fileExtension.substring(1),
+        }
+      }];
+      console.log(`${fileExtension} ファイルのテキスト抽出完了。`);
+      console.log("抽出テキストの冒頭 (最初の200文字):");
+      console.log((docs[0].pageContent || "").substring(0, 200) + "...");
+    } else {
+      console.warn(`未対応のファイル形式です: ${fileExtension}`);
+      return null;
     }
     return docs;
   } catch (error) {
@@ -66,7 +85,7 @@ async function downloadAndParsePdf() {
     return null;
   } finally {
     try {
-      if (await fs.stat(tmpFilePath).catch(() => false)) { // statでファイルの存在を確認し、なければエラーをキャッチ
+      if (await fs.stat(tmpFilePath).catch(() => false)) {
         await fs.unlink(tmpFilePath);
         console.log(`\n一時ファイルを削除しました: ${tmpFilePath}`);
       }
@@ -91,21 +110,28 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
       .select('id')
       .eq('file_name', sourceFileName)
       .single();
+
     if (selectError && selectError.code !== 'PGRST116') {
       console.error(`既存マニュアルの確認中にエラー: ${sourceFileName}`, selectError);
       throw selectError;
     }
+
     if (existingManual) {
       manualId = existingManual.id;
       console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
     } else {
-      const totalPages = parsedDocs.reduce((sum, doc) => sum + (doc.metadata?.pdf?.totalPages || 0), 0) / parsedDocs.length;
+      const totalPages = parsedDocs[0]?.metadata?.pdf?.totalPages ||
+                         (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length);
+
       const { data: newManual, error: insertError } = await supabase
         .from('manuals')
         .insert({
           file_name: sourceFileName,
           storage_path: `${BUCKET_NAME}/${sourceFileName}`,
-          metadata: { totalPages: Math.round(totalPages) || parsedDocs.length },
+          metadata: { 
+            totalPages: Math.round(totalPages),
+            sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown'
+          },
         })
         .select('id')
         .single();
@@ -121,29 +147,34 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
       chunkSize: 2500,
       chunkOverlap: 400,
       separators: [
-        "\n\n",   // 段落区切り (元々のデフォルトでも最優先に近い)
-        "。\n",    // 日本語の文末＋改行 (文の区切りを意識)
-        "！\n",   // 感嘆符＋改行
-        "？\n",   // 疑問符＋改行
-        "\n",     // 改行
-        "。",       // 文末 (改行がない場合)
-        "！",       // 感嘆符 (改行がない場合)
-        "？",       // 疑問符 (改行がない場合)
-        "、",       // 読点
-        " ",       // 半角スペース
-        "　",     // 全角スペース (念のため)
-        ""         // 最終的な区切り文字
+        "\n\n",
+        "。\n",
+        "！\n",
+        "？\n",
+        "\n",
+        "。",
+        "！",
+        "？",
+        "、",
+        " ",
+        "　",
+        ""
       ],
     });
     const chunks = [];
     for (let i = 0; i < parsedDocs.length; i++) {
       const doc = parsedDocs[i];
-      const splitText = await splitter.splitText(doc.pageContent);
+      const pageContent = doc.pageContent || "";
+      if (!pageContent.trim()) {
+          console.log(`ドキュメント ${i+1} は空の内容のためスキップします。`);
+          continue;
+      }
+      const splitText = await splitter.splitText(pageContent);
       splitText.forEach((text, index) => {
         chunks.push({
           manual_id: manualId,
           chunk_text: text,
-          page_number: doc.metadata?.loc?.pageNumber || i + 1,
+          page_number: doc.metadata?.loc?.pageNumber || (doc.metadata?.type === 'pdf' ? i + 1 : 1),
           chunk_order: index + 1,
         });
       });
@@ -171,6 +202,7 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
         .from('manual_chunks')
         .delete()
         .eq('manual_id', manualId);
+
     if (deleteChunksError) {
         console.error(`既存チャンクの削除中にエラー: manual_id=${manualId}`, deleteChunksError);
     } else {
@@ -180,6 +212,7 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
     const { error: insertChunksError } = await supabase
       .from('manual_chunks')
       .insert(chunksToInsert);
+
     if (insertChunksError) {
       console.error("チャンクのDB保存中にエラー:", insertChunksError);
       throw insertChunksError;
@@ -192,18 +225,24 @@ async function processAndStoreDocuments(parsedDocs, sourceFileName) {
   }
 }
 
-async function main() {
-  const documents = await downloadAndParsePdf();
+async function main(targetFileName) {
+  if (!targetFileName) {
+    targetFileName = 'r6_koubover2_sogyo1.pdf';
+    console.warn(`対象ファイル名が指定されなかったため、デフォルトの ${targetFileName} で実行します。`);
+  }
+  console.log(`処理対象ファイル: ${targetFileName}`);
+
+  const documents = await downloadAndProcessFile(targetFileName);
   if (documents) {
-    console.log("\n--- PDF処理パイプライン (ダウンロードと読み込み) 成功 ---");
-    const success = await processAndStoreDocuments(documents, FILE_NAME);
+    console.log("\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功 ---");
+    const success = await processAndStoreDocuments(documents, targetFileName);
     if (success) {
       console.log("\n--- 全体処理完了 (チャンク化とDB保存含む) 成功 ---");
     } else {
       console.error("\n--- 全体処理失敗 (チャンク化またはDB保存でエラー) ---");
     }
   } else {
-    console.error("\n--- PDF処理パイプライン (ダウンロードと読み込み) 失敗 ---");
+    console.error("\n--- ファイル処理パイプライン (ダウンロードと抽出) 失敗 ---");
   }
 }
 
