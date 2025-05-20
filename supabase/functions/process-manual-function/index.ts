@@ -256,6 +256,8 @@ async function processAndStoreDocuments(
 
 // Deno ネイティブ HTTP サーバーハンドラ
 async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { // _connInfo は現時点では未使用
+  console.log(`Request received: Method=${req.method}, URL=${req.url}, Pathname=${new URL(req.url).pathname}`);
+
   // CORSヘッダーをすべてのレスポンスに追加
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*', // すべてのオリジンを許可 (開発用)
@@ -265,10 +267,12 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
   // OPTIONSリクエスト (プリフライトリクエスト) の処理
   if (req.method === 'OPTIONS') {
+    console.log("Responding to OPTIONS request.");
     return new Response(null, { status: 204, headers: corsHeaders });
   }
   
   if (req.method !== "POST" || new URL(req.url).pathname !== "/") {
+    console.log(`Invalid request: Method=${req.method}, Pathname=${new URL(req.url).pathname}. Responding 404.`);
     return new Response(JSON.stringify({ error: "Not Found" }), { 
       status: 404, 
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
