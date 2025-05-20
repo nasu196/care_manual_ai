@@ -23,6 +23,7 @@ interface SourceFile {
 const SourceManager: React.FC = () => {
   const [selectedLocalFile, setSelectedLocalFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
+  const [processingFile, setProcessingFile] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -75,11 +76,10 @@ const SourceManager: React.FC = () => {
   const handleLocalFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setMessage(null);
     if (event.target.files && event.target.files.length > 0) {
-      setSelectedLocalFile(event.target.files[0]);
-      // 自動アップロードするか、別途アップロードボタンを設けるか検討。今回は選択即アップロードの準備。
-      // すぐにアップロード処理を呼び出す例:
-      handleUpload(event.target.files[0]); 
-      event.target.value = ''; // 同じファイルを選択できるようにリセット
+      const file = event.target.files[0];
+      setSelectedLocalFile(file);
+      handleUpload(file);
+      event.target.value = '';
     } else {
       setSelectedLocalFile(null);
     }
@@ -95,7 +95,6 @@ const SourceManager: React.FC = () => {
       return;
     }
 
-    // ファイル名バリデーション (handleRenameFileと同様)
     const fileName = file.name;
     const allowedCharsRegex = /^[\w\-\.]+$/;
     if (!allowedCharsRegex.test(fileName)) {
@@ -103,46 +102,97 @@ const SourceManager: React.FC = () => {
         type: 'error',
         text: `ファイル名「${fileName}」には使用できない文字が含まれています。半角の英数字、ハイフン(-)、アンダースコア(_)、ピリオド(.)のみ使用できます。アップロードを中止しました。`
       });
-      // fileInputRef.current.value = ''; // 必要に応じてファイル選択をリセット
-      setSelectedLocalFile(null); // 選択されているローカルファイルをクリア
+      setSelectedLocalFile(null);
       return;
     }
 
     setUploading(true);
+    setProcessingFile(false);
     setMessage({ type: 'info', text: `ファイル「${fileName}」のアップロードを開始します...` });
     console.log(`[handleUpload] Uploading file: ${fileName}, size: ${file.size}, type: ${file.type}`);
 
     try {
       const bucketName = 'manuals';
-
-      console.log(`[handleUpload] Calling supabase.storage.from('${bucketName}').upload('${fileName}')`);
-      const { error } = await supabase.storage
+      const { error: uploadError } = await supabase.storage
         .from(bucketName)
         .upload(`${fileName}`, file, {
           cacheControl: '3600',
           upsert: true,
         });
-      console.log('[handleUpload] Supabase upload call returned. Error:', error);
+      console.log('[handleUpload] Supabase upload call returned. Error:', uploadError);
 
-      if (error) {
-        console.error('[handleUpload] Upload error details:', error);
-        setMessage({ type: 'error', text: `アップロードに失敗しました: ${error.message}` });
-      } else {
-        console.log('[handleUpload] Upload successful.');
+      if (uploadError) {
+        console.error('[handleUpload] Upload error details:', uploadError);
+        setMessage({ type: 'error', text: `アップロードに失敗しました: ${uploadError.message}` });
+        setUploading(false);
+        return;
+      }
+      
+      setUploading(false);
+      let currentMessage = `ファイル「${file.name}」が正常にアップロードされました。`;
+      setMessage({ type: 'success', text: currentMessage });
+      setSelectedLocalFile(null);
+      await fetchUploadedFiles();
+
+      setProcessingFile(true);
+      currentMessage += ` 続けてファイルの処理を開始します...`;
+      setMessage({ type: 'info', text: currentMessage });
+
+      try {
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error("NEXT_PUBLIC_SUPABASE_URL is not defined.");
+        }
+        const urlRegex = new RegExp('https://([^.]+)\\.supabase\\.co');
+        const match = supabaseUrl.match(urlRegex);
+        const projectRef = match ? match[1] : null;
+        if (!projectRef) {
+          throw new Error("Supabase project reference ID could not be determined from NEXT_PUBLIC_SUPABASE_URL.");
+        }
+        const finalFunctionUrl = `https://${projectRef}.supabase.co/functions/v1/process-manual-function`;
+        console.log(`[handleUpload] Calling Edge Function: ${finalFunctionUrl} for file: ${file.name}`);
+
+        const response = await fetch(finalFunctionUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileName: file.name }),
+        });
+
+        const responseData = await response.json();
+        if (!response.ok) {
+          console.error('[handleUpload] Edge Function call failed:', response.status, responseData);
+          throw new Error(responseData.error || `Edge Functionの実行に失敗 (status: ${response.status})`);
+        }
+
+        console.log('[handleUpload] Edge Function call successful:', responseData);
         setMessage({
           type: 'success',
-          text: `ファイル「${file.name}」が正常にアップロードされました。`,
+          text: `ファイル「${file.name}」のアップロードと処理が全て完了しました。`,
         });
-        setSelectedLocalFile(null); 
-        await fetchUploadedFiles();
+      } catch (funcError: unknown) {
+        console.error('Error calling Edge Function:', funcError);
+        let errorMessage = 'サーバー処理中に不明なエラーが発生しました。';
+        if (funcError instanceof Error) {
+          errorMessage = funcError.message;
+        }
+        setMessage({
+          type: 'error',
+          text: `ファイル「${file.name}」の処理中にエラー: ${errorMessage}`,
+        });
+      } finally {
+        setProcessingFile(false);
       }
-    } catch (err) {
-      console.error('[handleUpload] Unexpected error during upload catch block:', err);
-      setMessage({ type: 'error', text: '予期せぬエラーが発生しました。' });
-    } finally {
+    } catch (err: unknown) {
+      console.error('Outer catch error during upload:', err);
+      let outerErrorMessage = 'アップロード処理中に予期せぬエラーが発生しました。';
+      if (err instanceof Error) {
+        outerErrorMessage = err.message;
+      }
+      setMessage({ type: 'error', text: outerErrorMessage });
       setUploading(false);
-      console.log('[handleUpload] End.');
+      setProcessingFile(false);
     }
+    console.log('[handleUpload] End.');
   };
 
   const handleSelectAllChange = (checked: boolean) => {
@@ -162,7 +212,6 @@ const SourceManager: React.FC = () => {
     }
   };
   
-  // selectedSourceNames が更新されたら selectAll の状態を更新
   useEffect(() => {
     if (sourceFiles.length > 0 && selectedSourceNames.length === sourceFiles.length) {
       setSelectAll(true);
@@ -176,22 +225,22 @@ const SourceManager: React.FC = () => {
       return;
     }
     setUploading(true);
-    // メッセージは処理完了後に設定するため、ここではクリアまたは変更しない
-    // setMessage({ type: 'info', text: `ファイル「${fileName}」を削除しています...` });
     try {
       const { error } = await supabase.storage.from('manuals').remove([fileName]);
       if (error) {
         console.error('Delete error:', error);
         setMessage({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${error.message}` });
       } else {
-        // 先にファイル一覧を確実に更新する
-        await fetchUploadedFiles(); // ファイル一覧を再取得 (await を追加)
-        setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // 選択状態からも削除
-        setMessage({ type: 'success', text: `ファイル「${fileName}」を削除しました。` }); // 更新後にメッセージ表示
+        await fetchUploadedFiles();
+        setSelectedSourceNames(prev => prev.filter(name => name !== fileName));
+        setMessage({ type: 'success', text: `ファイル「${fileName}」を削除しました。` });
       }
-    } catch (err) {
-      console.error('Unexpected error during delete:', err);
-      setMessage({ type: 'error', text: 'ファイル削除中に予期せぬエラーが発生しました。' });
+    } catch (err: unknown) {
+      let deleteErrorMessage = 'ファイル削除中に予期せぬエラーが発生しました。';
+      if (err instanceof Error) {
+        deleteErrorMessage = err.message;
+      }
+      setMessage({ type: 'error', text: deleteErrorMessage });
     }
     setUploading(false);
   };
@@ -200,24 +249,19 @@ const SourceManager: React.FC = () => {
     const newNamePromptResult = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
     console.log(`[handleRenameFile] Attempting to rename. Original name: '${oldName}', New name prompt result: '${newNamePromptResult}'`);
 
-    if (newNamePromptResult === null) { // ユーザーがキャンセルした場合
+    if (newNamePromptResult === null) {
       setMessage({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
       return;
     }
-
     const trimmedNewName = newNamePromptResult.trim();
-
     if (trimmedNewName === '') {
       setMessage({ type: 'error', text: 'ファイル名が空です。変更はキャンセルされました。' });
       return;
     }
-
     if (trimmedNewName === oldName) {
       setMessage({ type: 'info', text: 'ファイル名は変更されませんでした（同じ名前です）。' });
       return;
     }
-
-    // ASCII文字、数字、ハイフン、アンダースコア、ピリオドのみを許可する正規表現
     const allowedCharsRegex = /^[\w\-\.]+$/;
     if (!allowedCharsRegex.test(trimmedNewName)) {
       setMessage({
@@ -226,15 +270,12 @@ const SourceManager: React.FC = () => {
       });
       return;
     }
-
-    // ここまできたらバリデーションOKなので、API呼び出しに進む
     setUploading(true);
     setMessage({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
     console.log(`[handleRenameFile] Calling supabase.storage.from('manuals').move('${oldName}', '${trimmedNewName}')`);
     try {
       const { data, error } = await supabase.storage.from('manuals').move(oldName, trimmedNewName);
       console.log('[handleRenameFile] Supabase move call returned. Error:', JSON.stringify(error, null, 2), 'Data:', JSON.stringify(data, null, 2));
-
       if (error) {
         console.error('[handleRenameFile] Detailed rename error object from Supabase:', error);
         setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${error.message}` });
@@ -245,12 +286,15 @@ const SourceManager: React.FC = () => {
           prev.map(name => name === oldName ? trimmedNewName : name)
         );
       }
-    } catch (err) {
-      console.error('[handleRenameFile] Unexpected error during rename catch block:', err);
-      setMessage({ type: 'error', text: 'ファイル名変更中に予期せぬエラーが発生しました。' });
-    } finally {
-      setUploading(false);
+    } catch (err: unknown) {
+      let renameErrorMessage = 'ファイル名変更中に予期せぬエラーが発生しました。';
+      if (err instanceof Error) {
+        renameErrorMessage = err.message;
+      }
+      setMessage({ type: 'error', text: renameErrorMessage });
     }
+    setUploading(false);
+    console.log('[handleRenameFile] End.');
   };
 
   return (
@@ -259,7 +303,7 @@ const SourceManager: React.FC = () => {
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold">ソース</h2>
         {/* 右上のアイコンは一旦省略 (例: <PanelRightClose className="h-5 w-5" />) */}
-        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={uploading}>
+        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={uploading || processingFile}>
           <PlusIcon className="mr-2 h-4 w-4" />
           追加
         </Button>
@@ -268,7 +312,7 @@ const SourceManager: React.FC = () => {
           ref={fileInputRef} 
           onChange={handleLocalFileChange} 
           className="hidden" 
-          disabled={uploading}
+          disabled={uploading || processingFile}
           accept=".pdf,.doc,.docx,.ppt,.pptx"
         />
       </div>
@@ -355,6 +399,17 @@ const SourceManager: React.FC = () => {
               </AlertTitle>
               <AlertDescription>{message.text}</AlertDescription>
             </Alert>
+        </div>
+      )}
+
+      {(uploading || loadingFiles || processingFile) && (
+        <div className="flex items-center justify-center p-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2 text-muted-foreground">
+            {uploading && "Storageへアップロード中..."}
+            {loadingFiles && "ファイル一覧を読み込み中..."}
+            {processingFile && "サーバーでファイルを処理中..."}
+          </span>
         </div>
       )}
     </div>

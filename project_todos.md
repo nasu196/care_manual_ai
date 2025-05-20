@@ -64,7 +64,7 @@
 | Supabaseプロジェクトセットアップ                                 |        |      | 完了     | Database, Storage, Edge Functions                              |
 | データベーススキーマ設計（マニュアル、メモ、設定など）             |        |      | 完了     | `manuals`, `manual_chunks`, `memos`, `settings` テーブル作成 |
 | ベクトル検索のためのpgvector拡張機能導入と設定                     |        |      | 完了     | `vector` 拡張機能有効化                                    |
-| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 未着手   | ローカルテスト時、PowerShellのInvoke-WebRequestで日本語JSONを送信する場合は、-Bodyに渡すデータを [System.Text.Encoding]::UTF8.GetBytes() でバイト配列化し、-ContentType \'application/json;charset=utf-8\' を指定すること。 |
+| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 進行中   | ローカルテスト時、PowerShellのInvoke-WebRequestで日本語JSONを送信する場合は、-Bodyに渡すデータを [System.Text.Encoding]::UTF8.GetBytes() でバイト配列化し、-ContentType 'application/json;charset=utf-8' を指定すること。`process-manual-function` のクラウド環境での動作確認完了。その他メモ関連CRUD Functionはパスルーティング問題なし。 |
 
 ## 9. AI関連技術準備
 | タスク名                                                       | 担当者 | 期限 | 進捗状況 | 備考            |
@@ -86,4 +86,4 @@
 - [x] No.42 類似度検索APIエンドポイントの実装 (pgvector利用) (担当: AI, 状態: 完了)
 - [x] No.43 LLM連携による回答生成処理 (プロンプトエンジニアリング含む、会話履歴記憶機能追加) (担当: AI, 状態: 完了, 詳細: 2段階LLM導入、プロンプト改善、パラメータ調整により回答品質と構造が大幅向上。詳細は別途報告書参照。)
 - [x] No.44 Q&A APIエンドポイントの実装 (No.42, 43の統合) (担当: AI, 状態: 完了, 詳細: RAGシステムのコア機能として実装完了。継続的な品質・速度改善を実施。詳細は別途報告書参照。)
-- [ ] No.68 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) (担当: AI, 状態: 未着手) 
+- [ ] No.68 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) (担当: AI, 状態: 進行中) 
