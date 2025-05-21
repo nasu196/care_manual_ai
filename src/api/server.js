@@ -266,7 +266,12 @@ ${candidates.map(s => `- ${s}`).join('\n')}
 
     res.status(200).json({
       answer: answer,
-      sources: allChunks.length > 0 ? allChunks.map(c => ({ id: c.id, manual_id: c.manual_id, page_number: c.page_number, similarity: c.similarity, text_snippet: c.chunk_text.substring(0,100) + '...' })) : [],
+      sources: allChunks.length > 0 ? allChunks.map(c => ({ 
+        id: c.id, 
+        manual_id: c.manual_id, 
+        similarity: c.similarity, 
+        text_snippet: c.chunk_text.substring(0,100) + '...' 
+      })) : [],
       debug_info: {
         generated_queries: searchQueries,
         analysis_data: analysisData,

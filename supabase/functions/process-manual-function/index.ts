@@ -52,7 +52,6 @@ const TMP_DIR_BASE = "/tmp";
 interface ChunkObject {
     manual_id: string; // or number, depending on your DB schema
     chunk_text: string;
-    page_number: number;
     chunk_order: number;
     embedding?: number[]; // embeddingはベクトル化後に設定される
 }
@@ -217,7 +216,6 @@ async function processAndStoreDocuments(
         chunks.push({
           manual_id: manualId,
           chunk_text: text,
-          page_number: doc.metadata?.loc?.pageNumber || (doc.metadata?.type === 'pdf' ? i + 1 : 1),
           chunk_order: index + 1,
         });
       });
