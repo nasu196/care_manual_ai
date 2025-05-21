@@ -28,13 +28,13 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
           {sourceSlot || <SourceManager />}
         </div>
 
-        {/* 中央カラム: チャット (6/12幅) */}
-        <div className="col-span-6 bg-card rounded-lg shadow h-full overflow-hidden">
+        {/* 中央カラム: チャット (5/12幅) */}
+        <div className="col-span-5 bg-card rounded-lg shadow h-full overflow-hidden">
           {chatSlot}
         </div>
 
-        {/* 右カラム: メモ (3/12幅) */}
-        <div className="col-span-3 bg-card rounded-lg shadow h-full overflow-hidden">
+        {/* 右カラム: メモ (4/12幅) */}
+        <div className="col-span-4 bg-card rounded-lg shadow h-full overflow-hidden">
           {memoSlot || <MemoStudio />}
         </div>
       </div>

@@ -1,9 +1,15 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { corsHeaders } from '../_shared/cors.ts'
 
 console.log('Create Memo Function Initialized')
 
 serve(async (req: Request) => {
+  // OPTIONSリクエストの処理 (CORSプリフライト)
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
   try {
     // Supabaseクライアントを初期化
     // 環境変数からSupabaseのURLとanonキーを取得
@@ -15,7 +21,7 @@ serve(async (req: Request) => {
       console.error('SUPABASE_URL or SUPABASE_ANON_KEY is not set.')
       return new Response(
         JSON.stringify({ error: 'Missing Supabase environment variables' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -33,7 +39,7 @@ serve(async (req: Request) => {
     if (!title || !content) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields: title and content' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
@@ -53,19 +59,23 @@ serve(async (req: Request) => {
 
     if (error) {
       console.error('Error inserting memo:', error)
-      throw error
+      // エラーレスポンスにもCORSヘッダーを含めることが推奨される
+      return new Response(JSON.stringify({ error: error.message || 'Failed to insert memo' }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
     }
 
     console.log('Memo created successfully:', data)
-    return new Response(JSON.stringify({ memo: data ? data[0] : null }), { // dataは配列で返ってくるので最初の要素を取得
+    return new Response(JSON.stringify({ memo: data ? data[0] : null }), {
       status: 201, // Created
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
-  } catch (err) {
+  } catch (err: any) { // catchブロックのエラー型をanyに一旦変更 (Deno Deployの挙動に合わせる場合がある)
     console.error('Unhandled error:', err)
     return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
 })
