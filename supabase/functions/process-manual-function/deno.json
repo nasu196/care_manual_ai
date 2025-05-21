@@ -1,3 +1,11 @@
 {
-  "imports": {}
+  "imports": {
+    "@langchain/community/": "npm:@langchain/community@0.3.43/",
+    "langchain/": "npm:langchain@0.3.26/",
+    "@langchain/google-genai": "npm:@langchain/google-genai@0.2.9",
+    "@supabase/supabase-js@2": "npm:@supabase/supabase-js@2",
+    "officeparser": "npm:officeparser@5.1.1/", 
+    "pdf-parse": "npm:pdf-parse@1.1.1/",
+    "dotenv/config": "npm:dotenv/config"
+  }
 }
