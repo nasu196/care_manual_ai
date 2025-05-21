@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop  # developブランチへのpushをトリガーにする
+      - fix/function-size # developブランチへのpushに加え、fix/function-sizeブランチへのpushもトリガーにする
 
 jobs:
   deploy:
