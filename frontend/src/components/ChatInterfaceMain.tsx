@@ -25,7 +25,11 @@ interface Message {
 
 export type AiVerbosity = 'concise' | 'default' | 'detailed';
 
-export default function ChatInterfaceMain() {
+interface ChatInterfaceMainProps {
+  selectedSourceNames: string[];
+}
+
+export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterfaceMainProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -44,6 +48,8 @@ export default function ChatInterfaceMain() {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInputValue('');
     setIsLoading(true);
+
+    console.log('[ChatInterfaceMain] Selected source files:', selectedSourceNames);
 
     try {
       const response = await fetch('http://localhost:3001/api/qa', {

@@ -20,7 +20,13 @@ interface SourceFile {
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
-const SourceManager: React.FC = () => {
+// ★ propsの型定義を追加
+interface SourceManagerProps {
+  selectedSourceNames: string[];
+  onSelectionChange: (selectedNames: string[]) => void;
+}
+
+const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange }) => { // ★ propsを受け取るように変更
   const [selectedLocalFile, setSelectedLocalFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
   const [processingFile, setProcessingFile] = useState<boolean>(false);
@@ -30,7 +36,7 @@ const SourceManager: React.FC = () => {
   const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
 
   const [selectAll, setSelectAll] = useState(false);
-  const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]);
+  // const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]); // ★ page.tsxからpropsとして受け取るため削除
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -198,17 +204,21 @@ const SourceManager: React.FC = () => {
   const handleSelectAllChange = (checked: boolean) => {
     setSelectAll(checked);
     if (checked) {
-      setSelectedSourceNames(sourceFiles.map(file => file.name));
+      // setSelectedSourceNames(sourceFiles.map(file => file.name)); // ★ onSelectionChange を呼び出すように変更
+      onSelectionChange(sourceFiles.map(file => file.name));
     } else {
-      setSelectedSourceNames([]);
+      // setSelectedSourceNames([]); // ★ onSelectionChange を呼び出すように変更
+      onSelectionChange([]);
     }
   };
 
   const handleSourceSelectionChange = (fileName: string, checked: boolean) => {
     if (checked) {
-      setSelectedSourceNames(prev => [...prev, fileName]);
+      // setSelectedSourceNames(prev => [...prev, fileName]); // ★ onSelectionChange を呼び出すように変更
+      onSelectionChange([...selectedSourceNames, fileName]);
     } else {
-      setSelectedSourceNames(prev => prev.filter(name => name !== fileName));
+      // setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // ★ onSelectionChange を呼び出すように変更
+      onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
     }
   };
   
@@ -232,7 +242,8 @@ const SourceManager: React.FC = () => {
         setMessage({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${error.message}` });
       } else {
         await fetchUploadedFiles();
-        setSelectedSourceNames(prev => prev.filter(name => name !== fileName));
+        // setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // ★ onSelectionChange を呼び出すように変更
+        onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
         setMessage({ type: 'success', text: `ファイル「${fileName}」を削除しました。` });
       }
     } catch (err: unknown) {
@@ -282,9 +293,17 @@ const SourceManager: React.FC = () => {
       } else {
         setMessage({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
         await fetchUploadedFiles();
-        setSelectedSourceNames(prev =>
-          prev.map(name => name === oldName ? trimmedNewName : name)
+        
+        // ★ 選択状態の更新ロジック修正
+        const newSelectedNames = selectedSourceNames.map(name => 
+          name === oldName ? trimmedNewName : name
         );
+        if (JSON.stringify(newSelectedNames) !== JSON.stringify(selectedSourceNames)) {
+          onSelectionChange(newSelectedNames);
+        }
+        // setSelectedSourceNames(prev =>
+        //   prev.map(name => name === oldName ? trimmedNewName : name)
+        // );
       }
     } catch (err: unknown) {
       let renameErrorMessage = 'ファイル名変更中に予期せぬエラーが発生しました。';
