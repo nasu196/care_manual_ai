@@ -60,6 +60,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         body: JSON.stringify({ 
           query: userMessage.text,
           verbosity: aiVerbosity,
+          source_filenames: selectedSourceNames
         }),
       });
 

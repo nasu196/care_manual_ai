@@ -150,11 +150,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // Q&A API エンドポイント
 app.post('/api/qa', async (req, res) => {
-  const { query: userQuery } = req.body; // query を userQuery に変更して変数名の衝突を避ける
+  const { query: userQuery, source_filenames: sourceFilenames } = req.body; // ★ source_filenames を受け取る
 
   if (!userQuery || typeof userQuery !== 'string' || userQuery.trim() === '') {
     return res.status(400).json({ error: '質問内容 (query) が必要です。' });
   }
+
+  // ★ sourceFilenames のバリデーションとデフォルト値設定 (任意)
+  const validSourceFilenames = Array.isArray(sourceFilenames) && sourceFilenames.every(item => typeof item === 'string') 
+    ? sourceFilenames 
+    : null; // nullまたは空配列 [] どちらが良いかはRPC側の実装による
+
+  console.log(`[API Request] User Query: "${userQuery}", Source Filenames:`, validSourceFilenames);
 
   try {
     // --- 第1段階: 質問分析と検索クエリ生成 ---
@@ -204,6 +211,9 @@ app.post('/api/qa', async (req, res) => {
         query_embedding: queryEmbedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
+        // ★ RPCに selected_filenames を渡す (RPC側の引数名に合わせる必要あり)
+        // 仮に selected_filenames とする
+        p_selected_filenames: validSourceFilenames // ★ キー名を p_selected_filenames に変更
       });
 
       if (rpcError) {
