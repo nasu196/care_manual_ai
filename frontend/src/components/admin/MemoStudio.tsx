@@ -17,6 +17,7 @@ interface Memo {
   title: string;
   content: string; // HTML文字列として扱う
   created_at: string;
+  updated_at: string; // updated_at プロパティを追加
   created_by: string | null;
   is_important: boolean; // is_important プロパティを追加
   // 他に必要なフィールドがあれば追加
@@ -498,7 +499,10 @@ const MemoStudio = () => {
                           {memo.is_important && <Flag size={14} className="mr-1.5 text-red-500 fill-red-500" />}
                           <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
                         </div>
-                        <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full">
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          最終更新: {new Date(memo.updated_at).toLocaleDateString('ja-JP')}
+                        </p>
+                        <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full mt-1">
                           {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')}
                         </p>
                       </div>
