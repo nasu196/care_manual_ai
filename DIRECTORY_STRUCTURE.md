@@ -5,7 +5,6 @@ This document outlines the main directory structure of the `care_manual_ai` proj
 - **`.github/`**: Contains GitHub Actions workflows.
   - `workflows/`:
     - `deploy_edge_function.yml`: Workflow for deploying Supabase Edge Functions.
-- **`data/`**: (Likely for sample data, CSVs, etc. - content not inspected)
 - **`frontend/`**: Contains the Next.js frontend application.
   - **`.next/`**: Next.js build output (auto-generated).
   - **`node_modules/`**: Frontend project dependencies (auto-generated).
@@ -30,8 +29,6 @@ This document outlines the main directory structure of the `care_manual_ai` proj
   - `tailwind.config.ts`: Tailwind CSS configuration.
   - `tsconfig.json`: TypeScript configuration for the frontend.
 - **`node_modules/`**: Backend/Root project dependencies (auto-generated).
-- **`src/`**: Contains backend API server code (Node.js/Express API).
-  - **`api/`**: Source code for the backend API (e.g., `server.js`).
 - **`supabase/`**: Contains Supabase project configuration and Edge Functions.
   - **`.temp/`**: Temporary files for Supabase CLI (auto-generated).
   - **`functions/`**: Supabase Edge Functions.
