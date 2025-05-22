@@ -67,7 +67,8 @@ const MemoTemplateSuggestions = () => {
       console.log("Raw response text from Edge Function:\n", responseText);
 
       let jsonStringToParse = responseText;
-      const jsonMarkerMatch = responseText.match(/\\\`\\\`\\\`json\\s*([\\s\\S]*?)\\\\s*\\\`\\\`\\\`/);
+      const jsonBlockRegex = new RegExp("\\\`\\\`\\\`json\\s*([\\s\\S]*?)\\\\s*\\\`\\\`\\\`");
+      const jsonMarkerMatch = responseText.match(jsonBlockRegex);
 
       if (jsonMarkerMatch && jsonMarkerMatch[1]) {
         jsonStringToParse = jsonMarkerMatch[1].trim();
