@@ -499,10 +499,10 @@ const MemoStudio = () => {
           </div>
         ) : (
           <>
-            <div>
+            {/* <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
-              <MemoTemplateSuggestions />
-            </div>
+            </div> */}
+            <MemoTemplateSuggestions />
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
               {isLoading && <p>メモを読み込み中...</p>}
