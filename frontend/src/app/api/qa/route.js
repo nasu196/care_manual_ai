@@ -1,39 +1,51 @@
-require('dotenv').config(); // プロジェクトルートの.envを参照
-const express = require('express');
-const cors = require('cors');
-const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAIEmbeddings } = require('@langchain/google-genai');
-const { ChatGoogleGenerativeAI } = require("@langchain/google-genai");
-const { ConversationChain, LLMChain } = require("langchain/chains");
-const { BufferWindowMemory, ConversationSummaryBufferMemory } = require("langchain/memory");
-const { PromptTemplate } = require("@langchain/core/prompts");
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
+import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ConversationChain, LLMChain } from "langchain/chains";
+import { ConversationSummaryBufferMemory } from "langchain/memory"; // BufferWindowMemory は memoGenerationChain で使用
+import { PromptTemplate } from "@langchain/core/prompts";
 
-const app = express();
-const PORT = process.env.PORT || 3001;
-
-// Supabase クライアントと Embeddings モデルの初期化
+// 環境変数
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const geminiApiKey = process.env.GEMINI_API_KEY;
 
-if (!supabaseUrl || !supabaseAnonKey || !geminiApiKey) {
-  console.error("エラー: 必要な環境変数 (SUPABASE_URL, SUPABASE_ANON_KEY, GEMINI_API_KEY) が設定されていません。");
-  process.exit(1);
-}
+// グローバルスコープでの初期化 (App Routerの性質上、リクエストごとに再初期化される可能性に注意)
+let supabase;
+let embeddings;
+let chatModel;
+let queryAnalysisChain;
+let answerGenerationChain; // memory も内部で初期化またはここで保持
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-const embeddings = new GoogleGenerativeAIEmbeddings({
-  apiKey: geminiApiKey,
-  model: "text-embedding-004",
-});
-const chatModel = new ChatGoogleGenerativeAI({
-    apiKey: geminiApiKey,
-    model: "gemini-2.0-flash",
-    temperature: 0.4,
-});
+// 初期化関数
+function initializeClientsAndChains() {
+  if (!supabaseUrl || !supabaseAnonKey || !geminiApiKey) {
+    console.error("エラー: 必要な環境変数 (SUPABASE_URL, SUPABASE_ANON_KEY, GEMINI_API_KEY) が設定されていません。");
+    // このエラーはリクエスト処理中に適切にハンドリングされるべき
+    throw new Error("サーバー設定エラー: APIキーが不足しています。");
+  }
 
-// --- 第1段階LLM用: 質問分析とクエリ生成 ---
-const queryAnalysisPromptTemplate = PromptTemplate.fromTemplate(`
+  if (!supabase) {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  if (!embeddings) {
+    embeddings = new GoogleGenerativeAIEmbeddings({
+      apiKey: geminiApiKey,
+      model: "text-embedding-004",
+    });
+  }
+  if (!chatModel) {
+    chatModel = new ChatGoogleGenerativeAI({
+        apiKey: geminiApiKey,
+        model: "gemini-2.5-flash-preview-05-20", // server.jsからモデル名をコピー
+        temperature: 0.4,
+    });
+  }
+
+  // --- 第1段階LLM用: 質問分析とクエリ生成 ---
+  if (!queryAnalysisChain) {
+    const queryAnalysisPromptTemplateString = `
 あなたは、ユーザーからの質問を深く理解し、その質問に答えるために必要な情報を網羅的に収集するための戦略を立てる、非常に優秀なリサーチアシスタントです。
 
 以下のユーザーの質問を分析してください。
@@ -44,7 +56,7 @@ const queryAnalysisPromptTemplate = PromptTemplate.fromTemplate(`
 
 出力は必ず以下のJSON形式で、キーは日本語で記述してください。値には分析結果や提案を文字列または文字列の配列として格納してください。
 
-\`\`\`json
+\\\`\\\`\\\`json
 {{
   "質問の要約": "ユーザーが最も知りたいポイントを1～2文で簡潔に記述",
   "補足情報候補": [
@@ -57,30 +69,33 @@ const queryAnalysisPromptTemplate = PromptTemplate.fromTemplate(`
     "一つの検索クエリは、10～20文字程度の簡潔なものが望ましい"
   ]
 }}
-\`\`\`
+\\\`\\\`\\\`
 
 ユーザーの質問:
 「{user_query}」
 
 あなたの分析結果と提案（JSON形式）:
-`);
+`;
+    const queryAnalysisPromptTemplate = PromptTemplate.fromTemplate(queryAnalysisPromptTemplateString);
+    queryAnalysisChain = new LLMChain({
+      llm: chatModel,
+      prompt: queryAnalysisPromptTemplate,
+      outputKey: "analysis_result",
+    });
+  }
 
-const queryAnalysisChain = new LLMChain({
-  llm: chatModel, // 回答生成モデルと同じものを一旦使用。必要であれば専用のモデルを用意
-  prompt: queryAnalysisPromptTemplate,
-  outputKey: "analysis_result", // LLMChainの出力を格納するキー
-});
+  // --- 第2段階LLM用: 回答生成 ---
+  if (!answerGenerationChain) {
+    // ConversationSummaryBufferMemory はリクエストごとに初期化する方が安全かもしれない
+    // ここでは server.js の構造に合わせてグローバルに一度だけ初期化する試み
+    const memory = new ConversationSummaryBufferMemory({
+        llm: chatModel,
+        maxTokenLimit: 2000,
+        memoryKey: "chat_history",
+        inputKey: "input", // server.js と合わせる
+    });
 
-
-// --- 第2段階LLM用: 回答生成 ---
-const memory = new ConversationSummaryBufferMemory({
-    llm: chatModel,
-    maxTokenLimit: 2000,
-    memoryKey: "chat_history",
-    inputKey: "input",
-});
-
-const answerGenerationPrompt = PromptTemplate.fromTemplate(`
+    const answerGenerationPromptString = `
 あなたは高度な分析能力と優れた説明能力を持つAIアシスタントです。提供された「背景情報」を主な情報源として参照しつつ、ユーザーの質問の意図を深く理解し、役立つ回答を生成してください。
 **特に、直前の会話の流れやユーザーからの指示の変更（例えば、言語の変更や話題の転換など）があった場合は、それを的確に捉え、柔軟に対応してください。**
 {analysis_summary}
@@ -135,58 +150,54 @@ const answerGenerationPrompt = PromptTemplate.fromTemplate(`
 {input}
 
 あなたの回答 (日本語で記述):
-`);
-
-const answerGenerationChain = new ConversationChain({
-    llm: chatModel,
-    memory: memory,
-    prompt: answerGenerationPrompt,
-});
-
-// ミドルウェアの設定
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Q&A API エンドポイント
-app.post('/api/qa', async (req, res) => {
-  const { query: userQuery, source_filenames: sourceFilenames } = req.body; // ★ source_filenames を受け取る
-
-  if (!userQuery || typeof userQuery !== 'string' || userQuery.trim() === '') {
-    return res.status(400).json({ error: '質問内容 (query) が必要です。' });
+`;
+    const answerGenerationPrompt = PromptTemplate.fromTemplate(answerGenerationPromptString);
+    answerGenerationChain = new ConversationChain({
+        llm: chatModel,
+        memory: memory,
+        prompt: answerGenerationPrompt,
+        // outputKey: "response" // server.js に合わせてデフォルトのまま
+    });
   }
+}
 
-  // ★ sourceFilenames のバリデーションとデフォルト値設定 (任意)
-  const validSourceFilenames = Array.isArray(sourceFilenames) && sourceFilenames.every(item => typeof item === 'string') 
-    ? sourceFilenames 
-    : null; // nullまたは空配列 [] どちらが良いかはRPC側の実装による
-
-  console.log(`[API Request] User Query: "${userQuery}", Source Filenames:`, validSourceFilenames);
-
+export async function POST(request) {
   try {
+    initializeClientsAndChains();
+
+    const { query: userQuery, source_filenames: sourceFilenames } = await request.json();
+
+    if (!userQuery || typeof userQuery !== 'string' || userQuery.trim() === '') {
+      return NextResponse.json({ error: '質問内容 (query) が必要です。' }, { status: 400 });
+    }
+
+    const validSourceFilenames = Array.isArray(sourceFilenames) && sourceFilenames.every(item => typeof item === 'string') 
+      ? sourceFilenames 
+      : null;
+
+    console.log(`[API /api/qa] User Query: "${userQuery}", Source Filenames:`, validSourceFilenames);
+
     // --- 第1段階: 質問分析と検索クエリ生成 ---
     console.log(`[Phase 1] ユーザーの質問を分析中: "${userQuery}"`);
     const analysisResultRaw = await queryAnalysisChain.invoke({ user_query: userQuery });
     let analysisData;
     try {
       let jsonString = analysisResultRaw.analysis_result;
-      // Markdownのコードブロックマーカーを削除
       if (jsonString.startsWith("```json\n")) {
         jsonString = jsonString.substring(7); // "```json\n".length
-      } else if (jsonString.startsWith("```json")) { // 改行なしのケースも考慮
+      } else if (jsonString.startsWith("```json")) {
         jsonString = jsonString.substring(7);
       }
       if (jsonString.endsWith("\n```")) {
         jsonString = jsonString.substring(0, jsonString.length - 4); // "\n```".length
-      } else if (jsonString.endsWith("```")) { // 改行なしのケースも考慮
+      } else if (jsonString.endsWith("```")) {
         jsonString = jsonString.substring(0, jsonString.length - 3);
       }
-      
-      analysisData = JSON.parse(jsonString.trim()); // trim() で前後の空白も除去
+      analysisData = JSON.parse(jsonString.trim());
     } catch (e) {
       console.error("[Phase 1] LLMからの分析結果(JSON)のパースに失敗しました。", e);
       console.error("[Phase 1] LLM Raw Output:", analysisResultRaw.analysis_result);
-      return res.status(500).json({ error: '質問分析中にエラーが発生しました (結果不正)。' });
+      return NextResponse.json({ error: '質問分析中にエラーが発生しました (結果不正)。' }, { status: 500 });
     }
     
     const searchQueries = analysisData.検索クエリ群 && Array.isArray(analysisData.検索クエリ群) && analysisData.検索クエリ群.length > 0 ? analysisData.検索クエリ群 : [userQuery];
@@ -194,30 +205,28 @@ app.post('/api/qa', async (req, res) => {
 
     // --- 第2段階: 検索クエリ群に基づいてベクトル検索 ---
     console.log('[Phase 2] 複数の検索クエリで類似チャンクを検索中...');
-    const matchThreshold = 0.4; // 0.4から0.3に変更
-    const matchCount = 3; // 変更 (1クエリあたりの取得件数)
+    const matchThreshold = 0.4;
+    const matchCount = 3;
     
     let allChunks = [];
-    const retrievedChunkIds = new Set(); // 重複するチャンクを避けるため
+    const retrievedChunkIds = new Set();
 
     for (const searchQuery of searchQueries) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') {
-        console.warn(`[Phase 2] スキップされた無効な検索クエリ: \"${searchQuery}\"`);
+        console.warn(`[Phase 2] スキップされた無効な検索クエリ: "${searchQuery}"`);
         continue;
       }
-      console.log(`[Phase 2] 検索実行中: \"${searchQuery}\"`);
+      console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
       const queryEmbedding = await embeddings.embedQuery(searchQuery);
       const { data: rpcData, error: rpcError } = await supabase.rpc('match_manual_chunks', {
         query_embedding: queryEmbedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
-        // ★ RPCに selected_filenames を渡す (RPC側の引数名に合わせる必要あり)
-        // 仮に selected_filenames とする
-        p_selected_filenames: validSourceFilenames // ★ キー名を p_selected_filenames に変更
+        p_selected_filenames: validSourceFilenames
       });
 
       if (rpcError) {
-        console.warn(`[Phase 2] Supabase RPCエラー (クエリ: \"${searchQuery}\"):`, rpcError);
+        console.warn(`[Phase 2] Supabase RPCエラー (クエリ: "${searchQuery}"):`, rpcError);
         continue; 
       }
 
@@ -231,21 +240,18 @@ app.post('/api/qa', async (req, res) => {
       }
     }
     console.log(`[Phase 2] 合計 ${allChunks.length} 件のユニークなチャンクを取得しました。`);
-    // ★★★ allChunksの内容をコンソールに出力 ★★★
     if (allChunks.length > 0) {
       console.log('[Phase 2] allChunksの内容 (最初の1件):', JSON.stringify(allChunks[0], null, 2));
     }
 
     let contextForLLM = "";
     if (allChunks.length > 0) {
-      // 類似度でソートすることも検討できるが、まずは単純マージ
-      contextForLLM = allChunks.map(chunk => chunk.chunk_text).join('\n\n---\n\n');
+      contextForLLM = allChunks.map(chunk => chunk.chunk_text).join('\\n\\n---\\n\\n');
     } else {
       console.log("[Phase 2] 関連するチャンクが見つかりませんでした。");
       contextForLLM = "関連する背景情報は見つかりませんでした。";
     }
 
-    // 第1段階LLMの分析結果を第2段階LLMのプロンプトに含めるための準備
     let analysisSummaryForPrompt = "";
     if (analysisData) {
         const summary = analysisData.質問の要約 || 'N/A';
@@ -254,7 +260,7 @@ app.post('/api/qa', async (req, res) => {
 以下の分析結果も参考にしてください:
 質問の要約: ${summary}
 補足情報候補: 
-${candidates.map(s => `- ${s}`).join('\n')}
+${candidates.map(s => `- ${s}`).join('\\n')}
 `;
     }
 
@@ -263,18 +269,18 @@ ${candidates.map(s => `- ${s}`).join('\n')}
     const llmResponse = await answerGenerationChain.invoke({
         input: userQuery,
         context: contextForLLM,
-        analysis_summary: analysisSummaryForPrompt // 第1段階の分析結果を渡す
+        analysis_summary: analysisSummaryForPrompt
     });
     
     const answer = llmResponse.response; 
 
     if (!answer) {
         console.error("[Phase 3] LLMからの応答形式が予期したものではありません。", llmResponse);
-        return res.status(500).json({ error: 'AIからの回答取得に失敗しました。' });
+        return NextResponse.json({ error: 'AIからの回答取得に失敗しました。' }, { status: 500 });
     }
     console.log("[Phase 3] LLMからの回答受信完了。");
 
-    res.status(200).json({
+    return NextResponse.json({
       answer: answer,
       sources: allChunks.length > 0 ? allChunks.map(c => ({ 
         id: c.id, 
@@ -286,26 +292,13 @@ ${candidates.map(s => `- ${s}`).join('\n')}
         generated_queries: searchQueries,
         analysis_data: analysisData,
       }
-    });
+    }, { status: 200 });
 
   } catch (error) {
-    console.error("Q&A処理中に予期せぬエラー:", error);
-    // エラーオブジェクト全体をログに出力して詳細を確認
-    console.error("Full error object:", JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    res.status(500).json({ error: 'サーバー内部でエラーが発生しました。', details: error.message });
+    console.error("[API /api/qa] Q&A処理中に予期せぬエラー:", error);
+    // エラーオブジェクトの message と stack を含める
+    const errorMessage = error.message || 'サーバー内部でエラーが発生しました。';
+    const errorStack = error.stack;
+    return NextResponse.json({ error: errorMessage, details: errorStack }, { status: 500 });
   }
-});
-
-// ヘルスチェック用エンドポイント
-app.get('/healthcheck', (req, res) => {
-  res.status(200).json({ 
-    status: 'ok', 
-    message: 'API server is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// サーバー起動
-app.listen(PORT, () => {
-  console.log(`API server listening on port ${PORT}`);
-});
+} 

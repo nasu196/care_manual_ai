@@ -8,29 +8,50 @@ import {
 } from "@/components/ui/tooltip";
 import { motion } from 'framer-motion'; // Framer Motionをインポート
 
-interface MemoTemplateSuggestionItemProps {
+// Suggestion 型を MemoTemplateSuggestions.tsx からインポートするか、共通の型定義ファイルからインポートするのが望ましい
+// ここでは、MemoTemplateSuggestions.tsx 内で定義されている Suggestion 型と同じものを仮定して使用
+interface Suggestion {
+  id: string;
   title: string;
   description: string;
   source_files?: string[];
-  isLastItem?: boolean;
+}
+
+interface MemoTemplateSuggestionItemProps {
+  suggestion: Suggestion;
+  index: number; // アニメーションなどで利用する場合のために残す
+  onSuggestionClick: (suggestion: Suggestion) => void;
 }
 
 const itemVariants = {
   hidden: { opacity: 0, y: 20, scale: 0.95 },
-  visible: {
+  visible: (
+    i: number // index を受け取るように変更 (カスタムプロパティとして渡す)
+  ) => ({
     opacity: 1,
     y: 0,
     scale: 1,
-    transition: { type: "spring", stiffness: 120, damping: 12 }
-  }
+    transition: { 
+      type: "spring", 
+      stiffness: 120, 
+      damping: 12, 
+      delay: i * 0.05 // 要素ごとにわずかに遅延させる
+    }
+  })
 };
 
-const MemoTemplateSuggestionItem = ({ title, description, source_files, isLastItem }: MemoTemplateSuggestionItemProps) => {
+const MemoTemplateSuggestionItem = ({ suggestion, index, onSuggestionClick }: MemoTemplateSuggestionItemProps) => {
+  const { title, description, source_files } = suggestion;
+
   return (
-    <motion.div variants={itemVariants}> {/* Card全体をmotion.divでラップし、variantsを適用 */}
+    <motion.div 
+      variants={itemVariants}
+      custom={index} // custom プロパティで index を渡す
+      onClick={() => onSuggestionClick(suggestion)} // カードクリックでコールバックを実行
+    >
       <Tooltip>
         <TooltipTrigger asChild>
-          <Card className={`hover:shadow-md transition-shadow cursor-pointer flex flex-col h-full ${isLastItem ? '' : ''} p-2 gap-1`}>
+          <Card className={`hover:shadow-md transition-shadow cursor-pointer flex flex-col h-full p-2 gap-1`}>
             {/* CardHeaderとCardTitleをdivとh3で置き換え */}
             <div className="p-1 pb-0">
               <h3 className="text-sm font-medium">

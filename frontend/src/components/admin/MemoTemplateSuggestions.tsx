@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
@@ -6,7 +6,18 @@ import { supabase } from '@/lib/supabaseClient';
 import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// AIGeneratedMemoSource の型を MemoStudio.tsx からインポートする代わりにここで再定義（本来は共通化）
+// もしくは、MemoStudio.tsx の型定義名を GeneratedMemoSource にして、こちらからimport { GeneratedMemoSource } from './MemoStudio'; のようにする
+// 今回はここで再定義するが、@/types などに移動するのが望ましい
+interface AIGeneratedMemoSource {
+  id: string;
+  manual_id: string;
+  file_name: string;
+  similarity: number;
+  text_snippet: string;
+}
 
 const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
 const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
@@ -15,20 +26,27 @@ interface Suggestion {
   id: string;
   title: string;
   description: string;
-  source_files?: string[];
+  source_files?: string[]; // APIのレスポンスに合わせて optional に
 }
 
-// Propsの型定義を追加
+// Propsの型定義を修正
 interface MemoTemplateSuggestionsProps {
   selectedSourceNames: string[];
+  onMemoGenerated: (newMemo: { title: string; content: string; sources: AIGeneratedMemoSource[] }) => void;
 }
 
-const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames }) => {
+const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames, onMemoGenerated }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false); // 提案取得時のローディング
+  const [error, setError] = useState<string | null>(null); // 提案取得時のエラー
   const [hasFetchedOnce, setHasFetchedOnce] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+
+  // メモ生成モーダル関連のstate
+  const [isGenerateMemoModalOpen, setIsGenerateMemoModalOpen] = useState(false);
+  const [selectedIdeaForModal, setSelectedIdeaForModal] = useState<Suggestion | null>(null);
+  const [isGeneratingMemo, setIsGeneratingMemo] = useState(false); // メモ生成API呼び出し中のローディング
+  const [generateMemoError, setGenerateMemoError] = useState<string | null>(null); // メモ生成時のエラー
 
   useEffect(() => {
     try {
@@ -70,9 +88,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     }
   }, []);
 
-  const fetchSuggestions = async () => {
+  const fetchSuggestions = useCallback(async () => { // useCallback でラップ
     setIsLoading(true);
     setError(null);
+    setGenerateMemoError(null); // エラーをクリア
+    setMessage(null); // メッセージをクリア
     setHasFetchedOnce(true);
 
     if (!selectedSourceNames || selectedSourceNames.length === 0) {
@@ -198,6 +218,84 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
+  }, [selectedSourceNames]); // 依存配列
+
+  // アイデアカードクリック時のハンドラ
+  const handleSuggestionItemClick = (suggestion: Suggestion) => {
+    setSelectedIdeaForModal(suggestion);
+    setGenerateMemoError(null); // モーダルを開くときに前回のエラーをクリア
+    setIsGenerateMemoModalOpen(true);
+  };
+
+  // モーダルで「作成」が押されたときのハンドラ
+  const handleConfirmGenerateMemo = async () => {
+    if (!selectedIdeaForModal) return;
+
+    setIsGeneratingMemo(true);
+    setGenerateMemoError(null);
+    console.log("Generating memo for:", selectedIdeaForModal.title);
+
+    try {
+      // 1. PromptCraftLLM を呼び出す
+      const promptResponse = await fetch('/api/craft-memo-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ideaTitle: selectedIdeaForModal.title,
+          ideaDescription: selectedIdeaForModal.description,
+          sourceFileNames: selectedIdeaForModal.source_files || [], // source_files が undefined の場合空配列
+        }),
+      });
+      if (!promptResponse.ok) {
+        const errorText = await promptResponse.text(); // まずテキストとしてレスポンスを読む
+        let errorJson = {};
+        try {
+          errorJson = JSON.parse(errorText); // 次にJSONとしてパースを試みる
+        } catch (e) {
+          // JSONパースに失敗した場合は、テキストをそのまま使う
+          console.warn('Failed to parse error response as JSON:', e, 'Raw text:', errorText);
+        }
+        // errorJson がオブジェクトで error プロパティを持つか、あるいは errorText を使う
+        const errorMessage = (typeof errorJson === 'object' && errorJson !== null && 'error' in errorJson && typeof errorJson.error === 'string') 
+                           ? errorJson.error 
+                           : errorText || 'プロンプト作成リクエストの処理中に不明なエラーが発生しました。';
+        throw new Error(errorMessage);
+      }
+      const { generatedPrompt } = await promptResponse.json();
+
+      // 2. MemoWriterLLM を呼び出す
+      const memoResponse = await fetch('/api/generate-memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          crafted_prompt: generatedPrompt,
+          source_filenames: selectedIdeaForModal.source_files || [], // source_files が undefined の場合空配列
+        }),
+      });
+      if (!memoResponse.ok) {
+        const errorData = await memoResponse.json().catch(() => ({error: 'メモ生成リクエストの解析に失敗'}));
+        throw new Error(errorData.error || 'メモの生成に失敗しました。');
+      }
+      const { generated_memo, sources } = await memoResponse.json();
+      
+      onMemoGenerated({
+        title: selectedIdeaForModal.title,
+        content: generated_memo,
+        sources: sources,
+      });
+
+      setIsGenerateMemoModalOpen(false);
+      setSelectedIdeaForModal(null);
+    } catch (err: unknown) {
+      console.error("Error generating memo:", err);
+      if (err instanceof Error) {
+        setGenerateMemoError(err.message || 'メモの生成中に不明なエラーが発生しました。');
+      } else {
+        setGenerateMemoError('メモの生成中に不明なエラーが発生しました。');
+      }
+    } finally {
+      setIsGeneratingMemo(false);
+    }
   };
 
   const containerVariants = {
@@ -213,7 +311,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-sm font-medium text-gray-500">提案</h3>
+        <h3 className="text-sm font-medium text-gray-500">資料の活用アイデア</h3>
         <Button onClick={fetchSuggestions} disabled={isLoading}>
           {isLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -264,23 +362,69 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       {!isLoading && !error && suggestions.length > 0 && (
         <TooltipProvider>
           <motion.div
-            className="grid grid-cols-1 md:grid-cols-2 gap-3"
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3"
             variants={containerVariants}
             initial="hidden"
             animate="visible"
+            exit={{ opacity: 0 }}
           >
             {suggestions.map((suggestion, index) => (
-              <MemoTemplateSuggestionItem
+        <MemoTemplateSuggestionItem 
                 key={suggestion.id}
-                title={suggestion.title}
-                description={suggestion.description}
-                source_files={suggestion.source_files}
-                isLastItem={index === suggestions.length - 1}
-              />
-            ))}
+                suggestion={suggestion}
+                index={index}
+                onSuggestionClick={handleSuggestionItemClick}
+        />
+      ))}
           </motion.div>
         </TooltipProvider>
       )}
+
+      {/* メモ生成モーダル */}
+      <AnimatePresence>
+        {isGenerateMemoModalOpen && selectedIdeaForModal && (
+          <div 
+            className="fixed inset-0 flex items-center justify-center p-4 z-50" 
+            style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}
+          >
+            <motion.div 
+              className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <h3 className="text-lg font-semibold mb-2">メモを生成しますか？</h3>
+              <p className="text-sm mb-1">アイデア: 「{selectedIdeaForModal.title}」</p>
+              {selectedIdeaForModal.source_files && selectedIdeaForModal.source_files.length > 0 && (
+                <p className="text-xs text-gray-600 mb-4">
+                  参照ファイル: {selectedIdeaForModal.source_files.join(', ')}
+                </p>
+              )}
+              {generateMemoError && (
+                  <div className="mb-3 p-2 bg-red-100 text-red-700 rounded-md text-sm">
+                      <p>エラー: {generateMemoError}</p>
+                  </div>
+              )}
+              <div className="flex justify-end gap-2 mt-5">
+                <Button 
+                  variant="outline" 
+                  onClick={() => { setIsGenerateMemoModalOpen(false); setGenerateMemoError(null); }} 
+                  disabled={isGeneratingMemo}
+                >
+                  キャンセル
+                </Button>
+                <Button onClick={handleConfirmGenerateMemo} disabled={isGeneratingMemo}>
+                  {isGeneratingMemo ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 作成中...</>
+                  ) : (
+                    '作成する'
+                  )}
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

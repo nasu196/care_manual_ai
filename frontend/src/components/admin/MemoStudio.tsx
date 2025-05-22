@@ -11,7 +11,25 @@ import { marked } from 'marked'; // marked をインポート
 import { useMemoStore } from '@/store/memoStore'; // Zustandストアをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
-import MemoTemplateSuggestions from './MemoTemplateSuggestions';
+import MemoTemplateSuggestions from './MemoTemplateSuggestions'; // AISuggestion のエイリアスを削除
+
+// AIが生成するメモのソース情報の型 (MemoTemplateSuggestions.tsxのGeneratedMemoSource)
+interface AIGeneratedMemoSource {
+  id: string;
+  manual_id: string;
+  file_name: string;
+  similarity: number;
+  text_snippet: string;
+}
+
+// AIが生成するメモの型
+interface AIGeneratedMemo {
+  id: string; // UUIDなどで一意に
+  title: string; // これはAI提案のタイトルを引き継ぐ
+  content: string; // AIが生成したメモ本体 (Markdown or HTML)
+  sources: AIGeneratedMemoSource[];
+  createdAt: string; // ISO文字列
+}
 
 // メモの型定義 (仮。実際のEdge Functionの返り値に合わせる)
 interface Memo {
@@ -64,6 +82,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   // Zustandストアから状態とアクションを取得
   const newMemoRequest = useMemoStore((state) => state.newMemoRequest);
   const clearNewMemoRequest = useMemoStore((state) => state.clearNewMemoRequest);
+  // AIによって生成され、リストに表示するためのメモの状態
+  const [aiGeneratedDisplayMemos, setAiGeneratedDisplayMemos] = useState<AIGeneratedMemo[]>([]);
 
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
@@ -387,6 +407,27 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     }
   };
 
+  const handleAiMemoGenerated = (newAiMemo: { title: string; content: string; sources: AIGeneratedMemoSource[] }) => {
+    console.log("AI Generated Memo Received in MemoStudio:", newAiMemo);
+    const memoToAdd: AIGeneratedMemo = {
+      id: crypto.randomUUID(),
+      title: newAiMemo.title,
+      content: newAiMemo.content, // これがMarkdownかHTMLかは要確認。現状はそのまま表示
+      sources: newAiMemo.sources,
+      createdAt: new Date().toISOString(),
+    };
+    // ローカルステートに追加して表示。永続化は別途。
+    setAiGeneratedDisplayMemos(prevMemos => [memoToAdd, ...prevMemos]);
+    
+    // 将来的には、このメモを「新規メモ作成」の初期値として編集モードを開始する、
+    // または直接DBに保存して memos リストを更新するなどの処理を行う。
+    // 例えば、編集モードで開く場合:
+    // setNewMemoTitle(memoToAdd.title);
+    // setNewMemoContent(memoToAdd.content); // AIのcontentがHTMLでない場合はmarkedなどで変換
+    // setIsEditingNewMemo(true);
+    // setSelectedMemoId(null); // 他の選択は解除
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 pb-2 sticky top-0 z-10 border-b">
@@ -506,7 +547,43 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             {/* <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
             </div> */}
-            <MemoTemplateSuggestions selectedSourceNames={selectedSourceNames} />
+            <MemoTemplateSuggestions 
+              selectedSourceNames={selectedSourceNames} 
+              onMemoGenerated={handleAiMemoGenerated} // コールバックを接続
+            />
+            {/* AIによって生成されたメモの表示エリア */} 
+            {aiGeneratedDisplayMemos.length > 0 && (
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-gray-500 mb-2">AI生成メモ (プレビュー)</h3>
+                <div className="space-y-3">
+                  {aiGeneratedDisplayMemos.map((memo) => (
+                    <div key={memo.id} className="p-3 border rounded-md bg-blue-50 shadow-sm">
+                      <h4 className="font-semibold text-sm text-blue-700">{memo.title}</h4>
+                      <p className="text-xs text-gray-500 mt-0.5 mb-1.5">
+                        生成日時: {new Date(memo.createdAt).toLocaleTimeString('ja-JP')}
+                      </p>
+                      {/* AI生成コンテンツの表示 (Markdownの場合HTMLに変換が必要) */}
+                      <div 
+                        className="prose prose-sm max-w-none bg-white p-2 border rounded whitespace-pre-wrap break-words" 
+                        dangerouslySetInnerHTML={{ __html: memo.content.includes('<') ? memo.content : marked.parse(memo.content) as string }}
+                      />
+                      {memo.sources && memo.sources.length > 0 && (
+                        <div className="mt-2 pt-1.5 border-t border-blue-200">
+                          <p className="text-xs font-semibold text-blue-600 mb-0.5">参照ソース:</p>
+                          <ul className="list-disc list-inside text-xs text-gray-600 pl-1">
+                            {memo.sources.map(source => (
+                              <li key={source.id} className="truncate">
+                                {source.file_name} (類似度: {source.similarity.toFixed(2)}) - 抜粋: {source.text_snippet}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
               {isLoading && <p>メモを読み込み中...</p>}

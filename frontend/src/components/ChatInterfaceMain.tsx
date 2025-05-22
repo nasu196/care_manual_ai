@@ -54,7 +54,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     console.log('[ChatInterfaceMain] Selected source files:', selectedSourceNames);
 
     try {
-      const response = await fetch('http://localhost:3001/api/qa', {
+      const response = await fetch('/api/qa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
