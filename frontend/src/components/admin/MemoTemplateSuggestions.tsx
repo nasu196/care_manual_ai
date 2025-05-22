@@ -51,7 +51,7 @@ const MemoTemplateSuggestions = () => {
     setHasFetchedOnce(true);
 
     try {
-      const { data, error: invokeError } = await supabase.functions.invoke(
+      const { data: responseText, error: invokeError } = await supabase.functions.invoke<string>(
         'suggest-next-actions',
         { method: 'POST' }
       );
@@ -60,17 +60,43 @@ const MemoTemplateSuggestions = () => {
         throw invokeError;
       }
 
-      if (data && data.error) {
-        console.error("Server-side error from suggest-next-actions:", data.error, data.details);
-        throw new Error(data.details ? `${data.error} (${data.details})` : data.error);
+      if (typeof responseText !== 'string') {
+        throw new Error('AIからのレスポンスが予期しない形式です。 (Not a string)');
       }
 
-      const fetchedSuggestions = (data?.suggestions as Array<{ id?: string; title: string; description: string; }> || [])
-        .map((suggestionObj, index) => ({
-          id: suggestionObj.id || `suggestion-${Date.now()}-${index}`,
-          title: suggestionObj.title,
-          description: suggestionObj.description
-        }));
+      console.log("Raw response text from Edge Function:\n", responseText);
+
+      let jsonStringToParse = responseText;
+      const jsonMarkerMatch = responseText.match(/\\\`\\\`\\\`json\\s*([\\s\\S]*?)\\\\s*\\\`\\\`\\\`/);
+
+      if (jsonMarkerMatch && jsonMarkerMatch[1]) {
+        jsonStringToParse = jsonMarkerMatch[1].trim();
+        console.log("Extracted JSON string from markers (client-side):\n", jsonStringToParse);
+      } else {
+        console.warn("JSON markers (```json) not found in response, attempting to parse the whole string.");
+      }
+      
+      let parsedSuggestions: Array<{ id?: string; title: string; description: string; }> = [];
+      try {
+        const parsedData = JSON.parse(jsonStringToParse);
+        if (Array.isArray(parsedData)) {
+          parsedSuggestions = parsedData;
+        } else if (parsedData && Array.isArray(parsedData.suggestions)) {
+          parsedSuggestions = parsedData.suggestions;
+        } else {
+          throw new Error('解析されたデータが期待する提案の配列形式ではありません。');
+        }
+      } catch (e: any) {
+        console.error("Failed to parse JSON response (client-side):", e);
+        console.error("Original string attempted to parse:", jsonStringToParse);
+        throw new Error(`AIからの提案の解析に失敗しました。(${e.message})`);
+      }
+
+      const fetchedSuggestions = parsedSuggestions.map((suggestionObj, index) => ({
+        id: suggestionObj.id || `suggestion-${Date.now()}-${index}`,
+        title: suggestionObj.title || "無題の提案",
+        description: suggestionObj.description || "説明がありません。"
+      }));
       
       setSuggestions(fetchedSuggestions);
 

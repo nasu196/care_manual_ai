@@ -44,14 +44,8 @@ serve(async (req: Request) => {
         return new Response('ok', { headers: corsHeaders });
     }
 
-    if (!supabase) {
-        return new Response(JSON.stringify({ error: "Supabase client not initialized." }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            status: 500,
-        });
-    }
-    if (!genAI) {
-        return new Response(JSON.stringify({ error: "Gemini API client not initialized." }), {
+    if (!supabase || !genAI) {
+        return new Response(JSON.stringify({ error: "サーバー初期化エラー。環境変数を確認してください。" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
         });
@@ -72,7 +66,7 @@ serve(async (req: Request) => {
 
         if (!summariesData || summariesData.length === 0) {
             console.log("No summaries found in the database.");
-            return new Response(JSON.stringify({ suggestions: [], message: "提案の元となる有効なドキュメントサマリーが見つかりません。" }), {
+            return new Response(JSON.stringify({ suggestions: [], message: "提案の元となるサマリーがありません。" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200, // エラーではなく、提案がない状態として200を返す
             });
@@ -108,56 +102,18 @@ serve(async (req: Request) => {
 
         console.log("Calling Gemini API...");
         const result = await model.generateContent(prompt);
-        const response = result.response;
-        const responseText = response.text();
+        const responseText = result.response.text();
 
-        console.log("Gemini API response text:\\n ", responseText);
+        console.log("Raw response from Gemini API:\\n ", responseText); // 生のレスポンスをログに出力
 
-        let suggestionsJsonString = responseText; // デフォルトはそのまま
-        try {
-            // レスポンスからJSON部分を抽出 (```json ... ``` の中身)
-            const jsonMatch = responseText.match(/```json\\s*([\\s\\S]*?)\\s*```/);
-            if (jsonMatch && jsonMatch[1]) {
-                suggestionsJsonString = jsonMatch[1]; // 抽出したJSON文字列を使用
-                console.log("Extracted JSON string from markers:\\n", suggestionsJsonString);
-            } else {
-                console.warn("JSON markers (```json) not found in Gemini response, assuming raw JSON or plain text.");
-                // マーカーがない場合は、responseText がそのままJSON文字列であると期待する (あるいはエラー処理)
-            }
-            
-            // ここで一度JSONとしてパースできるか試す（バリデーション目的）
-            const preliminaryParse = JSON.parse(suggestionsJsonString);
-            console.log("Preliminary parse successful before sending to client.");
-            // もし description のトリミングなどをサーバーサイドで行うならここ
-            if (Array.isArray(preliminaryParse)) {
-                const processedSuggestions = preliminaryParse.map((s: any) => ({ 
-                    title: s.title || "無題の提案", 
-                    description: s.description ? (s.description.length > 150 ? s.description.substring(0, 150) + "..." : s.description) : "説明がありません。"
-                }));
-                suggestionsJsonString = JSON.stringify({ suggestions: processedSuggestions }); // フロントが期待する {suggestions: [...]} の形に戻す
-            } else {
-                 // 配列でない場合、エラーとして扱うか、あるいはそのまま返すか。今回はエラーとして扱う。
-                console.error("Parsed preliminary JSON is not an array as expected by front-end wrapper.");
-                throw new Error("AI response was not a JSON array after attempting to extract from markers.");
-            }
-
-        } catch (parseError: any) {
-            console.error("Failed to parse or process Gemini API response on server-side:", parseError);
-            console.error("Original response text from Gemini was:", responseText);
-            // エラーの場合は、フロントエンドにエラー情報がわかるようなレスポンスを返す
-            return new Response(JSON.stringify({ error: "AIからの応答の処理中にサーバー側でエラーが発生しました。詳細はサーバーログを確認してください。", details: parseError.message }), {
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 500,
-            });
-        }
-
-        return new Response(suggestionsJsonString, { // ★ 整形済みのJSON文字列 (suggestionsプロパティでラップされた) を返す
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        // Geminiからのレスポンスをそのままテキストとして返す
+        return new Response(responseText, {
+            headers: { ...corsHeaders, 'Content-Type': 'text/plain' }, // Content-Type を text/plain に変更
             status: 200,
         });
-    } catch (error: any) { // このcatchは主にDBアクセスやクライアント初期化エラーなど
+    } catch (error: any) {
         console.error("Error in suggest-next-actions function:", error);
-        return new Response(JSON.stringify({ error: error.message || "An unknown error occurred" }), {
+        return new Response(JSON.stringify({ error: error.message || "不明なサーバーエラーが発生しました。" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
         });
