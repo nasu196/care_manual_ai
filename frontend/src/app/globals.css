@@ -144,16 +144,21 @@
   }
 
   .prose :where(ul):not(:where([class~="not-prose"] *)) {
-    @apply list-disc list-inside pl-5 my-4; /* マーカー表示、位置、インデント、マージン */
+    @apply list-disc list-outside pl-5 my-4; /* list-inside を list-outside に変更、pl を調整 */
   }
 
   .prose :where(ol):not(:where([class~="not-prose"] *)) {
-    @apply pl-5 my-4; /* ol は現状の ::before スタイルでマーカーを処理しているため、型指定は一旦保留 */
-    /* 必要であれば @apply list-decimal list-inside; などを追加 */
+    @apply list-decimal list-outside pl-5 my-4; /* list-decimal と list-outside を追加 */
   }
 
   .prose :where(ul > li, ol > li):not(:where([class~="not-prose"] *)) {
-    @apply my-1; /* リストアイテム間のマージン */
+    @apply my-0; /* リストアイテム間のマージンを0に */
+  }
+
+  /* リストアイテム内の段落のマージンを調整 */
+  .prose ul > li > p,
+  .prose ol > li > p {
+    @apply mt-0 mb-0; /* アイテム内の段落の上下マージンを0に */
   }
   
   /* Tailwind Typographyのデフォルトマーカーを使用するため、以下の::beforeスタイルを削除またはコメントアウト */
@@ -178,4 +183,22 @@
   /* 参照元情報のスタイル調整 (もし必要であれば) */
   /* .prose .text-xs.font-semibold { ... } */
   /* .prose ul.list-disc.list-inside.text-xs { ... } */
+
+  .prose h1,
+  .prose .h1,
+  .prose-h1 {
+    @apply text-2xl font-bold;
+  }
+
+  .prose h2,
+  .prose .h2,
+  .prose-h2 {
+    @apply text-xl font-semibold;
+  }
+
+  .prose h3,
+  .prose .h3,
+  .prose-h3 {
+    @apply text-lg font-semibold;
+  }
 }
