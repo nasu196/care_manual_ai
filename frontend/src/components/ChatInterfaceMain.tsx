@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal, NotebookPen } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +15,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useMemoStore } from '@/store/memoStore';
 
 interface Message {
   id: string;
@@ -35,6 +36,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   const [isLoading, setIsLoading] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default');
+  const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -90,6 +92,15 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     }
   };
 
+  const handleMemoMessage = (message: Message) => {
+    const title = `AIの回答 (${new Date().toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`;
+    const content = message.text;
+
+    setNewMemoRequest({ title, content });
+
+    console.log('New memo request set to store:', { title, content });
+  };
+
   useEffect(() => {
     if (scrollAreaRef.current) {
         const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -132,18 +143,29 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                 className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`p-3 rounded-lg ${ 
+                  className={`p-3 rounded-lg ${
                     msg.sender === 'user'
                       ? 'bg-primary text-primary-foreground max-w-[70%]'
-                      : 'bg-muted text-muted-foreground max-w-[95%]'
+                      : 'bg-muted text-muted-foreground max-w-[95%] relative'
                   }`}
                 >
                   {msg.sender === 'user' ? (
                     <p className="whitespace-pre-wrap">{msg.text}</p>
                   ) : (
-                    <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
-                      <ReactMarkdown>{msg.text}</ReactMarkdown>
-                    </div>
+                    <>
+                      <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
+                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute bottom-1 right-1 h-7 w-7 text-gray-500 hover:text-primary"
+                        onClick={() => handleMemoMessage(msg)}
+                        title="この回答をメモする"
+                      >
+                        <NotebookPen size={16} />
+                      </Button>
+                    </>
                   )}
                   {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
                     <div className="mt-2 pt-2 border-t">

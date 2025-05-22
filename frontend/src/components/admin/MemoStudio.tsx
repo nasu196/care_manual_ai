@@ -1,11 +1,14 @@
+'use client';
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button'; // shadcn/uiのButtonをインポート
 import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
-// import { marked } from 'marked'; // markedをインポート (未使用のためコメントアウト)
 import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Flag } from 'lucide-react'; // Save, XCircle, Flagアイコンを追加
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
+import { marked } from 'marked'; // marked をインポート
+import { useMemoStore } from '@/store/memoStore'; // Zustandストアをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
 import MemoTemplateSuggestions from './MemoTemplateSuggestions';
@@ -53,6 +56,27 @@ const MemoStudio = () => {
   // 重要度トグル用のstate
   const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null);
   const [toggleImportantError, setToggleImportantError] = useState<string | null>(null);
+
+  // Zustandストアから状態とアクションを取得
+  const newMemoRequest = useMemoStore((state) => state.newMemoRequest);
+  const clearNewMemoRequest = useMemoStore((state) => state.clearNewMemoRequest);
+
+  useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
+    if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
+      setNewMemoTitle(newMemoRequest.title);
+      try {
+        const htmlContent = marked.parse(newMemoRequest.content) as string;
+        setNewMemoContent(htmlContent);
+      } catch (e) {
+        console.error("Markdownの解析に失敗しました:", e);
+        setNewMemoContent(newMemoRequest.content); // 解析失敗時はプレーンテキストとしてセット
+        setCreateMemoError("メモ内容のMarkdown解析に失敗しました。プレーンテキストとして読み込みます。");
+      }
+      setIsEditingNewMemo(true);
+      clearNewMemoRequest(); // ストアのリクエストをクリア
+    }
+    // isEditingNewMemo と selectedMemoId は依存配列に残し、意図しないタイミングでの実行を防ぐ
+  }, [newMemoRequest, clearNewMemoRequest, isEditingNewMemo, selectedMemoId]); // 依存配列にストアの値を追加
 
   const fetchMemos = useCallback(async () => {
     setIsLoading(true);
