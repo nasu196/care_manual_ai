@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { motion } from 'framer-motion';
 
 const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
 const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
@@ -199,6 +200,16 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     }
   };
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
@@ -252,7 +263,12 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
       {!isLoading && !error && suggestions.length > 0 && (
         <TooltipProvider>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <motion.div
+            className="grid grid-cols-1 md:grid-cols-2 gap-3"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
             {suggestions.map((suggestion, index) => (
               <MemoTemplateSuggestionItem
                 key={suggestion.id}
@@ -262,7 +278,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                 isLastItem={index === suggestions.length - 1}
               />
             ))}
-          </div>
+          </motion.div>
         </TooltipProvider>
       )}
     </div>
