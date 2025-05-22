@@ -11,6 +11,7 @@ const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
 interface Suggestion {
   id: string;
   title: string;
+  description: string;
 }
 
 const MemoTemplateSuggestions = () => {
@@ -46,9 +47,10 @@ const MemoTemplateSuggestions = () => {
         throw invokeError;
       }
 
-      const fetchedSuggestions = (data?.suggestions || []).map((suggestionText: string, index: number) => ({ 
+      const fetchedSuggestions = (data?.suggestions as Array<{ title: string; description: string; }> || []).map((suggestionObj, index) => ({ 
         id: `suggestion-${Date.now()}-${index}`,
-        title: suggestionText
+        title: suggestionObj.title,
+        description: suggestionObj.description
       }));
       
       setSuggestions(fetchedSuggestions);
@@ -138,6 +140,7 @@ const MemoTemplateSuggestions = () => {
             <MemoTemplateSuggestionItem
               key={template.id}
               title={template.title}
+              description={template.description}
             />
           ))}
         </div>
