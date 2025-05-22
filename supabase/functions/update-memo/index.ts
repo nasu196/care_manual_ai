@@ -26,10 +26,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // リクエストメソッドがPUTであるか確認
-    if (req.method !== 'PUT') {
+    // リクエストメソッドがPOSTであるか確認 (PUTからPOSTに変更)
+    if (req.method !== 'POST') {
       return new Response(
-        JSON.stringify({ error: 'Method Not Allowed' }),
+        JSON.stringify({ error: 'Method Not Allowed. Please use POST.' }), // エラーメッセージも調整
         { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -71,22 +71,15 @@ Deno.serve(async (req) => {
         global: { headers: authHeader ? { Authorization: authHeader } : {} },
     })
 
-    // URLからメモのIDを取得
-    const url = new URL(req.url)
-    const pathParts = url.pathname.split('/')
-    const memoId = pathParts[pathParts.length - 1]
+    // URLからメモのIDを取得する代わりに、リクエストボディから取得する
+    // const url = new URL(req.url)
+    // const pathParts = url.pathname.split('/')
+    // const memoIdFromPath = pathParts[pathParts.length - 1] // 変数名変更
 
-    if (!memoId) {
-      return new Response(
-        JSON.stringify({ error: 'Memo ID is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // リクエストボディから更新データを取得
-    let updateData: { title?: string; content?: string } = {};
+    // リクエストボディを先にパース
+    let body;
     try {
-      const buffer = await req.arrayBuffer(); // バイト配列として読み込む
+      const buffer = await req.arrayBuffer();
       
       // ★★★ デバッグログ追加: 受信したバイト列を16進数で表示 ★★★
       let hexString = "";
@@ -97,39 +90,53 @@ Deno.serve(async (req) => {
       console.log("Received raw bytes (hex, first 100 bytes):", hexString.toUpperCase().trim());
       // ★★★ ここまで ★★★
 
-      const decoder = new TextDecoder('utf-8', { fatal: true }); // fatal: true を追加してデコードエラーを厳密に検知
+      const decoder = new TextDecoder('utf-8', { fatal: true });
       let rawBody = "";
       try {
         rawBody = decoder.decode(buffer);   
       } catch (decodeError) {
         console.error("UTF-8 decoding failed:", decodeError);
-        // デコード失敗時のためのフォールバックやエラーレスポンス
         return new Response(
           JSON.stringify({ error: 'Failed to decode request body as UTF-8' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      console.log("Decoded rawBody:", rawBody); // デバッグのためコメント解除
-      const body = JSON.parse(rawBody); // rawBodyが空や不正な場合にエラーになる可能性
-
-      // 更新可能なフィールドを指定 (想定外のフィールドは無視)
-      if (body.title !== undefined) updateData.title = body.title;
-      if (body.content !== undefined) updateData.content = body.content;
-      // created_by は更新しないので含めない
+      console.log("Decoded rawBody:", rawBody);
+      body = JSON.parse(rawBody);
     } catch (e) {
       return new Response(
-        JSON.stringify({ error: 'Invalid JSON in request body' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    if (Object.keys(updateData).length === 0) {
-      return new Response(
-        JSON.stringify({ error: 'No update fields provided (title or content)' }),
+        JSON.stringify({ error: 'Invalid JSON in request body or failed to read body' }), // エラーメッセージ調整
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
     
+    const memoId = body.id; // ボディからIDを取得
+    const titleToUpdate = body.title;
+    const contentToUpdate = body.content;
+
+
+    if (!memoId) {
+      return new Response(
+        JSON.stringify({ error: 'Memo ID is required in the request body' }), // エラーメッセージ変更
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // リクエストボディから更新データを取得
+    let updateData: { title?: string; content?: string } = {};
+    // try { // このtry-catchは上でボディ全体をパースしているので不要かも
+      // const body = await req.json(); // 上でパース済みの body を使用
+
+      // 更新可能なフィールドを指定 (想定外のフィールドは無視)
+      if (titleToUpdate !== undefined) updateData.title = titleToUpdate;
+      if (contentToUpdate !== undefined) updateData.content = contentToUpdate;
+    // } catch (e) {
+    //   return new Response(
+    //     JSON.stringify({ error: 'Invalid JSON in request body' }),
+    //     { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    //   )
+    // }
+
     // データベースのメモを更新
     // .eq('created_by', createdBy) のような条件を追加すれば、作成者のみが更新できるように制限できる
     // 今回は created_by のチェックは省略（誰でも更新可能）
