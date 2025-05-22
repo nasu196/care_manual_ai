@@ -13,6 +13,7 @@ interface Suggestion {
   id: string;
   title: string;
   description: string;
+  source_files?: string[];
 }
 
 // Propsの型定義を追加
@@ -44,7 +45,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
             (cachedItem.suggestions.length > 0 &&
               typeof cachedItem.suggestions[0].id === 'string' &&
               typeof cachedItem.suggestions[0].title === 'string' &&
-              typeof cachedItem.suggestions[0].description === 'string')
+              typeof cachedItem.suggestions[0].description === 'string' &&
+              (cachedItem.suggestions[0].source_files === undefined || 
+               (Array.isArray(cachedItem.suggestions[0].source_files) && 
+                cachedItem.suggestions[0].source_files.every((sf: unknown) => typeof sf === 'string'))))
           ) {
             setSuggestions(cachedItem.suggestions);
             setHasFetchedOnce(true); // Consider if this should be true if loading from cache
@@ -123,7 +127,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         jsonStringToParse = responseText;
       }
       
-      let parsedSuggestions: Array<{ id?: string; title: string; description: string; }> = [];
+      let parsedSuggestions: Array<{ id?: string; title: string; description: string; source_files?: string[] }> = [];
       try {
         const parsedData = JSON.parse(jsonStringToParse);
         if (Array.isArray(parsedData)) {
@@ -133,16 +137,23 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         } else {
           throw new Error('解析されたデータが期待する提案の配列形式ではありません。');
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         console.error("Failed to parse JSON response (client-side):", e);
         console.error("Original string attempted to parse:", jsonStringToParse);
-        throw new Error(`AIからの提案の解析に失敗しました。(${e.message})`);
+        let errorMessage = "AIからの提案の解析中に不明なエラーが発生しました。";
+        if (e instanceof Error) {
+          errorMessage = `AIからの提案の解析に失敗しました。(${e.message})`;
+        } else if (typeof e === 'string') {
+          errorMessage = `AIからの提案の解析に失敗しました。(${e})`;
+        }
+        throw new Error(errorMessage);
       }
 
-      const fetchedSuggestions = parsedSuggestions.map((suggestionObj, index) => ({
+      const fetchedSuggestions: Suggestion[] = parsedSuggestions.map((suggestionObj, index) => ({
         id: suggestionObj.id || `suggestion-${Date.now()}-${index}`,
         title: suggestionObj.title || "無題の提案",
-        description: suggestionObj.description || "説明がありません。"
+        description: suggestionObj.description || "説明がありません。",
+        source_files: suggestionObj.source_files || []
       }));
       
       setSuggestions(fetchedSuggestions);
@@ -245,6 +256,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
               key={template.id}
               title={template.title}
               description={template.description}
+              source_files={template.source_files}
             />
           ))}
         </div>

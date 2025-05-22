@@ -98,13 +98,48 @@ serve(async (req: Request) => {
         // formattedSummaries の生成方法を修正 (リンターエラー対策)
         let summaryStrings: string[] = [];
         for (const item of summariesData) {
-            summaryStrings.push(`[サマリー: ${item.file_name}]\\n${item.summary}`);
+            // 変更: file_name をよりAIが認識しやすい形式でサマリーに含める
+            summaryStrings.push(`ドキュメント名: ${item.file_name}\n内容サマリー:\n${item.summary}`);
         }
-        const formattedSummaries = summaryStrings.join('\\n\\n---\\n\\n');
+        const formattedSummaries = summaryStrings.join('\n\n---\n\n');
 
-        const prompt = `以下のドキュメントサマリー群に基づいて、ユーザーが次にどのような派生資料を作成すると有効か、具体的なアイデアを5つ提案してください。\n提案内容は、**主にテキストコンテンツの生成や編集といった、コーディングや複雑なツール開発を伴わない、生成AIが得意とする範囲内**のものに限定してください。\n\n提案の例：\n- 特定のトピックに関する練習問題集の作成\n- 既存情報を基にした初心者向け解説資料の作成\n- よくある質問とその回答をまとめたFAQリストの作成\n- 特定の作業手順に関するチェックリストの生成\n- 既存の情報を異なる視点や対象者向けに再構成した説明文の作成\n- 要点をまとめたフラッシュカード用コンテンツの作成\n\n各アイデアは、簡潔なタイトルと、それがなぜ有用かの短い説明（100字以内）を含めてください。\n\n【ドキュメントサマリー群】\n${formattedSummaries}\n\n提案は必ず以下のJSON配列形式で出力してください。説明文はmarkdown形式ではなくプレーンテキストにしてください。\n\`\`\`json\n[\n  {\n    \"title\": \"提案タイトル1\",\n    \"description\": \"提案の説明1 (なぜ有用か)\"\n  },\n  {\n    \"title\": \"提案タイトル2\",\n    \"description\": \"提案の説明2 (なぜ有用か)\"\n  },\n  // ...他アイデア\n]\n\`\`\`\n`;
+        const prompt = `以下の複数のドキュメントサマリー（各サマリーには「ドキュメント名: ...」で始まるファイル名が明記されています）を注意深く読み込んでください。
+これらの情報を基に、ユーザーが次にどのような派生資料を作成すると有効か、具体的なアイデアを5つ提案してください。
 
-        console.log("Prompt for Gemini API:\\n ", prompt);
+提案内容は、**主にテキストコンテンツの生成や編集といった、コーディングや複雑なツール開発を伴わない、生成AIが得意とする範囲内**のものに限定してください。
+
+提案の例：
+- 特定のトピックに関する練習問題集の作成
+- 既存情報を基にした初心者向け解説資料の作成
+- よくある質問とその回答をまとめたFAQリストの作成
+- 特定の作業手順に関するチェックリストの生成
+- 既存の情報を異なる視点や対象者向けに再構成した説明文の作成
+- 要点をまとめたフラッシュカード用コンテンツの作成
+
+各アイデアは、簡潔なタイトル、それがなぜ有用かの短い説明（100字以内）、そしてそのアイデアを生成する上で**特に参考になったドキュメント名を1つ以上含む配列**を必ず含めてください。
+
+【ドキュメントサマリー群】
+${formattedSummaries}
+
+提案は必ず以下のJSON配列形式で出力してください。説明文はmarkdown形式ではなくプレーンテキストにしてください。
+\`\`\`json
+[
+  {
+    "title": "提案タイトル1",
+    "description": "提案の説明1 (なぜ有用か)",
+    "source_files": ["参考にしたドキュメント名1.md", "参考にしたドキュメント名2.md"]
+  },
+  {
+    "title": "提案タイトル2",
+    "description": "提案の説明2 (なぜ有用か)",
+    "source_files": ["参考にしたドキュメント名3.md"]
+  },
+  // ...他アイデア（各提案に source_files を含めること）
+]
+\`\`\`
+`;
+
+        console.log("Prompt for Gemini API:\n ", prompt);
 
         const model = genAI.getGenerativeModel({ 
             model: "gemini-2.0-flash",
@@ -125,7 +160,7 @@ serve(async (req: Request) => {
         const result = await model.generateContent(prompt);
         const responseText = result.response.text();
 
-        console.log("Raw response from Gemini API:\\n ", responseText); // 生のレスポンスをログに出力
+        console.log("Raw response from Gemini API:\n ", responseText); // 生のレスポンスをログに出力
 
         // Geminiからのレスポンスをそのままテキストとして返す
         return new Response(responseText, {
