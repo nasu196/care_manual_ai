@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
 // import { marked } from 'marked'; // markedをインポート (未使用のためコメントアウト)
-import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Star } from 'lucide-react'; // Save, XCircle, Starアイコンを追加
+import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Flag } from 'lucide-react'; // Save, XCircle, Flagアイコンを追加
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
@@ -495,7 +495,7 @@ const MemoStudio = () => {
                     >
                       <div className="min-w-0 flex-grow mr-2">
                         <div className="flex items-center">
-                          {memo.is_important && <Star size={14} className="mr-1.5 text-yellow-500 fill-yellow-500" />}
+                          {memo.is_important && <Flag size={14} className="mr-1.5 text-red-500 fill-red-500" />}
                           <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
                         </div>
                         <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full">
@@ -512,12 +512,12 @@ const MemoStudio = () => {
                             handleToggleImportant(memo.id, !memo.is_important);
                           }}
                           disabled={togglingImportantId === memo.id}
-                          className="p-1 h-auto text-gray-500 hover:text-yellow-600"
+                          className="p-1 h-auto text-gray-500 hover:text-red-600"
                         >
                           {togglingImportantId === memo.id ? (
-                            <span className="animate-spin h-4 w-4 border-2 border-yellow-500 border-t-transparent rounded-full"></span>
+                            <span className="animate-spin h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full"></span>
                           ) : (
-                            <Star size={16} className={memo.is_important ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
+                            <Flag size={16} className={memo.is_important ? "text-red-500 fill-red-500" : "text-gray-400"} />
                           )}
                         </Button>
                         <Button
