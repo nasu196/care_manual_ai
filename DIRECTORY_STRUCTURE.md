@@ -30,9 +30,8 @@ This document outlines the main directory structure of the `care_manual_ai` proj
   - `tailwind.config.ts`: Tailwind CSS configuration.
   - `tsconfig.json`: TypeScript configuration for the frontend.
 - **`node_modules/`**: Backend/Root project dependencies (auto-generated).
-- **`src/`**: Contains backend server-side code (Node.js/Express API).
+- **`src/`**: Contains backend API server code (Node.js/Express API).
   - **`api/`**: Source code for the backend API (e.g., `server.js`).
-  - **`scripts/`**: Utility scripts for backend tasks (e.g., `process-manual.js`).
 - **`supabase/`**: Contains Supabase project configuration and Edge Functions.
   - **`.temp/`**: Temporary files for Supabase CLI (auto-generated).
   - **`functions/`**: Supabase Edge Functions.
@@ -46,7 +45,6 @@ This document outlines the main directory structure of the `care_manual_ai` proj
 - **`.cursor/`**: Cursor IDE specific files.
 - **`.git/`**: Git version control system files.
 - **`.gitignore`**: Specifies intentionally untracked files for the entire project.
-- **`.vscode/`**: VS Code editor specific settings.
 - **`development_flow.md`**: Document outlining the development process and phases.
 - **`package-lock.json`**: Exact versions of backend/root dependencies.
 - **`package.json`**: Backend/Root project dependencies and scripts (e.g., starting the API server).
