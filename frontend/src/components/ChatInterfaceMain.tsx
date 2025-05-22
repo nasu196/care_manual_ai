@@ -127,7 +127,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
             <DropdownMenuSeparator />
             <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => setAiVerbosity(value as AiVerbosity)}>
               <DropdownMenuRadioItem value="concise">簡潔に</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="default">デフォルト</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="default">標準的</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="detailed">より丁寧に</DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
