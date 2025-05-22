@@ -3,8 +3,9 @@ import { Button } from '@/components/ui/button'; // shadcn/uiのButtonをイン�
 import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
-import { marked } from 'marked'; // markedをインポート
-import { PlusCircle } from 'lucide-react'; // 新規メモボタン用アイコン
+// import { marked } from 'marked'; // markedをインポート (未使用のためコメントアウト)
+import { PlusCircle, Trash2, AlertTriangle } from 'lucide-react'; // 新規メモボタン用アイコン、削除アイコン、アラートアイコン
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
 import MemoTemplateSuggestions from './MemoTemplateSuggestions';
@@ -31,6 +32,11 @@ const MemoStudio = () => {
   const [createMemoError, setCreateMemoError] = useState<string | null>(null);
 
   const [isEditingNewMemo, setIsEditingNewMemo] = useState(false); // 新規メモ編集モードの状態
+
+  // 削除機能用のstate
+  const [deletingMemoId, setDeletingMemoId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchMemos = useCallback(async () => {
     setIsLoading(true);
@@ -127,6 +133,69 @@ const MemoStudio = () => {
     }
   };
 
+  const handleDeleteMemo = async (memoId: string) => {
+    if (!window.confirm('このメモを本当に削除しますか？')) {
+      return;
+    }
+
+    setDeletingMemoId(memoId);
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData.session) {
+        // ユーザーが認証されていない場合、適切なエラーメッセージを設定
+        throw new Error('ユーザーが認証されていません。再度ログインしてください。');
+      }
+      const accessToken = sessionData.session.access_token;
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL is not configured.');
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/delete-memo/${memoId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+        }
+      });
+
+      if (!response.ok) {
+        let errorDetail = `Failed to delete memo with status: ${response.status}`;
+        try {
+            const errorData = await response.json();
+            errorDetail = errorData.message || errorData.error || JSON.stringify(errorData);
+        } catch (jsonParsingError) {
+            console.error('Failed to parse error response JSON:', jsonParsingError);
+            errorDetail = response.statusText || errorDetail;
+        }
+        throw new Error(errorDetail);
+      }
+
+      setMemos((prevMemos) => prevMemos.filter((memo) => memo.id !== memoId));
+
+    } catch (e) {
+      console.error('Failed to delete memo (コンソールエラー):', e);
+      let errorMessage = 'メモの削除中に予期せぬエラーが発生しました。';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+        console.log('エラーメッセージ (Error instance): ', errorMessage);
+      } else if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') {
+        errorMessage = e.message;
+        console.log('エラーメッセージ (Object with message): ', errorMessage);
+      } else {
+        console.log('エラーメッセージ (Unknown type): ', e);
+      }
+      setDeleteError(errorMessage);
+      console.log('setDeleteError にセットするメッセージ: ', errorMessage);
+    } finally {
+      setIsDeleting(false);
+      setDeletingMemoId(null);
+    }
+  };
+
   const handleCancelNewMemo = () => {
     setNewMemoTitle('');
     setNewMemoContent('');
@@ -135,14 +204,23 @@ const MemoStudio = () => {
   };
 
   // AIの回答（マークダウン）をHTMLに変換してエディタにセットする関数の例 (将来的に使用)
-  const setMemoContentFromMarkdown = (markdown: string) => {
-    // marked.parse() を使用し、結果がstringであることを明示 (v4以降は同期のはず)
-    const html = marked.parse(markdown);
-    setNewMemoContent(html as string); // 型アサーションで対応
-  };
+  // const setMemoContentFromMarkdown = (markdown: string) => {
+  //   // marked.parse() を使用し、結果がstringであることを明示 (v4以降は同期のはず)
+  //   const html = marked.parse(markdown);
+  //   setNewMemoContent(html as string); // 型アサーションで対応
+  // };
 
   return (
     <div className="flex h-full flex-col p-4 space-y-4">
+      {/* ★エラー表示をここに移動 */}
+      {deleteError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>エラーが発生しました</AlertTitle>
+          <AlertDescription>{deleteError}</AlertDescription>
+        </Alert>
+      )}
+
       {/* 上部のタイトルやアクションエリア */}
       <div className="flex justify-between items-center">
         <h2 className="text-lg font-semibold">メモ管理</h2> {/* タイトル例 */}
@@ -212,17 +290,33 @@ const MemoStudio = () => {
                 <ul className="space-y-2 pr-2">
                   {memos.map((memo) => (
                     <li key={memo.id} className="p-3 border rounded-md hover:bg-gray-50 cursor-pointer">
-                      <h4 className="text-sm font-semibold mb-1">{memo.title}</h4>
-                      <div 
-                        className="text-xs text-gray-600 prose dark:prose-invert max-w-none overflow-hidden line-clamp-3" 
-                        dangerouslySetInnerHTML={{ __html: memo.content }} 
-                      />
+                      <div className="flex justify-between items-center">
+                        <div className="flex-grow cursor-pointer" onClick={() => console.log('View memo:', memo.id)}>
+                          <h4 className="text-sm font-semibold mb-1">{memo.title}</h4>
+                          <div 
+                            className="text-xs text-gray-600 prose dark:prose-invert max-w-none overflow-hidden line-clamp-3" 
+                            dangerouslySetInnerHTML={{ __html: memo.content }} 
+                          />
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={() => handleDeleteMemo(memo.id)}
+                          disabled={isDeleting && deletingMemoId === memo.id}
+                          className="ml-2 p-1 h-auto text-red-500 hover:text-red-700"
+                        >
+                          {isDeleting && deletingMemoId === memo.id ? (
+                            <span className="text-xs">削除中...</span>
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
                     </li>
                   ))}
                 </ul>
               </div>
             )}
-            {/* <MemoList /> */} {/* データがmemosステートに入るので、将来的には <MemoList memos={memos} /> のように渡す */}
           </div>
         </>
       )}
