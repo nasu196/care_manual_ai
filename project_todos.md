@@ -22,7 +22,7 @@
 | :----------------------------------------------------------- | :----- | :--- | :------- | :--------------------------------------- |
 | 管理者向けインターフェースデザイン                           | AI/USER |      | 完了     | 基本的な3カラムレイアウト（`AppLayout.tsx`）およびNotebookLM風ヘッダー（`TopHeader.tsx`）の実装完了。チャットUIのスクロール制御、AI回答詳細度設定UI、メッセージ吹き出し幅調整など、関連するUI調整も含む。 |
 | マニュアル管理機能（アップロード、一覧、最新版表示）実装     | AI/USER |      | 進行中   | `SourceManager.tsx` にて基本的なファイル操作UI（アップロード、一覧、削除、名前変更 ※ファイル名はASCIIのみ、**ソース選択状態の永続化**）を実装。日本語ファイル名対応、最新版管理ロジックは未実装。PDF対応。**チャット時の参照ソース選択機能と連携。** |
-| 管理者作成メモ作成・編集・管理機能実装                       | AI/USER |      | 進行中   | リッチテキストエディタ（Tiptap）導入、新規メモ作成UIフロー（NotebookLM風表示切替）、エディタ内の箇条書き（ul, ol）・見出し（h1-h3）スタイル調整完了。                                          |
+| 管理者作成メモ作成・編集・管理機能実装                       | AI/USER |      | 完了 (v1) | リッチテキストエディタ（Tiptap）導入、新規メモ作成UIフロー（NotebookLM風表示切替）、エディタ内の箇条書き（ul, ol）・見出し（h1-h3）スタイル調整完了。**CRUD操作（作成、閲覧、更新、削除）のフロントエンドおよびSupabase Edge Functions連携完了。** |
 | AIへの指示インターフェース実装（練習問題生成など）           |        |      | 未着手   |                                          |
 | 設定画面実装（必要最低限）                                   |        |      | 未着手   |                                          |
 
@@ -64,7 +64,7 @@
 | Supabaseプロジェクトセットアップ                                 |        |      | 完了     | Database, Storage, Edge Functions                              |
 | データベーススキーマ設計（マニュアル、メモ、設定など）             |        |      | 完了     | `manuals`, `manual_chunks`, `memos`, `settings` テーブル作成 |
 | ベクトル検索のためのpgvector拡張機能導入と設定                     |        |      | 完了     | `vector` 拡張機能有効化                                    |
-| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 進行中   | ローカルテスト時、PowerShellのInvoke-WebRequestで日本語JSONを送信する場合は、-Bodyに渡すデータを [System.Text.Encoding]::UTF8.GetBytes() でバイト配列化し、-ContentType 'application/json;charset=utf-8' を指定すること。`process-manual-function` のクラウド環境での動作確認完了。その他メモ関連CRUD Functionはパスルーティング問題なし。 |
+| 各機能向けAPIエンドポイント作成 (Supabase Edge Functions or other) |        |      | 進行中   | ローカルテスト時、PowerShellのInvoke-WebRequestで日本語JSONを送信する場合は、-Bodyに渡すデータを [System.Text.Encoding]::UTF8.GetBytes() でバイト配列化し、-ContentType 'application/json;charset=utf-8' を指定すること。`process-manual-function` のクラウド環境での動作確認完了。その他メモ関連CRUD Functionはパスルーティング問題なし。**update-memo Functionのメソッド不一致およびID取得方法の問題を解決し、正常動作を確認。** |
 
 ## 9. AI関連技術準備
 | タスク名                                                       | 担当者 | 期限 | 進捗状況 | 備考            |
