@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
 const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
@@ -250,16 +251,19 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       )}
 
       {!isLoading && !error && suggestions.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {suggestions.map((template) => (
-            <MemoTemplateSuggestionItem
-              key={template.id}
-              title={template.title}
-              description={template.description}
-              source_files={template.source_files}
-            />
-          ))}
-        </div>
+        <TooltipProvider>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {suggestions.map((suggestion, index) => (
+              <MemoTemplateSuggestionItem
+                key={suggestion.id}
+                title={suggestion.title}
+                description={suggestion.description}
+                source_files={suggestion.source_files}
+                isLastItem={index === suggestions.length - 1}
+              />
+            ))}
+          </div>
+        </TooltipProvider>
       )}
     </div>
   );
