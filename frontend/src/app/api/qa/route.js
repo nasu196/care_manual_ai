@@ -38,7 +38,7 @@ function initializeClientsAndChains() {
   if (!chatModel) {
     chatModel = new ChatGoogleGenerativeAI({
         apiKey: geminiApiKey,
-        model: "gemini-2.5-flash-preview-05-20", // server.jsからモデル名をコピー
+        model: "gemini-2.0-flash", // モデル名を変更
         temperature: 0.4,
     });
   }
@@ -117,6 +117,7 @@ QueryAnalysisAIからの指示書は以下の通りです。これを最優先�
 *   ユーザーが「対象となる経費」について尋ねた場合は、まず「対象となる経費」を具体的に説明し、その後に必要であれば補足情報（対象外の経費など）を加えてください。ユーザーが直接尋ねていない情報から話し始めないでください。
 *   もしQueryAnalysisAIからの指示や「背景情報」だけでは答えられない場合や、質問が「背景情報」の内容と明らかに関連がないと判断される場合は、その旨を正直に、そして明確に伝えてください。
 *   **回答は必ず日本語で、自然で分かりやすい文章で記述してください。**
+*   **ユーザー向けの最終的な回答文には、AIの内部的な処理や、他のAIモジュールの存在（例：QueryAnalysisAI、AIコンサルタント、指示書といった言葉）に言及する記述は一切含めないでください。ユーザーには、あなたが単独で全ての情報を分析し、回答を生成したように自然に振る舞ってください。**
 
 これまでの会話履歴:
 {chat_history}
