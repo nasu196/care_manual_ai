@@ -22,13 +22,26 @@ const MemoTemplateSuggestions = () => {
 
   useEffect(() => {
     try {
-      const cachedSuggestions = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (cachedSuggestions) {
-        setSuggestions(JSON.parse(cachedSuggestions));
-        setHasFetchedOnce(true);
+      const cachedSuggestionsText = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (cachedSuggestionsText) {
+        const parsedSuggestions = JSON.parse(cachedSuggestionsText);
+        if (
+          Array.isArray(parsedSuggestions) &&
+          (parsedSuggestions.length === 0 ||
+            (parsedSuggestions.length > 0 &&
+              typeof parsedSuggestions[0].id === 'string' &&
+              typeof parsedSuggestions[0].title === 'string' &&
+              typeof parsedSuggestions[0].description === 'string'))) {
+          setSuggestions(parsedSuggestions);
+          setHasFetchedOnce(true);
+        } else {
+          console.warn("Cached suggestions are in an old format or invalid. Clearing cache.");
+          localStorage.removeItem(LOCAL_STORAGE_KEY);
+        }
       }
     } catch (e) {
-      console.error("Failed to load suggestions from localStorage", e);
+      console.error("Failed to load or parse suggestions from localStorage", e);
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
     }
   }, []);
 
@@ -47,11 +60,17 @@ const MemoTemplateSuggestions = () => {
         throw invokeError;
       }
 
-      const fetchedSuggestions = (data?.suggestions as Array<{ title: string; description: string; }> || []).map((suggestionObj, index) => ({ 
-        id: `suggestion-${Date.now()}-${index}`,
-        title: suggestionObj.title,
-        description: suggestionObj.description
-      }));
+      if (data && data.error) {
+        console.error("Server-side error from suggest-next-actions:", data.error, data.details);
+        throw new Error(data.details ? `${data.error} (${data.details})` : data.error);
+      }
+
+      const fetchedSuggestions = (data?.suggestions as Array<{ id?: string; title: string; description: string; }> || [])
+        .map((suggestionObj, index) => ({
+          id: suggestionObj.id || `suggestion-${Date.now()}-${index}`,
+          title: suggestionObj.title,
+          description: suggestionObj.description
+        }));
       
       setSuggestions(fetchedSuggestions);
 

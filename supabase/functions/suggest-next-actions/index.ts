@@ -113,30 +113,49 @@ serve(async (req: Request) => {
 
         console.log("Gemini API response text:\\n ", responseText);
 
-        let suggestions: Suggestion[] = [];
+        let suggestionsJsonString = responseText; // デフォルトはそのまま
         try {
-            // JSONマーカーの正規表現を修正
-            const jsonMatch = responseText.match(/```json\\n([\\s\\S]*?)\\n```/);
+            // レスポンスからJSON部分を抽出 (```json ... ``` の中身)
+            const jsonMatch = responseText.match(/```json\\s*([\\s\\S]*?)\\s*```/);
             if (jsonMatch && jsonMatch[1]) {
-                suggestions = JSON.parse(jsonMatch[1]);
+                suggestionsJsonString = jsonMatch[1]; // 抽出したJSON文字列を使用
+                console.log("Extracted JSON string from markers:\\n", suggestionsJsonString);
             } else {
-                console.warn("JSON markers not found in response, attempting direct parse.");
-                suggestions = JSON.parse(responseText);
+                console.warn("JSON markers (```json) not found in Gemini response, assuming raw JSON or plain text.");
+                // マーカーがない場合は、responseText がそのままJSON文字列であると期待する (あるいはエラー処理)
             }
-             // descriptionの長さを制限する (万が一AIが指示を守らなかった場合のため)
-            suggestions = suggestions.map(s => ({ ...s, description: s.description.length > 150 ? s.description.substring(0, 150) + "..." : s.description }));
+            
+            // ここで一度JSONとしてパースできるか試す（バリデーション目的）
+            const preliminaryParse = JSON.parse(suggestionsJsonString);
+            console.log("Preliminary parse successful before sending to client.");
+            // もし description のトリミングなどをサーバーサイドで行うならここ
+            if (Array.isArray(preliminaryParse)) {
+                const processedSuggestions = preliminaryParse.map((s: any) => ({ 
+                    title: s.title || "無題の提案", 
+                    description: s.description ? (s.description.length > 150 ? s.description.substring(0, 150) + "..." : s.description) : "説明がありません。"
+                }));
+                suggestionsJsonString = JSON.stringify({ suggestions: processedSuggestions }); // フロントが期待する {suggestions: [...]} の形に戻す
+            } else {
+                 // 配列でない場合、エラーとして扱うか、あるいはそのまま返すか。今回はエラーとして扱う。
+                console.error("Parsed preliminary JSON is not an array as expected by front-end wrapper.");
+                throw new Error("AI response was not a JSON array after attempting to extract from markers.");
+            }
+
         } catch (parseError: any) {
-            console.error("Failed to parse Gemini API response as JSON:", parseError);
-            console.error("Original response text was:", responseText);
-            // パース失敗時は固定のメッセージか、エラーを示す提案を返すことも検討
-            suggestions = [{ title: "提案取得エラー", description: "AIからの提案の解析に失敗しました。" }];
+            console.error("Failed to parse or process Gemini API response on server-side:", parseError);
+            console.error("Original response text from Gemini was:", responseText);
+            // エラーの場合は、フロントエンドにエラー情報がわかるようなレスポンスを返す
+            return new Response(JSON.stringify({ error: "AIからの応答の処理中にサーバー側でエラーが発生しました。詳細はサーバーログを確認してください。", details: parseError.message }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 500,
+            });
         }
 
-        return new Response(JSON.stringify({ suggestions }), {
+        return new Response(suggestionsJsonString, { // ★ 整形済みのJSON文字列 (suggestionsプロパティでラップされた) を返す
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200,
         });
-    } catch (error: any) {
+    } catch (error: any) { // このcatchは主にDBアクセスやクライアント初期化エラーなど
         console.error("Error in suggest-next-actions function:", error);
         return new Response(JSON.stringify({ error: error.message || "An unknown error occurred" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
