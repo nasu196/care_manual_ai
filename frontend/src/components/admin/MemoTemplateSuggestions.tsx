@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import { Loader2, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
@@ -9,6 +9,15 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from 'framer-motion';
 import { marked } from 'marked';
 import { useMemoStore } from '@/store/memoStore';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 // AIが生成するメモのソース情報の型 (エクスポートする)
 export interface AIGeneratedMemoSource {
@@ -18,6 +27,9 @@ export interface AIGeneratedMemoSource {
   similarity: number;
   text_snippet: string;
 }
+
+// ChatInterfaceMain.tsx から AiVerbosity 型をコピー
+export type AiVerbosity = 'concise' | 'default' | 'detailed';
 
 const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
 const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
@@ -46,6 +58,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const [selectedIdeaForModal, setSelectedIdeaForModal] = useState<Suggestion | null>(null);
   const [isGeneratingMemo, setIsGeneratingMemo] = useState(false); // メモ生成API呼び出し中のローディング
   const [generateMemoError, setGenerateMemoError] = useState<string | null>(null); // メモ生成時のエラー
+  const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default'); // 詳細度のためのstateを追加
 
   const triggerMemoListRefresh = useMemoStore((state) => state.triggerMemoListRefresh);
 
@@ -271,6 +284,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         body: JSON.stringify({
           crafted_prompt: generatedPrompt,
           source_filenames: selectedIdeaForModal.source_files || [],
+          verbosity: aiVerbosity,
         }),
       });
       if (!memoResponse.ok) {
@@ -440,6 +454,27 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                   参照ファイル: {selectedIdeaForModal.source_files.join(', ')}
                 </p>
               )}
+              {/* 詳細度選択ドロップダウンを追加 */}
+              <div className="mb-4">
+                <label htmlFor="memo-verbosity" className="block text-sm font-medium text-gray-700 mb-1">詳細度:</label>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" id="memo-verbosity" className="w-full justify-between">
+                      {aiVerbosity === 'concise' ? '簡潔に' : aiVerbosity === 'detailed' ? 'より丁寧に' : '標準的'}
+                      <SlidersHorizontal className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-56">
+                    <DropdownMenuLabel>回答の詳細度</DropdownMenuLabel>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => setAiVerbosity(value as AiVerbosity)}>
+                      <DropdownMenuRadioItem value="concise">簡潔に</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="default">標準的</DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="detailed">より丁寧に</DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
               {generateMemoError && (
                   <div className="mb-3 p-2 bg-red-100 text-red-700 rounded-md text-sm">
                       <p>エラー: {generateMemoError}</p>

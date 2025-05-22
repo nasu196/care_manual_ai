@@ -50,13 +50,16 @@ function initializeClientsAndChains() {
     });
 
     const memoGenerationPromptTemplateString = `
-あなたは、提供された「参照情報」と「作成指示」に基づいて、高品質で実用的な「成果物メモ」を生成する、高度な執筆AIアシスタントです。
+あなたは、提供された「参照情報」と「作成指示」、「期待される詳細度」に基づいて、高品質で実用的な「成果物メモ」を生成する、高度な執筆AIアシスタントです。
 
-以下の「作成指示」に厳密に従ってください。
+以下の「作成指示」と「期待される詳細度」に厳密に従ってください。
 そして、「参照情報」を最大限に活用し、具体的で有用な情報を含んだメモを作成してください。
 
 作成指示:
 {crafted_instruction}
+
+期待される詳細度:
+{verbosity_instruction}
 
 これまでの会話履歴:
 {memo_history}
@@ -84,7 +87,7 @@ export async function POST(request) {
   try {
     initializeClientsAndChains();
 
-    const { crafted_prompt: craftedPrompt, source_filenames: sourceFilenames } = await request.json();
+    const { crafted_prompt: craftedPrompt, source_filenames: sourceFilenames, verbosity } = await request.json();
 
     if (!craftedPrompt || typeof craftedPrompt !== 'string' || craftedPrompt.trim() === '') {
       return NextResponse.json({ error: 'メモ作成指示 (crafted_prompt) が必要です。' }, { status: 400 });
@@ -141,10 +144,19 @@ export async function POST(request) {
 
     // --- メモ生成 ---
     console.log("[MemoGen LLM] LLMにメモ生成をリクエスト中...");
+
+    let verbosityInstruction = "標準的な詳細度で、要点を押さえつつ具体例も適度に含めて記述してください。";
+    if (verbosity === 'concise') {
+      verbosityInstruction = "簡潔に、最も重要なポイントのみを記述してください。箇条書きなどを活用し、冗長な説明は避けてください。";
+    } else if (verbosity === 'detailed') {
+      verbosityInstruction = "可能な限り詳細に、背景情報、多様な具体例、考えられる影響、関連情報などを網羅的に記述してください。必要であれば複数のセクションに分けて構成してください。";
+    }
+
     const llmResponse = await memoGenerationChain.invoke({
         user_input: craftedPrompt, // BufferWindowMemory の inputKey に合わせる
         crafted_instruction: craftedPrompt,
         context: contextForLLM,
+        verbosity_instruction: verbosityInstruction,
     });
     
     const generatedMemo = llmResponse.generated_memo; 
