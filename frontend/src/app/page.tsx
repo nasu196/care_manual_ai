@@ -4,8 +4,7 @@ import { useState, useEffect } from 'react'; // ★ useEffect をインポート
 import AppLayout from '@/components/layout/AppLayout';
 import ChatInterfaceMain from '@/components/ChatInterfaceMain'; // 作成したコンポーネントをインポート
 import SourceManager from '@/components/features/SourceManager'; // ★ SourceManager をインポート
-// import SourcePanel from '@/components/placeholders/SourcePanel'; // 必要に応じて
-// import MemoPanel from '@/components/placeholders/MemoPanel';   // 必要に応じて
+import MemoStudio from '@/components/admin/MemoStudio'; // ★ MemoStudio をインポート
 
 const LOCAL_STORAGE_KEY_SELECTED_SOURCES = 'careManualAi_selectedSourceNames'; // ★ localStorageのキー
 
@@ -51,7 +50,9 @@ export default function HomePage() { // 関数名を HomePage に変更 (また�
         />
       }
       chatSlot={<ChatInterfaceMain selectedSourceNames={selectedSourceNames} />} // ★ ChatInterfaceMain に選択ソースを渡す
-      // memoSlot={<MemoPanel />}    // 右パネルに何か表示する場合はコメント解除
+      memoSlot={ // ★ memoSlot に MemoStudio を配置し、selectedSourceNames を渡す
+        <MemoStudio selectedSourceNames={selectedSourceNames} />
+      } 
     />
   );
 }

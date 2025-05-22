@@ -12,7 +12,6 @@ import { useMemoStore } from '@/store/memoStore'; // Zustandストアをイン�
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
 import MemoTemplateSuggestions from './MemoTemplateSuggestions';
-// import MemoList from './MemoList'; // 一旦コメントアウト
 
 // メモの型定義 (仮。実際のEdge Functionの返り値に合わせる)
 interface Memo {
@@ -26,7 +25,12 @@ interface Memo {
   // 他に必要なフィールドがあれば追加
 }
 
-const MemoStudio = () => {
+// Propsの型定義を追加
+interface MemoStudioProps {
+  selectedSourceNames: string[];
+}
+
+const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const [memos, setMemos] = useState<Memo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
@@ -502,7 +506,7 @@ const MemoStudio = () => {
             {/* <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
             </div> */}
-            <MemoTemplateSuggestions />
+            <MemoTemplateSuggestions selectedSourceNames={selectedSourceNames} />
             <div>
               <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
               {isLoading && <p>メモを読み込み中...</p>}
