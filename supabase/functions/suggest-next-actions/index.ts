@@ -52,12 +52,33 @@ serve(async (req: Request) => {
     }
 
     try {
-        console.log("Fetching summaries from 'manuals' table...");
-        const { data: summariesData, error: fetchError } = await supabase
+        // リクエストボディから selectedFileNames を取得
+        const body = await req.json();
+        const selectedFileNames = body?.selectedFileNames as string[] | undefined;
+
+        console.log("Received selectedFileNames:", selectedFileNames);
+
+        // selectedFileNames が指定されていない、または空の場合は、AI処理を行わず空の提案を返す
+        if (!selectedFileNames || selectedFileNames.length === 0) {
+            console.log("No specific files selected, or selectedFileNames is empty. Returning empty suggestions.");
+            // フロントエンドは ```json ... ``` マーカーで囲まれたテキストを期待するので、それに合わせる
+            return new Response("```json\n[]\n```", {
+                headers: { ...corsHeaders, 'Content-Type': 'text/plain' }, // text/plainで返す
+                status: 200,
+            });
+        }
+
+        console.log("Fetching summaries for selected files from 'manuals' table...");
+        let query = supabase
             .from('manuals')
             .select('file_name, summary')
             .not('summary', 'is', null)
-            .filter('summary', 'not.eq', ''); // 空文字列も除外
+            .filter('summary', 'not.eq', '');
+        
+        // selectedFileNames があれば、それでフィルタリング
+        query = query.in('file_name', selectedFileNames);
+        
+        const { data: summariesData, error: fetchError } = await query;
 
         if (fetchError) {
             console.error("Error fetching summaries:", fetchError);

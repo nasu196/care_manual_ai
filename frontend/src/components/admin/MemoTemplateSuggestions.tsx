@@ -7,6 +7,7 @@ import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
 
 const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
+const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
 
 interface Suggestion {
   id: string;
@@ -14,28 +15,46 @@ interface Suggestion {
   description: string;
 }
 
-const MemoTemplateSuggestions = () => {
+// Propsの型定義を追加
+interface MemoTemplateSuggestionsProps {
+  selectedSourceNames: string[];
+}
+
+const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [hasFetchedOnce, setHasFetchedOnce] = useState<boolean>(false);
+  const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   useEffect(() => {
     try {
-      const cachedSuggestionsText = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (cachedSuggestionsText) {
-        const parsedSuggestions = JSON.parse(cachedSuggestionsText);
+      const cachedItemText = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (cachedItemText) {
+        const cachedItem = JSON.parse(cachedItemText);
         if (
-          Array.isArray(parsedSuggestions) &&
-          (parsedSuggestions.length === 0 ||
-            (parsedSuggestions.length > 0 &&
-              typeof parsedSuggestions[0].id === 'string' &&
-              typeof parsedSuggestions[0].title === 'string' &&
-              typeof parsedSuggestions[0].description === 'string'))) {
-          setSuggestions(parsedSuggestions);
-          setHasFetchedOnce(true);
+          cachedItem &&
+          typeof cachedItem.timestamp === 'number' &&
+          Array.isArray(cachedItem.suggestions) &&
+          (Date.now() - cachedItem.timestamp < CACHE_EXPIRATION_MS)
+        ) {
+          // Validate structure of cached suggestions
+          if (
+            cachedItem.suggestions.length === 0 ||
+            (cachedItem.suggestions.length > 0 &&
+              typeof cachedItem.suggestions[0].id === 'string' &&
+              typeof cachedItem.suggestions[0].title === 'string' &&
+              typeof cachedItem.suggestions[0].description === 'string')
+          ) {
+            setSuggestions(cachedItem.suggestions);
+            setHasFetchedOnce(true); // Consider if this should be true if loading from cache
+            console.log("Loaded suggestions from valid cache.");
+          } else {
+            console.warn("Cached suggestions array has invalid structure. Clearing cache.");
+            localStorage.removeItem(LOCAL_STORAGE_KEY);
+          }
         } else {
-          console.warn("Cached suggestions are in an old format or invalid. Clearing cache.");
+          console.warn("Cached suggestions are expired, not in the new format, or invalid. Clearing cache.");
           localStorage.removeItem(LOCAL_STORAGE_KEY);
         }
       }
@@ -50,10 +69,22 @@ const MemoTemplateSuggestions = () => {
     setError(null);
     setHasFetchedOnce(true);
 
+    if (!selectedSourceNames || selectedSourceNames.length === 0) {
+      setMessage({ type: 'info', text: '提案を生成するには、まずソースを選択してください。' });
+      setSuggestions([]);
+      setIsLoading(false);
+      // キャッシュはクリアしない（選択なしの状態とキャッシュされた全件提案は別物として扱う）
+      // 必要であれば、ここで localStorage.removeItem(LOCAL_STORAGE_KEY) を呼ぶことも検討
+      return;
+    }
+
     try {
       const { data: responseText, error: invokeError } = await supabase.functions.invoke<string>(
         'suggest-next-actions',
-        { method: 'POST' }
+        {
+          method: 'POST',
+          body: { selectedFileNames: selectedSourceNames } // 選択されたファイル名を渡す
+        }
       );
 
       if (invokeError) {
@@ -117,7 +148,12 @@ const MemoTemplateSuggestions = () => {
       setSuggestions(fetchedSuggestions);
 
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(fetchedSuggestions));
+        const itemToCache = {
+          suggestions: fetchedSuggestions,
+          timestamp: Date.now()
+        };
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(itemToCache));
+        console.log("Saved suggestions to cache with timestamp.");
       } catch (e) {
         console.error("Failed to save suggestions to localStorage", e);
       }
@@ -176,7 +212,14 @@ const MemoTemplateSuggestions = () => {
         </div>
       )}
 
-      {!isLoading && !error && !hasFetchedOnce && suggestions.length === 0 && (
+      {/* 情報メッセージ表示の追加 */}
+      {!isLoading && !error && message && (
+        <div className="text-blue-700 bg-blue-100 border border-blue-400 rounded p-3 text-sm">
+          情報: {message.text}
+        </div>
+      )}
+
+      {!isLoading && !error && !hasFetchedOnce && suggestions.length === 0 && !message && (
         <div className="text-center text-gray-500 py-4 flex flex-col items-center">
           <Image 
             src="/thinking_animal.png"
@@ -189,7 +232,7 @@ const MemoTemplateSuggestions = () => {
         </div>
       )}
 
-      {!isLoading && !error && hasFetchedOnce && suggestions.length === 0 && (
+      {!isLoading && !error && hasFetchedOnce && suggestions.length === 0 && !message && (
          <div className="text-center text-gray-500 py-4">
           <p>適切な提案が見つかりませんでした。</p>
         </div>

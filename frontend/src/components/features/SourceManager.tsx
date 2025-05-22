@@ -42,24 +42,22 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
   const fetchUploadedFiles = async () => {
     setLoadingFiles(true);
-    console.log('[fetchUploadedFiles] Fetching file list...');
+    console.log('[fetchUploadedFiles] Fetching file list from manuals TABLE...');
     try {
-      const { data, error } = await supabase.storage
+      const { data, error } = await supabase
         .from('manuals')
-        .list('', { 
-          limit: 100,
-          offset: 0,
-          sortBy: { column: 'name', order: 'asc' },
-        });
-      console.log('[fetchUploadedFiles] list() returned. Error:', error, 'Raw data:', data);
+        .select('file_name')
+        .order('file_name', { ascending: true });
+
+      console.log('[fetchUploadedFiles] select() from manuals table returned. Error:', error, 'Raw data:', data);
 
       if (error) {
-        console.error('Error fetching uploaded files from root:', error);
+        console.error('Error fetching file list from manuals table:', error);
         setMessage({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
         setSourceFiles([]);
       } else {
-        const files = data?.filter(item => item.id !== null).map(item => ({ name: item.name, id: item.name })) || [];
-        console.log('[fetchUploadedFiles] Mapped files for UI:', files);
+        const files = data?.map(item => ({ name: item.file_name, id: item.file_name })) || [];
+        console.log('[fetchUploadedFiles] Mapped files for UI from manuals table:', files);
         setSourceFiles(files);
       }
     } catch (err) {
@@ -180,6 +178,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         if (!selectedSourceNames.includes(file.name)) {
           onSelectionChange([...selectedSourceNames, file.name]);
         }
+        await fetchUploadedFiles(); // ★ Edge Function 成功後に再度ファイルリストを読み込む
 
       } catch (funcError: unknown) {
         console.error('Error calling Edge Function:', funcError);
@@ -240,19 +239,48 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     if (!window.confirm(`ファイル「${fileName}」を本当に削除しますか？`)) {
       return;
     }
-    setUploading(true);
+    setUploading(true); // Consider renaming this state if it's used for more than just uploads
+    setMessage({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
-      const { error } = await supabase.storage.from('manuals').remove([fileName]);
-      if (error) {
-        console.error('Delete error:', error);
-        setMessage({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${error.message}` });
-      } else {
-        await fetchUploadedFiles();
-        // setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // ★ onSelectionChange を呼び出すように変更
-        onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
-        setMessage({ type: 'success', text: `ファイル「${fileName}」を削除しました。` });
+      // Step 1: Delete from Storage
+      const { error: storageError } = await supabase.storage.from('manuals').remove([fileName]);
+
+      if (storageError) {
+        console.error('Storage delete error:', storageError);
+        setMessage({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${storageError.message}` });
+        setUploading(false);
+        return;
       }
+
+      console.log(`File「${fileName}」deleted from storage.`);
+
+      // Step 2: Delete from manuals table
+      const { error: tableError } = await supabase
+        .from('manuals')
+        .delete()
+        .eq('file_name', fileName);
+
+      if (tableError) {
+        console.error('Table delete error:', tableError);
+        // Storageからは削除成功したがテーブルからは失敗した場合のリカバリは難しい。
+        // ユーザーにはエラーを通知し、手動での確認を促すか、あるいはより複雑な補償トランザクションを検討する必要がある。
+        // ここでは、エラーメッセージに両方の状況を含めることを検討する。
+        setMessage({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
+        // この場合でもリストは再読み込みして、テーブルの現状を反映する
+        await fetchUploadedFiles();
+        setUploading(false);
+        return;
+      }
+      
+      console.log(`Record for「${fileName}」deleted from manuals table.`);
+
+      // Step 3: Fetch updated list and update UI
+      await fetchUploadedFiles();
+      onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
+      setMessage({ type: 'success', text: `ファイル「${fileName}」を完全に削除しました。` });
+
     } catch (err: unknown) {
+      console.error('Generic delete error:', err);
       let deleteErrorMessage = 'ファイル削除中に予期せぬエラーが発生しました。';
       if (err instanceof Error) {
         deleteErrorMessage = err.message;
