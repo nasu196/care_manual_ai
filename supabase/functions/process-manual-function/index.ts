@@ -19,6 +19,7 @@ import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import "npm:dotenv/config";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai"; // ★ 追加
 
 // Supabaseクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
@@ -44,6 +45,11 @@ if (geminiApiKey) {
         model: "text-embedding-004",
     });
 }
+
+let genAI: GoogleGenerativeAI; // ★ 追加
+if (geminiApiKey) { // ★ 追加
+    genAI = new GoogleGenerativeAI(geminiApiKey); // ★ 追加
+} // ★ 追加
 
 const BUCKET_NAME = 'manuals';
 const TMP_DIR_BASE = "/tmp";
@@ -142,14 +148,78 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
   }
 }
 
+// ★ サマリー生成関数を追加
+async function generateSummary(text: string, generativeAiClient: GoogleGenerativeAI): Promise<string | null> {
+  if (!generativeAiClient) {
+    console.warn("Gemini API client not initialized. Skipping summary generation.");
+    return null;
+  }
+  if (!text || text.trim() === "") {
+    console.log("Input text for summary is empty. Skipping summary generation.");
+    return null;
+  }
+
+  // Gemini APIの呼び出しにおける安全設定
+  // TODO: 必要に応じて、これらの設定を調整してください。
+  // 現在はすべてのカテゴリで有害なコンテンツをブロックするように設定されています。
+  const safetySettings = [
+    {
+      category: HarmCategory.HARM_CATEGORY_HARASSMENT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+    {
+      category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+      threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+    },
+  ];
+
+  // 使用するモデルを指定します。'gemini-pro' はテキスト生成に適しています。
+  // 'gemini-1.5-flash-latest' も高速で安価な選択肢です。
+  const model = generativeAiClient.getGenerativeModel({ 
+    model: "gemini-2.0-flash",
+    safetySettings,
+  });
+
+  // プロンプトテンプレートを定義します。
+  // TODO: より高度なプロンプトエンジニアリングを検討してください。
+  const prompt = `以下のドキュメント内容を日本語で200字から400字程度で簡潔に要約してください。専門用語は避け、平易な言葉で説明してください。箇条書きではなく、段落形式で記述してください。\n\n---\n${text}\n---\n要約:`;
+
+  try {
+    console.log("Gemini API を呼び出してサマリー生成を開始...");
+    // テキスト生成リクエストを送信します。
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    const summary = response.text();
+    console.log("サマリー生成成功。");
+    return summary;
+  } catch (error: any) {
+    console.error("Gemini API を使用したサマリー生成中にエラーが発生しました:", error);
+    // エラーレスポンスに詳細が含まれている場合があるため、ログに出力
+    if (error && error.response && error.response.promptFeedback) {
+        console.error("Prompt Feedback:", error.response.promptFeedback);
+    }
+    return null; // エラー時はnullを返す
+  }
+}
+
 async function processAndStoreDocuments(
     processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, any> }>, tmpFilePath: string } | null, 
     sourceFileName: string, 
     supabaseClient: SupabaseClient,
-    embeddingsClient: GoogleGenerativeAIEmbeddings
+    embeddingsClient: GoogleGenerativeAIEmbeddings,
+    generativeAiClient: GoogleGenerativeAI // ★ 引数追加
 ) {
   if (!supabaseClient) throw new Error("Supabase client not initialized");
   if (!embeddingsClient) throw new Error("Embeddings client not initialized");
+  // generativeAiClient のチェックはサマリー生成関数内で行う
 
   if (!processedFile || !processedFile.docs || processedFile.docs.length === 0) {
     console.log("解析されたドキュメントがないため、処理をスキップします。");
@@ -171,9 +241,35 @@ async function processAndStoreDocuments(
       throw selectError;
     }
 
+    let summaryText: string | null = null;
+    if (parsedDocs.length > 0 && parsedDocs[0].pageContent) {
+        summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient); // ★ サマリー生成
+    } else {
+        console.log("ドキュメントのテキストコンテンツが見つからないため、サマリー生成をスキップします。");
+    }
+
     if (existingManual) {
       manualId = existingManual.id;
       console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
+      // 既存マニュアルの場合もサマリーを更新する
+      const { error: updateError } = await supabaseClient
+        .from('manuals')
+        .update({ 
+            summary: summaryText,
+            // 必要であれば他のメタデータも更新
+            metadata: { 
+                totalPages: parsedDocs[0]?.metadata?.totalPages || (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length),
+                sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown',
+                lastProcessed: new Date().toISOString() 
+            },
+         })
+        .eq('id', manualId);
+      if (updateError) {
+        console.error(`既存マニュアルのサマリー更新中にエラー: ID=${manualId}`, updateError);
+        // エラーが発生しても処理を続行する（サマリーが更新されないだけ）
+      } else {
+        console.log(`既存マニュアルのサマリーを更新しました。ID: ${manualId}`);
+      }
     } else {
       const totalPages = parsedDocs[0]?.metadata?.totalPages ||
                          (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length);
@@ -182,6 +278,7 @@ async function processAndStoreDocuments(
         .insert({
           file_name: sourceFileName,
           storage_path: `${BUCKET_NAME}/${sourceFileName}`,
+          summary: summaryText,
           metadata: { 
             totalPages: totalPages,
             sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown'
@@ -283,12 +380,11 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     return new Response(null, { status: 204, headers: corsHeaders });
   }
   
-  // POSTリクエストとパスのチェックを修正 (クラウド環境のパスを期待)
-  if (req.method !== "POST" || requestPathname !== "/process-manual-function") {
-    console.log(`Invalid request: Method=${req.method}, Pathname=${requestPathname}. Expected POST to /process-manual-function. Responding 404.`);
-    return new Response(JSON.stringify({ error: "Not Found" }), { 
-      status: 404, 
-      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+  if (req.method !== "POST") { // POSTメソッドのみ許可
+    console.log(`Invalid request method: ${req.method}. Expected POST. Responding 405.`);
+    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+      status: 405,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
   }
 
@@ -297,60 +393,67 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
   try {
     if (!supabase) {
-        throw new Error("Supabase client is not initialized. Check SUPABASE_URL and SUPABASE_ANON_KEY.");
+        throw new Error("Supabase client is not initialized due to missing environment variables.");
     }
     if (!embeddings) {
-        throw new Error("Embeddings client is not initialized. Check GEMINI_API_KEY.");
+        throw new Error("Embeddings client is not initialized due to missing GEMINI_API_KEY.");
+    }
+    if (!genAI) { 
+        console.warn("GenerativeAI client is not initialized due to missing GEMINI_API_KEY. Summary generation will be skipped.");
     }
 
+    console.log(`\nリクエストボディの解析を開始: ${new Date().toISOString()}`);
     const body = await req.json();
     const { fileName } = body;
-    receivedFileName = fileName; // ファイル名を変数に保存
+    receivedFileName = fileName; // ★ fileName を receivedFileName に保存
 
     if (!receivedFileName || typeof receivedFileName !== 'string') {
-      return new Response(JSON.stringify({ error: 'fileName (string) is required in the request body' }), { 
-        status: 400, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      console.error("fileName (string) is required in the request body.");
+      return new Response(JSON.stringify({ error: 'fileName (string) is required in the request body' }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    console.log(`Function called for fileName: ${receivedFileName}`);
+    console.log(`処理対象ファイル: ${receivedFileName}`);
 
     const processedFile = await downloadAndProcessFile(receivedFileName, supabase);
-    if (processedFile && processedFile.tmpFilePath) {
+    
+    if (processedFile && processedFile.tmpFilePath) { // ★ tmpFilePathToDelete を設定
         tmpFilePathToDelete = processedFile.tmpFilePath;
     }
-    
-    if (processedFile) {
-      console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
-      const success = await processAndStoreDocuments(processedFile, receivedFileName, supabase, embeddings);
-      if (success) {
-        console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
-        return new Response(JSON.stringify({ message: `Successfully processed ${receivedFileName}` }), { 
-          status: 200, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+
+    if (!processedFile) {
+        console.error(`File processing failed or unsupported file type for: ${receivedFileName}`);
+        return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
+            status: 500, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      } else {
-        console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${receivedFileName} ---`);
-        // このケースでもロールバックを試みる (下のcatchブロックで処理)
-        throw new Error(`Failed to process ${receivedFileName} during storage/embedding. Triggering rollback if applicable.`);
-      }
-    } else {
-      console.error(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 失敗: ${receivedFileName} ---`);
-      // このケースでもロールバックを試みる (下のcatchブロックで処理)
-      throw new Error(`Failed to download or parse ${receivedFileName}. Triggering rollback if applicable.`);
     }
-  } catch (error: unknown) {
+    
+    console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
+    const success = await processAndStoreDocuments(processedFile, receivedFileName, supabase, embeddings, genAI);
+
+    if (success) {
+      console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
+      return new Response(JSON.stringify({ message: `Successfully processed ${receivedFileName}` }), { 
+        status: 200, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
+    } else {
+      console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${receivedFileName} ---`);
+      throw new Error(`Failed to process ${receivedFileName} during storage/embedding steps. Triggering rollback if applicable.`);
+    }
+  } catch (error: any) { // ★ unknown から any へ変更
     console.error(`Error in function handler for file: ${receivedFileName || 'Unknown file'}:`, error);
     
-    // ロールバック処理: Storageからファイルを削除
+    // ロールバック処理: Storageからファイルを削除 (エラー発生時)
     if (receivedFileName && supabase) {
-      console.warn(`処理中にエラーが発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
+      console.warn(`処理中にエラー(${error.message})が発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
       try {
         const { error: deleteError } = await supabase.storage
           .from(BUCKET_NAME)
-          .remove([receivedFileName]); // ファイル名の配列を渡す
+          .remove([receivedFileName]); 
         if (deleteError) {
-          // removeはファイルが存在しない場合もエラーを返すことがあるので、エラー内容を確認
           if (deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
             console.log(`Storageにファイル ${receivedFileName} が見つからなかったため、削除はスキップされました。`);
           } else {
@@ -365,30 +468,30 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     }
 
     const message = error instanceof Error ? error.message : "Internal server error during file processing.";
-    return new Response(JSON.stringify({ error: message }), { 
+    return new Response(JSON.stringify({ error: message, detail: error.toString() }), { // error.toString() を追加
       status: 500, 
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
   } finally {
     if (tmpFilePathToDelete) {
         try {
+            console.log(`\nFinallyブロック: 一時ファイル ${tmpFilePathToDelete} のクリーンアップを試みます...`);
             await fs.unlink(tmpFilePathToDelete);
-            console.log(`\n一時ファイルをクリーンアップしました: ${tmpFilePathToDelete}`);
-        } catch (e: unknown) {
-            const fileError = e as { code?: string }; 
-            if (fileError.code !== 'ENOENT') { 
-                 console.warn(`一時ファイルの削除中にエラーが発生しました (無視): ${tmpFilePathToDelete}`, e);
+            console.log(`一時ファイルをクリーンアップしました: ${tmpFilePathToDelete}`);
+        } catch (e: any) { // ★ unknown から any へ変更
+            if (e.code !== 'ENOENT') { 
+                 console.warn(`Finallyブロック: 一時ファイルの削除中にエラーが発生しました (無視): ${tmpFilePathToDelete}`, e);
             } else {
-                 console.log(`一時ファイルは既に存在しませんでした (無視): ${tmpFilePathToDelete}`);
+                 console.log(`Finallyブロック: 一時ファイルは既に存在しませんでした (無視): ${tmpFilePathToDelete}`);
             }
         }
     }
   }
 }
 
-serve(handler, { port: 8000 }); // ポート8000でリッスンするように明示的に指定
+serve(handler); // ポート指定を削除。Deno Deployでは自動的に割り当てられる。ローカルテスト時はデフォルト(8000)
 
-console.log("Process manual function (Deno native HTTP) server running on port 8000!");
+console.log("Process manual function (Deno native HTTP) server running!");
 
 /* To invoke locally:
 
