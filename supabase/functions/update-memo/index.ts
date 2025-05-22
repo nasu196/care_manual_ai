@@ -113,6 +113,7 @@ Deno.serve(async (req) => {
     const memoId = body.id; // ボディからIDを取得
     const titleToUpdate = body.title;
     const contentToUpdate = body.content;
+    const isImportantToUpdate = body.is_important; // is_important を追加
 
 
     if (!memoId) {
@@ -123,13 +124,14 @@ Deno.serve(async (req) => {
     }
 
     // リクエストボディから更新データを取得
-    let updateData: { title?: string; content?: string } = {};
+    let updateData: { title?: string; content?: string; is_important?: boolean } = {}; // is_important の型を追加
     // try { // このtry-catchは上でボディ全体をパースしているので不要かも
       // const body = await req.json(); // 上でパース済みの body を使用
 
       // 更新可能なフィールドを指定 (想定外のフィールドは無視)
       if (titleToUpdate !== undefined) updateData.title = titleToUpdate;
       if (contentToUpdate !== undefined) updateData.content = contentToUpdate;
+      if (isImportantToUpdate !== undefined) updateData.is_important = isImportantToUpdate; // is_important の更新処理を追加
     // } catch (e) {
     //   return new Response(
     //     JSON.stringify({ error: 'Invalid JSON in request body' }),

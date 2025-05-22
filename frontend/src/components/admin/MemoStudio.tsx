@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
 // import { marked } from 'marked'; // markedをインポート (未使用のためコメントアウト)
-import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle } from 'lucide-react'; // Save, XCircleアイコンを追加
+import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Star } from 'lucide-react'; // Save, XCircle, Starアイコンを追加
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
@@ -18,6 +18,7 @@ interface Memo {
   content: string; // HTML文字列として扱う
   created_at: string;
   created_by: string | null;
+  is_important: boolean; // is_important プロパティを追加
   // 他に必要なフィールドがあれば追加
 }
 
@@ -47,6 +48,10 @@ const MemoStudio = () => {
   const [editingContent, setEditingContent] = useState<string>('');
   const [isUpdatingMemo, setIsUpdatingMemo] = useState<boolean>(false); // 保存中のローディング
   const [updateMemoError, setUpdateMemoError] = useState<string | null>(null); // 保存エラー
+
+  // 重要度トグル用のstate
+  const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null);
+  const [toggleImportantError, setToggleImportantError] = useState<string | null>(null);
 
   const fetchMemos = useCallback(async () => {
     setIsLoading(true);
@@ -309,6 +314,50 @@ const MemoStudio = () => {
     }
   };
 
+  const handleToggleImportant = async (memoId: string, newIsImportant: boolean) => {
+    setTogglingImportantId(memoId);
+    setToggleImportantError(null);
+
+    // 元のメモの状態を保存 (ロールバック用)
+    const originalMemos = [...memos];
+
+    // 1. UIを楽観的に更新
+    setMemos(prevMemos => 
+      prevMemos.map(m => 
+        m.id === memoId ? { ...m, is_important: newIsImportant } : m
+      )
+    );
+
+    try {
+      const { error: functionError } = await supabase.functions.invoke('update-memo', {
+        body: {
+          id: memoId,
+          is_important: newIsImportant,
+          // title や content は変更しないので含めない
+        }
+      });
+
+      if (functionError) {
+        throw functionError;
+      }
+      // 成功時は特に何もしない (UIは既に更新済み)
+
+    } catch (e) {
+      console.error('Failed to toggle important status:', e);
+      // 2. エラーが発生したらUIをロールバック
+      setMemos(originalMemos);
+      let errorMessage = '重要度の更新中にエラーが発生しました。';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') {
+        errorMessage = e.message;
+      }
+      setToggleImportantError(errorMessage);
+    } finally {
+      setTogglingImportantId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 pb-2 sticky top-0 z-10 border-b">
@@ -327,7 +376,7 @@ const MemoStudio = () => {
         {deleteError && (
           <Alert variant="destructive" className="mb-4">
             <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>エラーが発生しました</AlertTitle>
+            <AlertTitle>削除エラー</AlertTitle>
             <AlertDescription>{deleteError}</AlertDescription>
           </Alert>
         )}
@@ -336,6 +385,13 @@ const MemoStudio = () => {
             <AlertTriangle className="h-4 w-4" />
             <AlertTitle>更新エラー</AlertTitle>
             <AlertDescription>{updateMemoError}</AlertDescription>
+          </Alert>
+        )}
+        {toggleImportantError && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>重要度更新エラー</AlertTitle>
+            <AlertDescription>{toggleImportantError}</AlertDescription>
           </Alert>
         )}
 
@@ -437,24 +493,46 @@ const MemoStudio = () => {
                       className="p-3 border rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer flex justify-between items-center"
                       onClick={() => handleViewMemo(memo.id)}
                     >
-                      <div className="min-w-0">
-                        <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
+                      <div className="min-w-0 flex-grow mr-2">
+                        <div className="flex items-center">
+                          {memo.is_important && <Star size={14} className="mr-1.5 text-yellow-500 fill-yellow-500" />}
+                          <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
+                        </div>
                         <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full">
                           {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')}
                         </p>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteMemo(memo.id);
-                        }}
-                        disabled={isDeleting && deletingMemoId === memo.id}
-                        className="text-red-500 hover:text-red-700"
-                      >
-                        {isDeleting && deletingMemoId === memo.id ? '削除中...' : <Trash2 size={16} />}
-                      </Button>
+                      <div className="flex items-center space-x-1 flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (togglingImportantId === memo.id) return;
+                            handleToggleImportant(memo.id, !memo.is_important);
+                          }}
+                          disabled={togglingImportantId === memo.id}
+                          className="p-1 h-auto text-gray-500 hover:text-yellow-600"
+                        >
+                          {togglingImportantId === memo.id ? (
+                            <span className="animate-spin h-4 w-4 border-2 border-yellow-500 border-t-transparent rounded-full"></span>
+                          ) : (
+                            <Star size={16} className={memo.is_important ? "text-yellow-500 fill-yellow-500" : "text-gray-400"} />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteMemo(memo.id);
+                          }}
+                          disabled={isDeleting && deletingMemoId === memo.id}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          {isDeleting && deletingMemoId === memo.id ? '削除中...' : <Trash2 size={16} />}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
