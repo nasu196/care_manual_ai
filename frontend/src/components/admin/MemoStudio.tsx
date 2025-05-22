@@ -310,158 +310,159 @@ const MemoStudio = () => {
   };
 
   return (
-    <div className="flex h-full flex-col p-4 space-y-4">
-      {/* ★エラー表示をここに移動 */}
-      {deleteError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>エラーが発生しました</AlertTitle>
-          <AlertDescription>{deleteError}</AlertDescription>
-        </Alert>
-      )}
-      {updateMemoError && (
-        <Alert variant="destructive" className="mb-4">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertTitle>更新エラー</AlertTitle>
-          <AlertDescription>{updateMemoError}</AlertDescription>
-        </Alert>
-      )}
+    <div className="flex flex-col h-full">
+      <div className="p-4 pb-2 sticky top-0 z-10 border-b">
+        <div className="flex justify-between items-center">
+          <h2 className="text-lg font-semibold">メモ管理</h2>
+          {!isEditingNewMemo && !selectedMemo && (
+            <Button variant="outline" onClick={() => setIsEditingNewMemo(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              新規メモ
+            </Button>
+          )}
+        </div>
+      </div>
 
-      {/* ★表示ロジックの変更: selectedMemoId がある場合は閲覧ビュー */} 
-      {selectedMemo ? (
-        isEditingSelectedMemo ? (
+      <div className="flex-grow overflow-y-auto p-4 space-y-4">
+        {deleteError && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>エラーが発生しました</AlertTitle>
+            <AlertDescription>{deleteError}</AlertDescription>
+          </Alert>
+        )}
+        {updateMemoError && (
+          <Alert variant="destructive" className="mb-4">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>更新エラー</AlertTitle>
+            <AlertDescription>{updateMemoError}</AlertDescription>
+          </Alert>
+        )}
+
+        {selectedMemo ? (
+          isEditingSelectedMemo ? (
+            <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
+              <h3 className="text-xl font-semibold mb-2">メモを編集</h3>
+              <Input 
+                placeholder="タイトル" 
+                value={editingTitle} 
+                onChange={(e) => setEditingTitle(e.target.value)}
+                disabled={isUpdatingMemo}
+                className="mb-2"
+              />
+              <div className="flex-grow flex flex-col min-h-0">
+                <RichTextEditor 
+                  content={editingContent} 
+                  onChange={setEditingContent} 
+                  editable={!isUpdatingMemo} 
+                />
+              </div>
+              <div className="flex justify-end space-x-2 mt-4">
+                <Button variant="outline" onClick={handleCancelEdit} disabled={isUpdatingMemo}>
+                  <XCircle className="mr-2 h-4 w-4" />
+                  キャンセル
+                </Button>
+                <Button onClick={handleUpdateMemo} disabled={isUpdatingMemo || !editingTitle.trim() || !editingContent.replace(/<[^>]+>/g, '').trim()}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {isUpdatingMemo ? '保存中...' : '保存する'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
+              <div className="flex justify-between items-center mb-2">
+                <Button variant="outline" size="sm" onClick={handleBackToList}>
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  一覧に戻る
+                </Button>
+                <Button variant="default" size="sm" onClick={handleStartEdit}>
+                  編集する
+                </Button>
+              </div>
+              <h3 className="text-xl font-semibold break-all">{selectedMemo.title}</h3>
+              <div 
+                className="flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md" 
+                dangerouslySetInnerHTML={{ __html: selectedMemo.content }}
+              />
+            </div>
+          )
+        ) : isEditingNewMemo ? (
           <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
-            <h3 className="text-xl font-semibold mb-2">メモを編集</h3>
+            <h3 className="text-md font-semibold">新しいメモを作成</h3>
             <Input 
               placeholder="タイトル" 
-              value={editingTitle} 
-              onChange={(e) => setEditingTitle(e.target.value)}
-              disabled={isUpdatingMemo}
+              value={newMemoTitle} 
+              onChange={(e) => setNewMemoTitle(e.target.value)}
+              disabled={isCreatingMemo}
               className="mb-2"
             />
             <div className="flex-grow flex flex-col min-h-0">
               <RichTextEditor 
-                content={editingContent} 
-                onChange={setEditingContent} 
-                editable={!isUpdatingMemo} 
+                content={newMemoContent} 
+                onChange={setNewMemoContent} 
+                editable={!isCreatingMemo} 
               />
             </div>
-            <div className="flex justify-end space-x-2 mt-4">
-              <Button variant="outline" onClick={handleCancelEdit} disabled={isUpdatingMemo}>
-                <XCircle className="mr-2 h-4 w-4" />
+            {createMemoError && <p className="text-red-500 text-sm mt-2">{createMemoError}</p>}
+            <div className="flex justify-end space-x-2 mt-2">
+              <Button variant="outline" onClick={handleCancelNewMemo} disabled={isCreatingMemo}>
                 キャンセル
               </Button>
-              <Button onClick={handleUpdateMemo} disabled={isUpdatingMemo || !editingTitle.trim() || !editingContent.replace(/<[^>]+>/g, '').trim()}>
-                <Save className="mr-2 h-4 w-4" />
-                {isUpdatingMemo ? '保存中...' : '保存する'}
+              <Button 
+                onClick={handleCreateMemo} 
+                disabled={isCreatingMemo || !newMemoTitle.trim() || !newMemoContent.replace(/<[^>]+>/g, '').trim()} 
+              >
+                {isCreatingMemo ? '保存中...' : '保存する'}
               </Button>
             </div>
           </div>
         ) : (
-          <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
-            <div className="flex justify-between items-center mb-2">
-              <Button variant="outline" size="sm" onClick={handleBackToList}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                一覧に戻る
-              </Button>
-              <Button variant="default" size="sm" onClick={handleStartEdit}>
-                編集する
-              </Button>
+          <>
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
+              <MemoTemplateSuggestions />
             </div>
-            <h3 className="text-xl font-semibold break-all">{selectedMemo.title}</h3>
-            <div 
-              className="flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md" 
-              dangerouslySetInnerHTML={{ __html: selectedMemo.content }}
-            />
-          </div>
-        )
-      ) : isEditingNewMemo ? (
-        <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
-          <h3 className="text-md font-semibold">新しいメモを作成</h3>
-          <Input 
-            placeholder="タイトル" 
-            value={newMemoTitle} 
-            onChange={(e) => setNewMemoTitle(e.target.value)}
-            disabled={isCreatingMemo}
-            className="mb-2"
-          />
-          <div className="flex-grow flex flex-col min-h-0">
-            <RichTextEditor 
-              content={newMemoContent} 
-              onChange={setNewMemoContent} 
-              editable={!isCreatingMemo} 
-            />
-          </div>
-          {createMemoError && <p className="text-red-500 text-sm mt-2">{createMemoError}</p>}
-          <div className="flex justify-end space-x-2 mt-2">
-            <Button variant="outline" onClick={handleCancelNewMemo} disabled={isCreatingMemo}>
-              キャンセル
-            </Button>
-            <Button 
-              onClick={handleCreateMemo} 
-              disabled={isCreatingMemo || !newMemoTitle.trim() || !newMemoContent.replace(/<[^>]+>/g, '').trim()} 
-            >
-              {isCreatingMemo ? '保存中...' : '保存する'}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold">メモ管理</h2>
-            {!isEditingNewMemo && (
-              <Button variant="outline" onClick={() => setIsEditingNewMemo(true)}>
-                <PlusCircle className="mr-2 h-4 w-4" />
-                新規メモ
-              </Button>
-            )}
-          </div>
-          <div>
-            <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
-            <MemoTemplateSuggestions />
-          </div>
-          <div>
-            <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
-            {isLoading && <p>メモを読み込み中...</p>}
-            {error && <p className="text-red-500">エラー: {error.message || 'メモの読み込みに失敗しました。'}</p>}
-            {!isLoading && !error && memos.length === 0 && (
-              <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">作成済みのメモはありません。</div>
-            )}
-            {!isLoading && !error && memos.length > 0 && (
-              <div className="max-h-96 overflow-y-auto">
-                <ul className="space-y-2 pr-2">
+            <div>
+              <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
+              {isLoading && <p>メモを読み込み中...</p>}
+              {error && <p className="text-red-500">エラー: {error.message || 'メモの読み込みに失敗しました。'}</p>}
+              {!isLoading && !error && memos.length === 0 && (
+                <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">作成済みのメモはありません。</div>
+              )}
+              {!isLoading && !error && memos.length > 0 && (
+                <div className="space-y-2 pr-1">
                   {memos.map((memo) => (
-                    <li key={memo.id} className="p-3 border rounded-md hover:bg-gray-50 cursor-pointer" onClick={() => handleViewMemo(memo.id)}>
-                      <div className="flex justify-between items-center">
-                        <div className="flex-grow">
-                          <h4 className="text-sm font-semibold mb-1">{memo.title}</h4>
-                          <div 
-                            className="text-xs text-gray-600 prose dark:prose-invert max-w-none overflow-hidden line-clamp-1"
-                            dangerouslySetInnerHTML={{ __html: memo.content }} 
-                          />
-                        </div>
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteMemo(memo.id); }}
-                          disabled={isDeleting && deletingMemoId === memo.id}
-                          className="ml-2 p-1 h-auto text-red-500 hover:text-red-700"
-                        >
-                          {isDeleting && deletingMemoId === memo.id ? (
-                            <span className="text-xs">削除中...</span>
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
-                        </Button>
+                    <div
+                      key={memo.id}
+                      className="p-3 border rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer flex justify-between items-center"
+                      onClick={() => handleViewMemo(memo.id)}
+                    >
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
+                        <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full">
+                          {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')}
+                        </p>
                       </div>
-                    </li>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteMemo(memo.id);
+                        }}
+                        disabled={isDeleting && deletingMemoId === memo.id}
+                        className="text-red-500 hover:text-red-700"
+                      >
+                        {isDeleting && deletingMemoId === memo.id ? '削除中...' : <Trash2 size={16} />}
+                      </Button>
+                    </div>
                   ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </>
-      )}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 };
