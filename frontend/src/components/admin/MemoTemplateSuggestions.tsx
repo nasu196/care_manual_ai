@@ -66,15 +66,30 @@ const MemoTemplateSuggestions = () => {
 
       console.log("Raw response text from Edge Function:\n", responseText);
 
-      let jsonStringToParse = responseText;
-      const jsonBlockRegex = new RegExp("\\\`\\\`\\\`json\\s*([\\s\\S]*?)\\\\s*\\\`\\\`\\\`");
-      const jsonMarkerMatch = responseText.match(jsonBlockRegex);
+      let jsonStringToParse = "";
+      const startIndexMarker = "```json";
+      const endIndexMarker = "```";
 
-      if (jsonMarkerMatch && jsonMarkerMatch[1]) {
-        jsonStringToParse = jsonMarkerMatch[1].trim();
-        console.log("Extracted JSON string from markers (client-side):\n", jsonStringToParse);
+      const startIndex = responseText.indexOf(startIndexMarker);
+      if (startIndex !== -1) {
+        // ```json のマーカーが見つかった場合
+        const searchAfterStartMarker = responseText.substring(startIndex + startIndexMarker.length);
+        const endIndex = searchAfterStartMarker.indexOf(endIndexMarker);
+        if (endIndex !== -1) {
+          jsonStringToParse = searchAfterStartMarker.substring(0, endIndex).trim();
+          console.log("Extracted JSON string using string manipulation (client-side):\n", jsonStringToParse);
+        } else {
+          // 開始マーカーはあったが終了マーカーが見つからない場合
+          console.warn("JSON start marker (```json) found, but end marker (```) not found. Attempting to parse from start marker to end of string, or whole string if that fails.");
+          // この場合、状況によっては ```json 以降全てをパースしようと試みるか、エラーにするか判断が必要
+          // 今回は、より安全に、全体をパースしようとするフォールバックに任せるか、明確なエラーとする
+          // 一旦、全体をパースする方に倒すが、AIの出力が安定しているならエラーの方が良いかもしれない
+          jsonStringToParse = responseText; // フォールバック：全体をパースしようと試みる
+        }
       } else {
-        console.warn("JSON markers (```json) not found in response, attempting to parse the whole string.");
+        // ```json のマーカーが見つからない場合、レスポンス全体をJSONとみなしてパースを試みる
+        console.warn("JSON start marker (```json) not found in response, attempting to parse the whole string.");
+        jsonStringToParse = responseText;
       }
       
       let parsedSuggestions: Array<{ id?: string; title: string; description: string; }> = [];
