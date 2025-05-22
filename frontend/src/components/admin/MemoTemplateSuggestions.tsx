@@ -7,11 +7,11 @@ import type { FunctionInvokeError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from 'framer-motion';
+import { marked } from 'marked';
+import { useMemoStore } from '@/store/memoStore';
 
-// AIGeneratedMemoSource の型を MemoStudio.tsx からインポートする代わりにここで再定義（本来は共通化）
-// もしくは、MemoStudio.tsx の型定義名を GeneratedMemoSource にして、こちらからimport { GeneratedMemoSource } from './MemoStudio'; のようにする
-// 今回はここで再定義するが、@/types などに移動するのが望ましい
-interface AIGeneratedMemoSource {
+// AIが生成するメモのソース情報の型 (エクスポートする)
+export interface AIGeneratedMemoSource {
   id: string;
   manual_id: string;
   file_name: string;
@@ -32,10 +32,9 @@ interface Suggestion {
 // Propsの型定義を修正
 interface MemoTemplateSuggestionsProps {
   selectedSourceNames: string[];
-  onMemoGenerated: (newMemo: { title: string; content: string; sources: AIGeneratedMemoSource[] }) => void;
 }
 
-const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames, onMemoGenerated }) => {
+const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false); // 提案取得時のローディング
   const [error, setError] = useState<string | null>(null); // 提案取得時のエラー
@@ -47,6 +46,8 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const [selectedIdeaForModal, setSelectedIdeaForModal] = useState<Suggestion | null>(null);
   const [isGeneratingMemo, setIsGeneratingMemo] = useState(false); // メモ生成API呼び出し中のローディング
   const [generateMemoError, setGenerateMemoError] = useState<string | null>(null); // メモ生成時のエラー
+
+  const triggerMemoListRefresh = useMemoStore((state) => state.triggerMemoListRefresh);
 
   useEffect(() => {
     try {
@@ -243,7 +244,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         body: JSON.stringify({
           ideaTitle: selectedIdeaForModal.title,
           ideaDescription: selectedIdeaForModal.description,
-          sourceFileNames: selectedIdeaForModal.source_files || [], // source_files が undefined の場合空配列
+          sourceFileNames: selectedIdeaForModal.source_files || [],
         }),
       });
       if (!promptResponse.ok) {
@@ -269,7 +270,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           crafted_prompt: generatedPrompt,
-          source_filenames: selectedIdeaForModal.source_files || [], // source_files が undefined の場合空配列
+          source_filenames: selectedIdeaForModal.source_files || [],
         }),
       });
       if (!memoResponse.ok) {
@@ -278,20 +279,59 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       }
       const { generated_memo, sources } = await memoResponse.json();
       
-      onMemoGenerated({
-        title: selectedIdeaForModal.title,
-        content: generated_memo,
-        sources: sources,
+      // 3. AI生成メモを自動保存
+      console.log("Auto-saving AI generated memo...");
+      const memoTitle = selectedIdeaForModal.title; // アイデアのタイトルをメモのタイトルとする
+      const markdownContent = generated_memo;
+      
+      let htmlContent = '';
+      try {
+        htmlContent = marked.parse(markdownContent) as string;
+      } catch (e) {
+        console.error("Markdownの解析に失敗しました (MemoTemplateSuggestions):", e);
+        // 解析失敗時はMarkdownをそのまま保存するか、エラーとするか検討
+        // ここではエラーとして処理を中断する例（必要に応じて調整）
+        setGenerateMemoError("メモ内容のMarkdown解析に失敗しました。保存できません。");
+        setIsGeneratingMemo(false);
+        return; 
+      }
+
+      const { data: { user } } = await supabase.auth.getUser();
+      let userId = user?.id;
+
+      if (!userId && process.env.NODE_ENV === 'development') {
+        console.warn("User ID not found, using dummy_user_id_dev for auto-save.");
+        userId = 'dummy_user_id_dev_ai_generated'; 
+      } else if (!userId) {
+        throw new Error('自動保存のためにはユーザーが認証されている必要があります。');
+      }
+      
+      const { error: createError } = await supabase.functions.invoke('create-memo', {
+        body: { 
+          title: memoTitle, 
+          content: htmlContent,
+          created_by: userId,
+          is_ai_generated: true, // ★ AI生成フラグを立てる (任意)
+          ai_generation_sources: sources, // ★ sources を渡す
+        },
       });
+
+      if (createError) {
+        console.error("Error auto-saving AI memo via Edge Function:", createError);
+        throw new Error(createError.message || 'AI生成メモの自動保存に失敗しました。');
+      }
+
+      console.log("AI generated memo auto-saved successfully.");
+      triggerMemoListRefresh(); // MemoStudioのリスト更新をトリガー
 
       setIsGenerateMemoModalOpen(false);
       setSelectedIdeaForModal(null);
     } catch (err: unknown) {
-      console.error("Error generating memo:", err);
+      console.error("Error in memo generation/auto-save process:", err);
       if (err instanceof Error) {
-        setGenerateMemoError(err.message || 'メモの生成中に不明なエラーが発生しました。');
+        setGenerateMemoError(err.message || 'メモの生成または自動保存中に不明なエラーが発生しました。');
       } else {
-        setGenerateMemoError('メモの生成中に不明なエラーが発生しました。');
+        setGenerateMemoError('メモの生成または自動保存中に不明なエラーが発生しました。');
       }
     } finally {
       setIsGeneratingMemo(false);

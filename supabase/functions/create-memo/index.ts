@@ -33,7 +33,15 @@ serve(async (req: Request) => {
     })
 
     // リクエストボディからデータを取得
-    const { title, content, created_by, tags, is_important } = await req.json()
+    const { 
+      title, 
+      content, 
+      created_by, 
+      tags, 
+      is_important,
+      is_ai_generated,       // ★ 追加
+      ai_generation_sources  // ★ 追加
+    } = await req.json()
 
     // 簡単なバリデーション
     if (!title || !content) {
@@ -53,6 +61,8 @@ serve(async (req: Request) => {
           created_by: created_by, // オプショナル
           tags: tags,             // オプショナル
           is_important: is_important === undefined ? false : is_important, // デフォルトはfalse
+          is_ai_generated: is_ai_generated === undefined ? false : is_ai_generated, // ★ 追加 (デフォルトfalse)
+          ai_generation_sources: ai_generation_sources, // ★ 追加 (null許容ならそのままでOK)
         },
       ])
       .select() // 挿入されたデータを返す
