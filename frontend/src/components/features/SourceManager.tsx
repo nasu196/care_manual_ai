@@ -175,6 +175,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           type: 'success',
           text: `ファイル「${file.name}」のアップロードと処理が全て完了しました。`,
         });
+
+        // ★ アップロード成功後、そのファイルを選択状態にする
+        if (!selectedSourceNames.includes(file.name)) {
+          onSelectionChange([...selectedSourceNames, file.name]);
+        }
+
       } catch (funcError: unknown) {
         console.error('Error calling Edge Function:', funcError);
         let errorMessage = 'サーバー処理中に不明なエラーが発生しました。';
