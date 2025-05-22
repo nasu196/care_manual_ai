@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
 // import { marked } from 'marked'; // markedをインポート (未使用のためコメントアウト)
-import { PlusCircle, Trash2, AlertTriangle } from 'lucide-react'; // 新規メモボタン用アイコン、削除アイコン、アラートアイコン
+import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle } from 'lucide-react'; // Save, XCircleアイコンを追加
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
@@ -37,6 +37,16 @@ const MemoStudio = () => {
   const [deletingMemoId, setDeletingMemoId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // ★閲覧機能用のstate
+  const [selectedMemoId, setSelectedMemoId] = useState<string | null>(null);
+
+  // ★編集機能用のstate
+  const [isEditingSelectedMemo, setIsEditingSelectedMemo] = useState<boolean>(false);
+  const [editingTitle, setEditingTitle] = useState<string>('');
+  const [editingContent, setEditingContent] = useState<string>('');
+  const [isUpdatingMemo, setIsUpdatingMemo] = useState<boolean>(false); // 保存中のローディング
+  const [updateMemoError, setUpdateMemoError] = useState<string | null>(null); // 保存エラー
 
   const fetchMemos = useCallback(async () => {
     setIsLoading(true);
@@ -210,6 +220,95 @@ const MemoStudio = () => {
   //   setNewMemoContent(html as string); // 型アサーションで対応
   // };
 
+  // ★選択されたメモオブジェクトを取得するヘルパー (selectedMemoIdが変更されたら再計算)
+  const selectedMemo = React.useMemo(() => {
+    if (!selectedMemoId) return null;
+    return memos.find(memo => memo.id === selectedMemoId) || null;
+  }, [selectedMemoId, memos]);
+
+  const handleViewMemo = (memoId: string) => {
+    if (isEditingNewMemo) return;
+    setSelectedMemoId(memoId);
+    setIsEditingSelectedMemo(false); // 閲覧モードに切り替える際は編集モードを解除
+    setUpdateMemoError(null); // エラー表示をクリア
+  };
+
+  const handleBackToList = () => {
+    setSelectedMemoId(null);
+    setIsEditingSelectedMemo(false); // 編集モードも解除
+    setUpdateMemoError(null); // エラー表示をクリア
+  };
+
+  const handleStartEdit = () => {
+    if (!selectedMemo) return;
+    setIsEditingSelectedMemo(true);
+    setEditingTitle(selectedMemo.title);
+    setEditingContent(selectedMemo.content);
+    setUpdateMemoError(null); // エラー表示をクリア
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingSelectedMemo(false);
+    // editingTitle, editingContent は handleStartEdit で再設定されるのでクリア不要かも
+    setUpdateMemoError(null); // エラー表示をクリア
+  };
+
+  const handleUpdateMemo = async () => {
+    if (!selectedMemoId || !selectedMemo) return;
+    // 簡単なバリデーション
+    const plainEditingTextContent = editingContent.replace(/<[^>]+>/g, '').trim();
+    if (!editingTitle.trim() || !plainEditingTextContent) {
+      setUpdateMemoError('タイトルと内容は必須です。');
+      return;
+    }
+
+    setIsUpdatingMemo(true);
+    setUpdateMemoError(null);
+
+    try {
+      const { data: updatedMemo, error: functionError } = await supabase.functions.invoke('update-memo', {
+        body: {
+          id: selectedMemoId,
+          title: editingTitle,
+          content: editingContent,
+          // updated_by: userId, // もしEdge Function側で更新者を記録する場合
+        }
+      });
+
+      if (functionError) {
+        throw functionError; 
+      }
+
+      if (updatedMemo && typeof updatedMemo === 'object' && 'id' in updatedMemo && updatedMemo.id === selectedMemoId) {
+        // Edge Functionが更新後の完全なメモオブジェクトを返した場合 (idが一致することも確認)
+        setMemos(prevMemos => prevMemos.map(m => 
+          m.id === selectedMemoId ? (updatedMemo as Memo) : m
+        ));
+      } else {
+        // Edge Functionが期待した形式のオブジェクトを返さなかったか、idが一致しない場合
+        // ローカルの編集内容でフォールバック更新 (またはエラーとして扱うか、fetchMemos() を呼ぶ)
+        console.warn('update-memo did not return the expected memo object or ID mismatch. Falling back to local update based on editing fields.');
+        setMemos(prevMemos => prevMemos.map(m => 
+          m.id === selectedMemoId ? { ...m, title: editingTitle, content: editingContent } : m
+        ));
+      }
+      
+      setIsEditingSelectedMemo(false);
+
+    } catch (e) {
+      console.error('Failed to update memo:', e);
+      if (e instanceof Error) {
+        setUpdateMemoError(e.message);
+      } else if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') { 
+        setUpdateMemoError(e.message);
+      } else {
+        setUpdateMemoError('メモの更新中に予期せぬエラーが発生しました。');
+      }
+    } finally {
+      setIsUpdatingMemo(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col p-4 space-y-4">
       {/* ★エラー表示をここに移動 */}
@@ -220,20 +319,64 @@ const MemoStudio = () => {
           <AlertDescription>{deleteError}</AlertDescription>
         </Alert>
       )}
+      {updateMemoError && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>更新エラー</AlertTitle>
+          <AlertDescription>{updateMemoError}</AlertDescription>
+        </Alert>
+      )}
 
-      {/* 上部のタイトルやアクションエリア */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold">メモ管理</h2> {/* タイトル例 */}
-        {!isEditingNewMemo && (
-          <Button variant="outline" onClick={() => setIsEditingNewMemo(true)}>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            新規メモ
-          </Button>
-        )}
-      </div>
-
-      {isEditingNewMemo ? (
-        <div className="flex-grow flex flex-col space-y-2 overflow-hidden"> {/* overflow-hidden を追加 */}
+      {/* ★表示ロジックの変更: selectedMemoId がある場合は閲覧ビュー */} 
+      {selectedMemo ? (
+        isEditingSelectedMemo ? (
+          <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
+            <h3 className="text-xl font-semibold mb-2">メモを編集</h3>
+            <Input 
+              placeholder="タイトル" 
+              value={editingTitle} 
+              onChange={(e) => setEditingTitle(e.target.value)}
+              disabled={isUpdatingMemo}
+              className="mb-2"
+            />
+            <div className="flex-grow flex flex-col min-h-0">
+              <RichTextEditor 
+                content={editingContent} 
+                onChange={setEditingContent} 
+                editable={!isUpdatingMemo} 
+              />
+            </div>
+            <div className="flex justify-end space-x-2 mt-4">
+              <Button variant="outline" onClick={handleCancelEdit} disabled={isUpdatingMemo}>
+                <XCircle className="mr-2 h-4 w-4" />
+                キャンセル
+              </Button>
+              <Button onClick={handleUpdateMemo} disabled={isUpdatingMemo || !editingTitle.trim() || !editingContent.replace(/<[^>]+>/g, '').trim()}>
+                <Save className="mr-2 h-4 w-4" />
+                {isUpdatingMemo ? '保存中...' : '保存する'}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
+            <div className="flex justify-between items-center mb-2">
+              <Button variant="outline" size="sm" onClick={handleBackToList}>
+                <ArrowLeft className="mr-2 h-4 w-4" />
+                一覧に戻る
+              </Button>
+              <Button variant="default" size="sm" onClick={handleStartEdit}>
+                編集する
+              </Button>
+            </div>
+            <h3 className="text-xl font-semibold break-all">{selectedMemo.title}</h3>
+            <div 
+              className="flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md" 
+              dangerouslySetInnerHTML={{ __html: selectedMemo.content }}
+            />
+          </div>
+        )
+      ) : isEditingNewMemo ? (
+        <div className="flex-grow flex flex-col space-y-2 overflow-hidden">
           <h3 className="text-md font-semibold">新しいメモを作成</h3>
           <Input 
             placeholder="タイトル" 
@@ -242,7 +385,7 @@ const MemoStudio = () => {
             disabled={isCreatingMemo}
             className="mb-2"
           />
-          <div className="flex-grow flex flex-col min-h-0"> {/* RichTextEditorが残りの高さを取り、スクロール可能にするための変更 */}
+          <div className="flex-grow flex flex-col min-h-0">
             <RichTextEditor 
               content={newMemoContent} 
               onChange={setNewMemoContent} 
@@ -264,44 +407,43 @@ const MemoStudio = () => {
         </div>
       ) : (
         <>
-          {/* AI提案のメモテンプレート候補 */}
+          <div className="flex justify-between items-center">
+            <h2 className="text-lg font-semibold">メモ管理</h2>
+            {!isEditingNewMemo && (
+              <Button variant="outline" onClick={() => setIsEditingNewMemo(true)}>
+                <PlusCircle className="mr-2 h-4 w-4" />
+                新規メモ
+              </Button>
+            )}
+          </div>
           <div>
             <h3 className="text-sm font-medium text-gray-500 mb-2">提案</h3>
             <MemoTemplateSuggestions />
-            {/*
-            <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">
-              AIによるメモテンプレート候補がここに表示されます (7-8個)
-            </div>
-            */}
           </div>
-
-          {/* 既存メモ一覧 */}
           <div>
             <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
             {isLoading && <p>メモを読み込み中...</p>}
             {error && <p className="text-red-500">エラー: {error.message || 'メモの読み込みに失敗しました。'}</p>}
             {!isLoading && !error && memos.length === 0 && (
-              <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">
-                作成済みのメモはありません。
-              </div>
+              <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">作成済みのメモはありません。</div>
             )}
             {!isLoading && !error && memos.length > 0 && (
               <div className="max-h-96 overflow-y-auto">
                 <ul className="space-y-2 pr-2">
                   {memos.map((memo) => (
-                    <li key={memo.id} className="p-3 border rounded-md hover:bg-gray-50 cursor-pointer">
+                    <li key={memo.id} className="p-3 border rounded-md hover:bg-gray-50 cursor-pointer" onClick={() => handleViewMemo(memo.id)}>
                       <div className="flex justify-between items-center">
-                        <div className="flex-grow cursor-pointer" onClick={() => console.log('View memo:', memo.id)}>
+                        <div className="flex-grow">
                           <h4 className="text-sm font-semibold mb-1">{memo.title}</h4>
                           <div 
-                            className="text-xs text-gray-600 prose dark:prose-invert max-w-none overflow-hidden line-clamp-3" 
+                            className="text-xs text-gray-600 prose dark:prose-invert max-w-none overflow-hidden line-clamp-1"
                             dangerouslySetInnerHTML={{ __html: memo.content }} 
                           />
                         </div>
                         <Button 
                           variant="ghost" 
                           size="sm" 
-                          onClick={() => handleDeleteMemo(memo.id)}
+                          onClick={(e) => { e.stopPropagation(); handleDeleteMemo(memo.id); }}
                           disabled={isDeleting && deletingMemoId === memo.id}
                           className="ml-2 p-1 h-auto text-red-500 hover:text-red-700"
                         >
