@@ -8,7 +8,7 @@ import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from 'framer-motion';
 import { marked } from 'marked';
-import { useMemoStore } from '@/store/memoStore';
+import { useMemoStore, GeneratingMemo } from '@/store/memoStore';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +61,9 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default'); // 詳細度のためのstateを追加
 
   const triggerMemoListRefresh = useMemoStore((state) => state.triggerMemoListRefresh);
+  const addGeneratingMemo = useMemoStore((state) => state.addGeneratingMemo);
+  const updateGeneratingMemoStatus = useMemoStore((state) => state.updateGeneratingMemoStatus);
+  const removeGeneratingMemo = useMemoStore((state) => state.removeGeneratingMemo);
 
   useEffect(() => {
     try {
@@ -245,12 +248,19 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const handleConfirmGenerateMemo = async () => {
     if (!selectedIdeaForModal) return;
 
+    setIsGenerateMemoModalOpen(false);
+    
+    const tempMemoId = Date.now().toString();
+    const memoTitle = selectedIdeaForModal.title;
+
+    addGeneratingMemo({ id: tempMemoId, title: memoTitle, status: 'prompt_creating' });
+    
     setIsGeneratingMemo(true);
     setGenerateMemoError(null);
-    console.log("Generating memo for:", selectedIdeaForModal.title);
+    console.log("Generating memo for:", memoTitle);
 
     try {
-      // 1. PromptCraftLLM を呼び出す
+      console.log(`[${tempMemoId}] Calling PromptCraftLLM for: ${memoTitle}`);
       const promptResponse = await fetch('/api/craft-memo-prompt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -261,23 +271,19 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }),
       });
       if (!promptResponse.ok) {
-        const errorText = await promptResponse.text(); // まずテキストとしてレスポンスを読む
+        const errorText = await promptResponse.text(); 
         let errorJson = {};
-        try {
-          errorJson = JSON.parse(errorText); // 次にJSONとしてパースを試みる
-        } catch (e) {
-          // JSONパースに失敗した場合は、テキストをそのまま使う
-          console.warn('Failed to parse error response as JSON:', e, 'Raw text:', errorText);
-        }
-        // errorJson がオブジェクトで error プロパティを持つか、あるいは errorText を使う
+        try { errorJson = JSON.parse(errorText); } catch (_e) {}
         const errorMessage = (typeof errorJson === 'object' && errorJson !== null && 'error' in errorJson && typeof errorJson.error === 'string') 
                            ? errorJson.error 
                            : errorText || 'プロンプト作成リクエストの処理中に不明なエラーが発生しました。';
         throw new Error(errorMessage);
       }
       const { generatedPrompt } = await promptResponse.json();
+      console.log(`[${tempMemoId}] PromptCraftLLM successful.`);
 
-      // 2. MemoWriterLLM を呼び出す
+      updateGeneratingMemoStatus(tempMemoId, 'memo_generating');
+      console.log(`[${tempMemoId}] Calling MemoWriterLLM for: ${memoTitle}`);
       const memoResponse = await fetch('/api/generate-memo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -292,27 +298,21 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         throw new Error(errorData.error || 'メモの生成に失敗しました。');
       }
       const { generated_memo, sources } = await memoResponse.json();
+      console.log(`[${tempMemoId}] MemoWriterLLM successful.`);
       
-      // 3. AI生成メモを自動保存
-      console.log("Auto-saving AI generated memo...");
-      const memoTitle = selectedIdeaForModal.title; // アイデアのタイトルをメモのタイトルとする
-      const markdownContent = generated_memo;
+      updateGeneratingMemoStatus(tempMemoId, 'saving');
+      console.log(`[${tempMemoId}] Auto-saving AI generated memo for: ${memoTitle}`);
       
       let htmlContent = '';
       try {
-        htmlContent = marked.parse(markdownContent) as string;
+        htmlContent = marked.parse(generated_memo) as string;
       } catch (e) {
         console.error("Markdownの解析に失敗しました (MemoTemplateSuggestions):", e);
-        // 解析失敗時はMarkdownをそのまま保存するか、エラーとするか検討
-        // ここではエラーとして処理を中断する例（必要に応じて調整）
-        setGenerateMemoError("メモ内容のMarkdown解析に失敗しました。保存できません。");
-        setIsGeneratingMemo(false);
-        return; 
+        throw new Error("メモ内容のMarkdown解析に失敗しました。保存できません。");
       }
 
       const { data: { user } } = await supabase.auth.getUser();
       let userId = user?.id;
-
       if (!userId && process.env.NODE_ENV === 'development') {
         console.warn("User ID not found, using dummy_user_id_dev for auto-save.");
         userId = 'dummy_user_id_dev_ai_generated'; 
@@ -325,8 +325,8 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           title: memoTitle, 
           content: htmlContent,
           created_by: userId,
-          is_ai_generated: true, // ★ AI生成フラグを立てる (任意)
-          ai_generation_sources: sources, // ★ sources を渡す
+          is_ai_generated: true,
+          ai_generation_sources: sources,
         },
       });
 
@@ -335,20 +335,16 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         throw new Error(createError.message || 'AI生成メモの自動保存に失敗しました。');
       }
 
-      console.log("AI generated memo auto-saved successfully.");
-      triggerMemoListRefresh(); // MemoStudioのリスト更新をトリガー
+      console.log(`[${tempMemoId}] AI generated memo auto-saved successfully for: ${memoTitle}`);
+      removeGeneratingMemo(tempMemoId);
+      triggerMemoListRefresh();
 
-      setIsGenerateMemoModalOpen(false);
-      setSelectedIdeaForModal(null);
     } catch (err: unknown) {
-      console.error("Error in memo generation/auto-save process:", err);
-      if (err instanceof Error) {
-        setGenerateMemoError(err.message || 'メモの生成または自動保存中に不明なエラーが発生しました。');
-      } else {
-        setGenerateMemoError('メモの生成または自動保存中に不明なエラーが発生しました。');
-      }
+      console.error(`[${tempMemoId}] Error in memo generation/auto-save process for ${memoTitle}:`, err);
+      const errorMessage = err instanceof Error ? err.message : 'メモの生成または自動保存中に不明なエラーが発生しました。';
+      updateGeneratingMemoStatus(tempMemoId, 'error', errorMessage);
     } finally {
-      setIsGeneratingMemo(false);
+      setSelectedIdeaForModal(null);
     }
   };
 

@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button'; // shadcn/uiのButtonをインポート
 import { supabase } from '@/lib/supabaseClient'; // Supabase client
 import { Input } from '@/components/ui/input'; // Inputを追加
 import RichTextEditor from '@/components/common/RichTextEditor'; // RichTextEditorをインポート
-import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Flag } from 'lucide-react'; // Save, XCircle, Flagアイコンを追加
+import { PlusCircle, Trash2, AlertTriangle, ArrowLeft, Save, XCircle, Flag, Loader2 } from 'lucide-react'; // Save, XCircle, Flagアイコンを追加
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"; // Alertコンポーネントをインポート
 import { marked } from 'marked'; // marked をインポート
-import { useMemoStore } from '@/store/memoStore'; // Zustandストアをインポート
+import { useMemoStore, type GeneratingMemo } from '@/store/memoStore'; // Zustandストアをインポート
 import { AIGeneratedMemoSource } from './MemoTemplateSuggestions'; // ★ インポートを追加
 
 // 将来的にインポートするコンポーネントの型だけ定義（ダミー）
@@ -44,6 +44,8 @@ interface Memo {
   is_ai_generated?: boolean; // ★ 追加 (オプショナル)
   ai_generation_sources?: AIGeneratedMemoSource[] | null; // ★ 追加 (オプショナル)
   // 他に必要なフィールドがあれば追加
+  isGenerating?: boolean;
+  statusText?: string;
 }
 
 // Propsの型定義を追加
@@ -86,8 +88,11 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const newMemoRequest = useMemoStore((state) => state.newMemoRequest);
   const clearNewMemoRequest = useMemoStore((state) => state.clearNewMemoRequest);
   const memoListLastUpdated = useMemoStore((state) => state.memoListLastUpdated);
-  const initialMemoListLastUpdated = useMemoStore.getState().memoListLastUpdated; // ★ ストアの初期値を取得
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded); // ★ 追加
+  const generatingMemos = useMemoStore((state) => state.generatingMemos);
+
+  // ★ useRef を使って前回の memoListLastUpdated の値を保持
+  const prevMemoListLastUpdatedRef = useRef<number | null>(null);
 
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
@@ -109,48 +114,58 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const fetchMemos = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos...`); // ★ 呼び出し開始ログ
     try {
       const { data, error: functionError } = await supabase.functions.invoke('list-memos');
       
+      console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError }); // ★ 生レスポンスログ
+
       if (functionError) {
+        console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function:`, functionError);
         throw functionError;
       }
 
-      // dataが直接配列であるか、あるいはdataプロパティ内に配列があるかを確認
-      // Edge Functionのlist-memosの実装に依存します。
-      // ここではdataが直接メモの配列であると仮定します。
-      // もし { data: Memo[] } のような構造なら data.data や response.data.data のようにアクセス
       if (Array.isArray(data)) {
-        setMemos(data);
+        console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
+        // ★ 取得したデータの内容を詳細にログ出力 (最初の数件など)
+        if (data.length > 0) {
+          console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
+        }
+        setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
       } else {
-        // 想定外のデータ構造の場合
-        console.warn('Unexpected data structure from list-memos:', data);
-        setMemos([]); // またはエラー処理
+        console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
+        setMemos([]); 
       }
 
     } catch (e) {
-      console.error('Failed to fetch memos:', e);
+      console.error(`[${new Date().toISOString()}] [fetchMemos] Failed to fetch memos:`, e);
       setError(e instanceof Error ? e : new Error('An unknown error occurred'));
     } finally {
       setIsLoading(false);
+      console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`); // ★ 完了ログ
     }
   }, []);
 
   // 1. 初回マウント時と、手動での新規メモ編集モード終了時にメモを取得
   useEffect(() => {
-    if (!isEditingNewMemo) {
-      console.log('[Effect 1] Fetching memos because not editing new memo.');
+    // isEditingNewMemo が false になったとき (新規作成完了 or キャンセル時)
+    // または、selectedMemoId が null になったとき (詳細表示からリストに戻った時) にメモを再取得
+    if (!isEditingNewMemo && !selectedMemoId) {
+      console.log('[Effect 1] Fetching memos: not editing new memo, no selected memo.');
       fetchMemos();
     }
-  }, [fetchMemos, isEditingNewMemo]);
+  }, [fetchMemos, isEditingNewMemo, selectedMemoId]); // isLoading を依存配列から削除
 
   // 2. AIによる自動保存後のメモリスト更新 (memoListLastUpdated が実際に変更された場合のみ)
   useEffect(() => {
-    if (memoListLastUpdated !== initialMemoListLastUpdated && !isEditingNewMemo) {
-      console.log('[Effect 2] Fetching memos due to memoListLastUpdated change.');
+    // 前回の値がnull (初回実行時など) でない、かつ現在の値と異なる場合に実行
+    if (prevMemoListLastUpdatedRef.current !== null && memoListLastUpdated !== prevMemoListLastUpdatedRef.current /* && !isEditingNewMemo && !selectedMemoId */) {
+      console.log('[Effect 2 - Using Ref] Fetching memos due to memoListLastUpdated change.');
       fetchMemos();
     }
-  }, [fetchMemos, memoListLastUpdated, isEditingNewMemo, initialMemoListLastUpdated]);
+    // 現在の値を次回の比較のために保存
+    prevMemoListLastUpdatedRef.current = memoListLastUpdated;
+  }, [fetchMemos, memoListLastUpdated]); // 依存配列を memoListLastUpdated のみに（fetchMemosも含む）
 
   const handleCreateMemo = async () => {
     // contentの空チェックはTiptapのisEmptyを使う方がより正確だが、一旦titleのみで簡易チェック
@@ -198,6 +213,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
       setIsEditingNewMemo(false); // 作成後は編集モードを解除
       setMemoViewExpanded(false); // ★ メモ作成完了時も表示状態を終了
+      await fetchMemos(); // ★★★ 新規メモ作成成功後にリストを再取得 ★★★
     } catch (e) {
       console.error('Failed to create memo:', e);
       if (e instanceof Error) {
@@ -338,14 +354,14 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       if (updatedMemo && typeof updatedMemo === 'object' && 'id' in updatedMemo && updatedMemo.id === selectedMemoId) {
         // Edge Functionが更新後の完全なメモオブジェクトを返した場合 (idが一致することも確認)
         setMemos(prevMemos => prevMemos.map(m => 
-          m.id === selectedMemoId ? (updatedMemo as Memo) : m
+          m.id === selectedMemoId ? { ...(updatedMemo as Memo), isGenerating: false } : m
         ));
       } else {
         // Edge Functionが期待した形式のオブジェクトを返さなかったか、idが一致しない場合
         // ローカルの編集内容でフォールバック更新 (またはエラーとして扱うか、fetchMemos() を呼ぶ)
         console.warn('update-memo did not return the expected memo object or ID mismatch. Falling back to local update based on editing fields.');
         setMemos(prevMemos => prevMemos.map(m => 
-          m.id === selectedMemoId ? { ...m, title: editingTitle, content: editingContent } : m
+          m.id === selectedMemoId ? { ...m, title: editingTitle, content: editingContent, isGenerating: false } : m
         ));
       }
       
@@ -410,6 +426,34 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     }
   };
 
+  // ★★★ 表示用メモリストの作成 ★★★
+  const displayMemos = React.useMemo(() => {
+    const transformedGeneratingMemos: Memo[] = generatingMemos.map(genMemo => {
+      let statusText = '';
+      switch (genMemo.status) {
+        case 'prompt_creating': statusText = 'アイデアを分析中...'; break;
+        case 'memo_generating': statusText = 'AIがメモを作成中...'; break;
+        case 'saving': statusText = 'メモを保存中...'; break;
+        case 'error': statusText = `エラー: ${genMemo.errorMessage || '不明なエラー'}`; break;
+        default: statusText = '処理中...';
+      }
+      return {
+        id: genMemo.id, // 一時的なID
+        title: genMemo.title,
+        content: '', // ★★★ リンターエラー修正: content の後にカンマを追加 ★★★
+        created_at: new Date(parseInt(genMemo.id)).toISOString(), // 一時IDから日付生成
+        updated_at: new Date(parseInt(genMemo.id)).toISOString(),
+        created_by: 'AI Agent',
+        is_important: false,
+        is_ai_generated: true,
+        isGenerating: true,
+        statusText: statusText,
+      };
+    });
+    // generatingMemos (新しいものが上) -> memos (更新日時順)
+    return [...transformedGeneratingMemos, ...memos];
+  }, [generatingMemos, memos]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 pb-2 sticky top-0 z-10 border-b">
@@ -418,7 +462,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
           {!isEditingNewMemo && !selectedMemo && (
             <Button variant="outline" onClick={() => {
               setIsEditingNewMemo(true);
-              setMemoViewExpanded(true); // ★ 新規メモ編集開始時も表示状態を開始
+              setMemoViewExpanded(true); 
             }}>
               <PlusCircle className="mr-2 h-4 w-4" />
               新規メモ
@@ -533,93 +577,91 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
           <>
             <MemoTemplateSuggestions 
               selectedSourceNames={selectedSourceNames} 
-              // onMemoGenerated={handleAiMemoGenerated} // ★ このProps渡しを削除
             />
-            {/* AIによって生成されたメモの表示エリアを削除 */}
-            {/* {aiGeneratedDisplayMemos.length > 0 && ( ... )} */}
             
             <div>
-              <h3 className="text-sm font-medium text-gray-500 mb-4">作成済みメモ</h3>
+              <h3 className="text-sm font-medium text-gray-500 mb-4 mt-6">作成済みメモ</h3> {/* mt-6で少し間隔調整 */}
               {isLoading && <p className="text-center py-8 text-gray-500">メモを読み込み中...</p>}
               {error && (
                 <div className="p-4 border border-red-200 rounded-lg bg-red-50 text-red-600 text-center">
                   エラー: {error.message || 'メモの読み込みに失敗しました。'}
                 </div>
               )}
-              {!isLoading && !error && memos.length === 0 && (
+              {!isLoading && !error && displayMemos.length === 0 && (
                 <div className="p-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50 text-center text-gray-400">
                   <div className="text-4xl mb-2">📝</div>
                   <p>作成済みのメモはありません。</p>
                   <p className="text-xs mt-1">新規メモボタンから最初のメモを作成しましょう。</p>
                 </div>
               )}
-              {!isLoading && !error && memos.length > 0 && (
+              {!isLoading && !error && displayMemos.length > 0 && (
                 <div className="divide-y divide-gray-200">
-                  {memos.map((memo) => (
+                  {displayMemos.map((memo) => (
                     <div
                       key={memo.id}
-                      className="group cursor-pointer py-3 hover:bg-gray-50 transition-colors duration-150"
-                      onClick={() => handleViewMemo(memo.id)}
+                      className={`group cursor-pointer py-3 hover:bg-gray-50 transition-colors duration-150 ${memo.isGenerating ? 'opacity-75' : ''}`}
+                      onClick={() => memo.isGenerating ? null : handleViewMemo(memo.id)}
                     >
-                      <div className={`pl-3 ${
-                        memo.is_important ? 'border-l-2 border-l-red-400' : 'border-l-2 border-l-transparent'
-                      }`}>
-                        
-                        {/* ヘッダー行 */}
+                      <div className={`pl-3 ${memo.is_important && !memo.isGenerating ? 'border-l-2 border-l-red-400' : 'border-l-2 border-l-transparent'}`}>
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2 min-w-0 flex-1">
-                            {memo.is_important && (
+                            {memo.is_important && !memo.isGenerating && (
                               <Flag size={12} className="text-red-500 fill-red-500 flex-shrink-0" />
                             )}
                             <h4 className="font-medium text-sm text-gray-900 truncate">
                               {memo.title}
                             </h4>
                           </div>
-                          
-                          {/* アクションボタン */}
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (togglingImportantId === memo.id) return;
-                                handleToggleImportant(memo.id, !memo.is_important);
-                              }}
-                              disabled={togglingImportantId === memo.id}
-                              className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
-                            >
-                              {togglingImportantId === memo.id ? (
-                                <span className="animate-spin h-2 w-2 border border-red-500 border-t-transparent rounded-full"></span>
-                              ) : (
-                                <Flag size={10} className={memo.is_important ? "text-red-500 fill-red-500" : ""} />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteMemo(memo.id);
-                              }}
-                              disabled={isDeleting && deletingMemoId === memo.id}
-                              className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
-                            >
-                              {isDeleting && deletingMemoId === memo.id ? (
-                                <span className="text-xs leading-none">...</span>
-                              ) : (
-                                <Trash2 size={10} />
-                              )}
-                            </Button>
-                          </div>
+                          {!memo.isGenerating && (
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (togglingImportantId === memo.id) return;
+                                  handleToggleImportant(memo.id, !memo.is_important);
+                                }}
+                                disabled={togglingImportantId === memo.id}
+                                className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                              >
+                                {togglingImportantId === memo.id ? (
+                                  <span className="animate-spin h-2 w-2 border border-red-500 border-t-transparent rounded-full"></span>
+                                ) : (
+                                  <Flag size={10} className={memo.is_important ? "text-red-500 fill-red-500" : ""} />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteMemo(memo.id);
+                                }}
+                                disabled={isDeleting && deletingMemoId === memo.id}
+                                className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                              >
+                                {isDeleting && deletingMemoId === memo.id ? (
+                                  <span className="text-xs leading-none">...</span>
+                                ) : (
+                                  <Trash2 size={10} />
+                                )}
+                              </Button>
+                            </div>
+                          )}
                         </div>
-
-                        {/* コンテンツプレビューと日時 */}
                         <div className="flex items-center justify-between text-xs text-gray-500">
-                          <p className="truncate flex-1 mr-2">
-                            {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').substring(0, 60)}
-                            {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').length > 60 && '...'}
-                          </p>
+                          {memo.isGenerating ? (
+                            <div className="flex items-center text-blue-600">
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              <span>{memo.statusText}</span>
+                            </div>
+                          ) : (
+                            <p className="truncate flex-1 mr-2">
+                              {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').substring(0, 60)}
+                              {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').length > 60 && '...'}
+                            </p>
+                          )}
                           <span className="flex-shrink-0">
                             {new Date(memo.updated_at).toLocaleDateString('ja-JP', {
                               month: 'numeric',
@@ -629,7 +671,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                             })}
                           </span>
                         </div>
-                        
                       </div>
                     </div>
                   ))}

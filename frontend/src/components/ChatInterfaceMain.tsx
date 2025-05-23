@@ -21,7 +21,8 @@ interface Message {
   id: string;
   text: string;
   sender: 'user' | 'ai';
-  sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number }>;
+  sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number; original_file_name?: string }>;
+  isStreaming?: boolean;
 }
 
 export type AiVerbosity = 'concise' | 'default' | 'detailed';
@@ -47,7 +48,15 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       text: inputValue,
       sender: 'user',
     };
-    setMessages((prevMessages) => [...prevMessages, userMessage]);
+    const tempAiMessageId = Date.now().toString() + '-ai-streaming';
+    const initialAiMessage: Message = {
+      id: tempAiMessageId,
+      text: '',
+      sender: 'ai',
+      isStreaming: true,
+      sources: [],
+    };
+    setMessages((prevMessages) => [...prevMessages, userMessage, initialAiMessage]);
     setInputValue('');
     setIsLoading(true);
 
@@ -61,58 +70,150 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     };
     console.log('[ChatInterfaceMain] API request body:', apiRequestBody);
 
+    const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
+
     try {
       const response = await fetch('/api/qa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          query: userMessage.text,
-          verbosity: aiVerbosity,
-          source_filenames: selectedSourceNames
-        }),
+        body: JSON.stringify(apiRequestBody),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: "APIからのエラー応答が不正です。" }));
+        setMessages((prevMessages) => 
+          prevMessages.map(msg => 
+            msg.id === tempAiMessageId 
+              ? { ...msg, text: errorData.error || `APIエラー: ${response.status}`, isStreaming: false } 
+              : msg
+          )
+        );
         throw new Error(errorData.error || `APIエラー: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      console.log('[ChatInterfaceMain] API response received:', {
-        answerLength: data.answer?.length || 0,
-        sourcesCount: data.sources?.length || 0,
-        verbosityUsed: aiVerbosity
-      });
+      if (response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedData = '';
+        let finishedStreamingText = false;
 
-      const aiMessage: Message = {
-        id: Date.now().toString() + '-ai',
-        text: data.answer || "回答がありませんでした。",
-        sender: 'ai',
-        sources: data.sources,
-      };
-      setMessages((prevMessages) => [...prevMessages, aiMessage]);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (!finishedStreamingText && accumulatedData) {
+                setMessages((prevMessages) =>
+                    prevMessages.map(msg => 
+                        msg.id === tempAiMessageId ? { ...msg, text: accumulatedData, isStreaming: false } : msg
+                    )
+                );
+            } else if (!accumulatedData && !finishedStreamingText) {
+                 setMessages((prevMessages) =>
+                    prevMessages.map(msg => 
+                        msg.id === tempAiMessageId ? { ...msg, text: "AIからの応答が空でした。", isStreaming: false } : msg
+                    )
+                );
+            }
+             setMessages((prevMessages) =>
+              prevMessages.map(msg => 
+                msg.id === tempAiMessageId ? { ...msg, isStreaming: false } : msg
+              )
+            );
+            break;
+          }
+          accumulatedData += decoder.decode(value, { stream: true });
+          
+          if (!finishedStreamingText) {
+            const separatorIndex = accumulatedData.indexOf(sourcesSeparator);
+            if (separatorIndex !== -1) {
+              const textPart = accumulatedData.substring(0, separatorIndex);
+              const sourcesJsonPart = accumulatedData.substring(separatorIndex + sourcesSeparator.length);
+              
+              setMessages((prevMessages) =>
+                prevMessages.map(msg => 
+                  msg.id === tempAiMessageId ? { ...msg, text: textPart, isStreaming: false } : msg
+                )
+              );
+              finishedStreamingText = true;
+              accumulatedData = sourcesJsonPart;
+              
+              try {
+                const sources = JSON.parse(accumulatedData);
+                setMessages((prevMessages) =>
+                  prevMessages.map(msg => 
+                    msg.id === tempAiMessageId ? { ...msg, sources: sources, isStreaming: false } : msg
+                  )
+                );
+                accumulatedData = "";
+              } catch (e) {
+                console.warn("Failed to parse sources JSON, data might be incomplete or malformed:", accumulatedData, e);
+                 setMessages((prevMessages) =>
+                    prevMessages.map(msg => 
+                        msg.id === tempAiMessageId ? { ...msg, text: msg.text + "\n(参照情報の取得に失敗しました)", sources: [], isStreaming: false } : msg
+                    )
+                );
+              }
+            } else {
+              setMessages((prevMessages) =>
+                prevMessages.map(msg => 
+                  msg.id === tempAiMessageId ? { ...msg, text: accumulatedData } : msg
+                )
+              );
+            }
+          } else {
+            try {
+                const sources = JSON.parse(accumulatedData);
+                setMessages((prevMessages) =>
+                  prevMessages.map(msg => 
+                    msg.id === tempAiMessageId ? { ...msg, sources: sources, isStreaming: false } : msg
+                  )
+                );
+                accumulatedData = "";
+              } catch (e) {
+                console.log("Waiting for more source data chunks...");
+              }
+          }
+        }
+      } else {
+        console.warn("API response body is not streamable, attempting to parse as JSON.");
+        const data = await response.json().catch(() => ({ answer: "AIからの応答形式が不正です。", sources: [] }));
+        setMessages((prevMessages) =>
+          prevMessages.map(msg => 
+            msg.id === tempAiMessageId 
+              ? { ...msg, text: data.answer || "回答がありませんでした。", sources: data.sources || [], isStreaming: false }
+              : msg
+          )
+        );
+      }
+
     } catch (error) {
-      console.error("APIリクエストエラー:", error);
-      const errorMessage: Message = {
-        id: Date.now().toString() + '-error',
-        text: error instanceof Error ? error.message : "不明なエラーが発生しました。",
-        sender: 'ai',
-      };
-      setMessages((prevMessages) => [...prevMessages, errorMessage]);
+      console.error("APIリクエストエラー（catchブロック）:", error);
+      setMessages((prevMessages) => {
+        const aiMsgExists = prevMessages.find(m => m.id === tempAiMessageId);
+        if (aiMsgExists) {
+          return prevMessages.map(msg => 
+            msg.id === tempAiMessageId 
+              ? { ...msg, text: (msg.text && msg.text !== '' ? msg.text + "\n" : "") + (error instanceof Error ? error.message : "不明なエラーが発生しました。"), isStreaming: false } 
+              : msg
+          );
+        }
+        return prevMessages;
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleMemoMessage = (message: Message) => {
+    if (message.isStreaming) {
+        console.log("Cannot memoize a message that is still streaming.");
+        alert("AIの回答が完了してからメモを作成してください。");
+        return;
+    }
     const title = `AIの回答 (${new Date().toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`;
     const content = message.text;
-
     setNewMemoRequest({ title, content });
-
     console.log('New memo request set to store:', { title, content });
   };
 
@@ -167,6 +268,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                   className={`p-3 rounded-lg ${
                     msg.sender === 'user'
                       ? 'bg-primary text-primary-foreground max-w-[70%]'
+                      : msg.text === '' && msg.isStreaming
+                      ? 'bg-muted text-muted-foreground animate-pulse max-w-[95%] relative'
                       : 'bg-muted text-muted-foreground max-w-[95%] relative'
                   }`}
                 >
@@ -175,10 +278,10 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                   ) : (
                     <>
                       <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
-                        <ReactMarkdown>{msg.text}</ReactMarkdown>
+                        {msg.text === '' && msg.isStreaming ? 'AIが考え中...' : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                       </div>
                       
-                      {msg.sources && msg.sources.length > 0 && (
+                      {msg.sources && !msg.isStreaming && msg.sources.length > 0 && (
                         <div className="mt-2 pt-2 border-t">
                           <p className="text-xs font-semibold mb-1">参照元:</p>
                           <ul className="list-disc list-inside text-xs">
@@ -191,29 +294,24 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                         </div>
                       )}
                       
-                      <div className="mt-3 flex justify-end">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 px-3 text-xs font-medium bg-background/80 hover:bg-accent hover:text-accent-foreground transition-colors"
-                          onClick={() => handleMemoMessage(msg)}
-                        >
-                          <NotebookPen size={14} className="mr-1.5" />
-                          メモを作成
-                        </Button>
-                      </div>
+                      {!msg.isStreaming && msg.text && (
+                        <div className="mt-3 flex justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 px-3 text-xs font-medium bg-background/80 hover:bg-accent hover:text-accent-foreground transition-colors"
+                            onClick={() => handleMemoMessage(msg)}
+                          >
+                            <NotebookPen size={14} className="mr-1.5" />
+                            メモを作成
+                          </Button>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
               </div>
             ))}
-            {isLoading && (
-                <div className="flex justify-start mb-3">
-                    <div className="p-3 rounded-lg bg-muted text-muted-foreground animate-pulse">
-                        AIが考え中...
-                    </div>
-                </div>
-            )}
           </div>
         </ScrollArea>
       </div>

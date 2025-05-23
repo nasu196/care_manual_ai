@@ -5,6 +5,14 @@ interface NewMemoRequest {
   content: string; // Markdown content from chat
 }
 
+// ★ 生成中メモの型定義
+export interface GeneratingMemo {
+  id: string; // 一時的なID (例: Date.now().toString())
+  title: string;
+  status: 'prompt_creating' | 'memo_generating' | 'saving' | 'error';
+  errorMessage?: string;
+}
+
 interface MemoStoreState {
   newMemoRequest: NewMemoRequest | null;
   setNewMemoRequest: (request: NewMemoRequest | null) => void;
@@ -13,6 +21,12 @@ interface MemoStoreState {
   triggerMemoListRefresh: () => void; // ★ 追加: リスト更新をトリガーする関数
   isMemoViewExpanded: boolean; // ★ 追加: メモ表示・編集中かどうか
   setMemoViewExpanded: (expanded: boolean) => void; // ★ 追加: メモ表示状態を設定
+
+  // ★★★ 生成中メモの進捗管理用 state と actions ★★★
+  generatingMemos: GeneratingMemo[];
+  addGeneratingMemo: (memo: GeneratingMemo) => void;
+  updateGeneratingMemoStatus: (id: string, status: GeneratingMemo['status'], errorMessage?: string) => void;
+  removeGeneratingMemo: (id: string) => void;
 }
 
 export const useMemoStore = create<MemoStoreState>((set) => ({
@@ -23,4 +37,19 @@ export const useMemoStore = create<MemoStoreState>((set) => ({
   triggerMemoListRefresh: () => set({ memoListLastUpdated: Date.now() }), // ★ 実装
   isMemoViewExpanded: false, // ★ 初期値を設定
   setMemoViewExpanded: (expanded) => set({ isMemoViewExpanded: expanded }), // ★ 実装
+
+  // ★★★ 生成中メモの進捗管理用 state と actions の実装 ★★★
+  generatingMemos: [],
+  addGeneratingMemo: (memo) => 
+    set((state) => ({ generatingMemos: [...state.generatingMemos, memo] })),
+  updateGeneratingMemoStatus: (id, status, errorMessage) => 
+    set((state) => ({
+      generatingMemos: state.generatingMemos.map((m) => 
+        m.id === id ? { ...m, status, errorMessage: errorMessage || m.errorMessage } : m
+      ),
+    })),
+  removeGeneratingMemo: (id) => 
+    set((state) => ({ 
+      generatingMemos: state.generatingMemos.filter((m) => m.id !== id) 
+    })),
 })); 
