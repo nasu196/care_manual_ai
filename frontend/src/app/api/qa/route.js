@@ -165,6 +165,30 @@ export async function POST(request) {
 
     console.log(`[API /api/qa] User Query: "${userQuery}", Source Filenames:`, validSourceFilenames);
 
+    // 日本語ファイル名対応: original_file_nameから対応するfile_nameを取得
+    let encodedSourceFilenames = null;
+    if (validSourceFilenames && validSourceFilenames.length > 0) {
+      console.log(`[API /api/qa] Looking up encoded filenames for:`, validSourceFilenames);
+      
+      const { data: manualData, error: manualError } = await supabase
+        .from('manuals')
+        .select('file_name, original_file_name')
+        .in('original_file_name', validSourceFilenames);
+
+      if (manualError) {
+        console.error(`[API /api/qa] Error fetching manual data:`, manualError);
+        return NextResponse.json({ error: `ファイル名の解決に失敗しました: ${manualError.message}` }, { status: 500 });
+      }
+
+      if (manualData && manualData.length > 0) {
+        encodedSourceFilenames = manualData.map(manual => manual.file_name);
+        console.log(`[API /api/qa] Encoded filenames for RPC:`, encodedSourceFilenames);
+      } else {
+        console.warn(`[API /api/qa] No matching files found for:`, validSourceFilenames);
+        encodedSourceFilenames = []; // 空配列にして検索結果なしにする
+      }
+    }
+
     // --- 第1段階: 質問分析と検索クエリ生成 ---
     console.log(`[Phase 1] ユーザーの質問を分析中: "${userQuery}"`);
     
@@ -229,7 +253,7 @@ export async function POST(request) {
         query_embedding: queryEmbedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
-        p_selected_filenames: validSourceFilenames
+        p_selected_filenames: encodedSourceFilenames // ★ エンコードされたファイル名を使用
       });
 
       if (rpcError) {

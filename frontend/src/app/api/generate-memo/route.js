@@ -98,6 +98,28 @@ export async function POST(request) {
 
     console.log(`[API /api/generate-memo] Source Filenames:`, sourceFilenames);
 
+    // 日本語ファイル名対応: original_file_nameから対応するfile_nameを取得
+    console.log(`[API /api/generate-memo] Looking up encoded filenames for:`, sourceFilenames);
+    
+    const { data: manualData, error: manualError } = await supabase
+      .from('manuals')
+      .select('file_name, original_file_name')
+      .in('original_file_name', sourceFilenames);
+
+    if (manualError) {
+      console.error(`[API /api/generate-memo] Error fetching manual data:`, manualError);
+      return NextResponse.json({ error: `ファイル名の解決に失敗しました: ${manualError.message}` }, { status: 500 });
+    }
+
+    let encodedSourceFilenames = [];
+    if (manualData && manualData.length > 0) {
+      encodedSourceFilenames = manualData.map(manual => manual.file_name);
+      console.log(`[API /api/generate-memo] Encoded filenames for RPC:`, encodedSourceFilenames);
+    } else {
+      console.warn(`[API /api/generate-memo] No matching files found for:`, sourceFilenames);
+      return NextResponse.json({ error: '指定されたファイルが見つかりませんでした。' }, { status: 404 });
+    }
+
     // --- RAG: 参照情報取得 ---
     console.log('[MemoGen RAG] 参照情報を検索中...');
     const matchThreshold = 0.4;
@@ -110,7 +132,7 @@ export async function POST(request) {
     console.log(`[MemoGen RAG] Using generic search query: "${genericSearchQuery}" for specified files.`);
     const queryEmbedding = await embeddings.embedQuery(genericSearchQuery);
 
-    for (const filename of sourceFilenames) {
+    for (const filename of encodedSourceFilenames) { // ★ エンコードされたファイル名を使用
         const { data: rpcData, error: rpcError } = await supabase.rpc('match_manual_chunks', {
             query_embedding: queryEmbedding,
             match_threshold: matchThreshold,

@@ -71,12 +71,12 @@ serve(async (req: Request) => {
         console.log("Fetching summaries for selected files from 'manuals' table...");
         let query = supabase
             .from('manuals')
-            .select('file_name, summary')
+            .select('file_name, original_file_name, summary')
             .not('summary', 'is', null)
             .filter('summary', 'not.eq', '');
         
-        // selectedFileNames があれば、それでフィルタリング
-        query = query.in('file_name', selectedFileNames);
+        // selectedFileNames があれば、original_file_name でフィルタリング（日本語ファイル名対応）
+        query = query.in('original_file_name', selectedFileNames);
         
         const { data: summariesData, error: fetchError } = await query;
 
@@ -98,8 +98,9 @@ serve(async (req: Request) => {
         // formattedSummaries の生成方法を修正 (リンターエラー対策)
         let summaryStrings: string[] = [];
         for (const item of summariesData) {
-            // 変更: file_name をよりAIが認識しやすい形式でサマリーに含める
-            summaryStrings.push(`ドキュメント名: ${item.file_name}\n内容サマリー:\n${item.summary}`);
+            // 変更: original_file_name を使用し、AIが認識しやすい形式でサマリーに含める
+            const displayName = item.original_file_name || item.file_name;
+            summaryStrings.push(`ドキュメント名: ${displayName}\n内容サマリー:\n${item.summary}`);
         }
         const formattedSummaries = summaryStrings.join('\n\n---\n\n');
 
