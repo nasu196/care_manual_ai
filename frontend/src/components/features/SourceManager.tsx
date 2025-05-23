@@ -131,22 +131,34 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     // 日本語ファイル名対応: Base64エンコーディングを使用
     const encodeFileName = (name: string): string => {
       try {
-        // ファイル名と拡張子を分離
         const lastDotIndex = name.lastIndexOf('.');
-        const fileName = lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name;
+        const fileNameOnly = lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name;
         const extension = lastDotIndex !== -1 ? name.substring(lastDotIndex) : '';
+
+        // 1. ファイル名部分をUTF-8のバイト配列にエンコード
+        const utf8Bytes = new TextEncoder().encode(fileNameOnly);
         
-        // ファイル名部分をBase64エンコード（URLセーフ）
-        const encodedName = btoa(encodeURIComponent(fileName))
+        // 2. バイト配列をBase64文字列にエンコード
+        //    Uint8Arrayの各要素を文字コードとして扱い、バイナリ文字列に変換
+        let binaryString = '';
+        utf8Bytes.forEach((byte) => {
+          binaryString += String.fromCharCode(byte);
+        });
+        let base64Encoded = btoa(binaryString);
+        
+        // URLセーフな文字に置換し、パディングを削除
+        base64Encoded = base64Encoded
           .replace(/\+/g, '-')
           .replace(/\//g, '_')
           .replace(/=+$/, '');
         
-        return `${encodedName}${extension}`;
+        return `${base64Encoded}${extension}`;
       } catch (error) {
         console.error('Failed to encode filename:', error);
-        // エンコードに失敗した場合は英数字のみに変換
-        return name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        // エンコードに失敗した場合は英数字のみに変換し、拡張子を保持
+        const safeName = name.substring(0, name.lastIndexOf('.')).replace(/[^a-zA-Z0-9-]/g, '_');
+        const ext = name.substring(name.lastIndexOf('.'));
+        return `${safeName}${ext}`;
       }
     };
 
