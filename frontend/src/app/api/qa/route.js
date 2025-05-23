@@ -164,11 +164,11 @@ export async function POST(request) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') continue;
       console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
       const embedding = await embeddings.embedQuery(searchQuery);
-      const { data: chunks, error: matchError } = await supabase.rpc('match_manual_chunks_for_qa', {
+      const { data: chunks, error: matchError } = await supabase.rpc('match_manual_chunks', {
         query_embedding: embedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
-        source_filenames_filter: encodedSourceFilenamesForRpc,
+        p_selected_filenames: encodedSourceFilenamesForRpc,
       });
       if (matchError) {
         console.error(`[Phase 2] チャンク検索エラー (クエリ: "${searchQuery}"):`, matchError);
@@ -190,17 +190,29 @@ export async function POST(request) {
     const sourcesForClient = topNChunks.map(chunk => ({
       id: chunk.id.toString(), 
       page_number: chunk.page_number,
-      text_snippet: chunk.content ? chunk.content.substring(0, 200) : "",
+      text_snippet: chunk.chunk_text ? chunk.chunk_text.substring(0, 200) : "",
       similarity: chunk.similarity,
-      original_file_name: chunk.original_file_name || chunk.file_name 
+      original_file_name: chunk.manual_filename
     }));
+
+    // ★ デバッグログ追加: sourcesForClient の内容確認
+    console.log("[API /api/qa] Sources for client:", JSON.stringify(sourcesForClient, null, 2));
 
     // --- 第3段階: 回答生成 (ストリーミング対応) ---
     console.log("[Phase 3] LLMに回答生成をリクエスト中 (ストリーミング開始)...");
 
     const contextForLLM = topNChunks.map((chunk, index) => 
-      `背景情報 ${index + 1} (ファイル: ${chunk.original_file_name || chunk.file_name}, ページ: ${chunk.page_number}, 類似度: ${chunk.similarity.toFixed(3)}):\n${chunk.content}`
+      `背景情報 ${index + 1} (ファイル: ${chunk.manual_filename || "不明なファイル"}, ページ: ${chunk.page_number !== null ? chunk.page_number : "N/A"}, 類似度: ${chunk.similarity.toFixed(3)}):\n${chunk.chunk_text}`
     ).join('\n\n---\n\n');
+
+    // ★ デバッグログ追加: contextForLLM の内容確認
+    console.log("[API /api/qa] Context for LLM (first 500 chars):", contextForLLM.substring(0, 500));
+    if (topNChunks.length > 0 && (!contextForLLM || contextForLLM.trim() === "")) {
+      console.warn("[API /api/qa] Warning: contextForLLM is empty despite having chunks. Check chunk.content.");
+      topNChunks.forEach((chunk, index) => {
+        console.log(`[API /api/qa] Chunk ${index} content (first 100 chars):`, chunk.chunk_text ? chunk.chunk_text.substring(0,100) : "[EMPTY CHUNK CONTENT]");
+      });
+    }
 
     const analysisSummaryForPrompt = JSON.stringify(analysisData, null, 2);
     const answerGenerationSystemPrompt = `
@@ -244,6 +256,10 @@ ${userQuery}
 `;
 
     const fullPromptForGemini = answerGenerationSystemPrompt;
+    // ★ デバッグログ追加: fullPromptForGemini の背景情報部分確認
+    const contextStartIndex = fullPromptForGemini.indexOf("背景情報:\n");
+    const promptContextExcerpt = fullPromptForGemini.substring(contextStartIndex, contextStartIndex + 500);
+    console.log("[API /api/qa] Excerpt of full prompt (context part):", promptContextExcerpt);
 
     const stream = new ReadableStream({
       async start(controller) {
