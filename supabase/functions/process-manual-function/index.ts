@@ -69,6 +69,8 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
   const uniqueFileName = `${Date.now()}_${randomSuffix}_${path.basename(fileName)}`;
   const fileExtension = path.extname(fileName).toLowerCase();
 
+  console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Starting for ${fileName}, ext: ${fileExtension}`); // ★ 追加
+
   console.log(`Supabase Storageからファイル ${fileName} をダウンロード開始...`);
   
   const appTmpDir = path.join(TMP_DIR_BASE, 'process-manual-tmp');
@@ -101,6 +103,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
     let docs: Array<{ pageContent: string; metadata: Record<string, any> }> = [];
 
+    console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Before parsing (${fileExtension}): ${actualTmpFilePath}`); // ★ 追加
     if (fileExtension === '.pdf') {
       console.log("\npdf-parseでドキュメントを読み込み開始...");
       try {
@@ -187,6 +190,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
       console.warn(`未対応のファイル形式です: ${fileExtension}`);
       return null;
     }
+    console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] After parsing. Doc count: ${docs.length}`); // ★ 追加
     
     // docs の最終検証 ★
     if (!docs || !Array.isArray(docs) || docs.length === 0) {
@@ -315,16 +319,16 @@ async function processAndStoreDocuments(
     embeddingsClient: GoogleGenerativeAIEmbeddings,
     generativeAiClient: GoogleGenerativeAI // ★ 引数追加
 ) {
-  console.log("[processAndStoreDocuments] Start"); // ★ 追加
+  console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Start`); // ★ タイムスタンプ追加
   if (!supabaseClient) throw new Error("Supabase client not initialized");
   if (!embeddingsClient) throw new Error("Embeddings client not initialized");
   
   if (!processedFile || !processedFile.docs || processedFile.docs.length === 0) {
-    console.log("[processAndStoreDocuments] No parsed documents, skipping."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] No parsed documents, skipping.`); // ★ タイムスタンプ追加
     return false;
   }
   const parsedDocs = processedFile.docs;
-  console.log(`[processAndStoreDocuments] Processing file: ${sourceFileName}, original: ${originalFileName || 'N/A'}, Parsed doc count: ${parsedDocs.length}`); // ★ 追加
+  console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Processing file: ${sourceFileName}, original: ${originalFileName || 'N/A'}, Parsed doc count: ${parsedDocs.length}`); // ★ タイムスタンプ追加
   
   try {
     let manualId: string;
@@ -333,7 +337,7 @@ async function processAndStoreDocuments(
     let existingManualData: { id: string } | null = null;
     let selectQueryError: any = null;
 
-    console.log("[processAndStoreDocuments] Attempting to check for existing manual...");
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Attempting to check for existing manual (before await)...`); // ★ タイムスタンプ追加
     try {
         const result = await supabaseClient
             .from('manuals')
@@ -342,39 +346,39 @@ async function processAndStoreDocuments(
             .single();
         existingManualData = result.data;
         selectQueryError = result.error;
-        console.log("[processAndStoreDocuments] Supabase select query for existing manual executed successfully.");
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Supabase select query for existing manual executed successfully.`);
     } catch (e) {
-        console.error("[processAndStoreDocuments] CRITICAL: Exception during supabaseClient.select for existing manual:", e);
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: Exception during supabaseClient.select for existing manual:`, e);
         // e が null の場合、新しいErrorオブジェクトを作成してスローする
         const errorToThrow = e === null ? new Error("Supabase select query threw or rejected with null") : e;
         throw errorToThrow;
     }
 
     if (selectQueryError && selectQueryError.code !== 'PGRST116') { // PGRST116は「該当なし」のエラーコードなので無視
-        console.error(`[processAndStoreDocuments] Error from Supabase query (checking existing manual for ${sourceFileName}):`, selectQueryError);
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error from Supabase query (checking existing manual for ${sourceFileName}):`, selectQueryError);
         throw selectQueryError;
     }
-    console.log(`[processAndStoreDocuments] Existing manual check complete. Found: ${existingManualData ? existingManualData.id : 'null'}`);
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Existing manual check complete. Found: ${existingManualData ? existingManualData.id : 'null'}`); // ★ タイムスタンプ追加
     const existingManual = existingManualData; // 後続のロジックのために代入
     // --- 修正ここまで ---
 
     let summaryText: string | null = null;
     if (parsedDocs.length > 0 && parsedDocs[0] && parsedDocs[0].pageContent) {
-        console.log("[processAndStoreDocuments] Generating summary..."); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Generating summary...`); // ★ タイムスタンプ追加
         try {
             summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient);
-            console.log(`[processAndStoreDocuments] Summary generation result: ${summaryText ? 'Success' : 'Skipped/Null'}, Length: ${summaryText?.length || 0}`); // ★ 追加
+            console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Summary generation result: ${summaryText ? 'Success' : 'Skipped/Null'}, Length: ${summaryText?.length || 0}`); // ★ タイムスタンプ追加
         } catch (summaryError) {
-            console.error("[processAndStoreDocuments] Error during summary generation (continuing):", summaryError); // ★ 追加
+            console.error("[processAndStoreDocuments] Error during summary generation (continuing):", summaryError);
             summaryText = null; 
         }
     } else {
-        console.log("[processAndStoreDocuments] No content for summary, skipping."); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] No content for summary, skipping.`); // ★ タイムスタンプ追加
     }
 
     if (existingManual && existingManual.id) {
       manualId = existingManual.id;
-      console.log(`[processAndStoreDocuments] Using existing manual ID: ${manualId}`); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Using existing manual ID: ${manualId}`); // ★ タイムスタンプ追加
       const updateData: any = {
         original_file_name: originalFileName || sourceFileName,
         metadata: { 
@@ -386,18 +390,18 @@ async function processAndStoreDocuments(
       if (summaryText !== null) {
         updateData.summary = summaryText;
       }
-      console.log("[processAndStoreDocuments] Updating existing manual with data:", updateData); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Updating existing manual with data:`, updateData); // ★ タイムスタンプ追加
       const { error: updateError } = await supabaseClient
         .from('manuals')
         .update(updateData)
         .eq('id', manualId);
       if (updateError) {
-        console.error(`[processAndStoreDocuments] Error updating existing manual ID=${manualId}:`, updateError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error updating existing manual ID=${manualId}:`, updateError); // ★ タイムスタンプ追加
       } else {
-        console.log(`[processAndStoreDocuments] Successfully updated existing manual ID=${manualId}`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully updated existing manual ID=${manualId}`); // ★ タイムスタンプ追加
       }
     } else {
-      console.log("[processAndStoreDocuments] Creating new manual record..."); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Creating new manual record...`); // ★ タイムスタンプ追加
       const totalPages = (parsedDocs[0] && parsedDocs[0].metadata) ? 
                          (parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length)) : 1;
       const insertData: any = {
@@ -412,21 +416,21 @@ async function processAndStoreDocuments(
       if (summaryText !== null) {
         insertData.summary = summaryText;
       }
-      console.log("[processAndStoreDocuments] Inserting new manual with data:", insertData); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Inserting new manual with data:`, insertData); // ★ タイムスタンプ追加
       const { data: newManual, error: insertError } = await supabaseClient
         .from('manuals')
         .insert(insertData)
         .select('id')
         .single();
       if (insertError || !newManual || !newManual.id) { 
-        console.error(`[processAndStoreDocuments] Error inserting new manual for ${sourceFileName}:`, insertError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error inserting new manual for ${sourceFileName}:`, insertError); // ★ タイムスタンプ追加
         throw insertError || new Error("Failed to insert new manual and retrieve ID.");
       }
       manualId = newManual.id;
-      console.log(`[processAndStoreDocuments] New manual created with ID: ${manualId}`); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] New manual created with ID: ${manualId}`); // ★ タイムスタンプ追加
     }
 
-    console.log(`[processAndStoreDocuments] Manual ID set to: ${manualId}`); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Manual ID set to: ${manualId}`); // ★ タイムスタンプ追加
     const splitter = new RecursiveCharacterTextSplitter({
       chunkSize: 2500,
       chunkOverlap: 400,
@@ -434,22 +438,22 @@ async function processAndStoreDocuments(
     });
 
     const chunks: ChunkObject[] = [];
-    console.log("[processAndStoreDocuments] Splitting documents into chunks..."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Splitting documents into chunks...`); // ★ タイムスタンプ追加
     for (let i = 0; i < parsedDocs.length; i++) {
       const doc = parsedDocs[i];
       const pageContent = doc.pageContent || "";
-      console.log(`[processAndStoreDocuments] Processing document ${i+1}/${parsedDocs.length}, content length: ${pageContent.length}`); // ★ 追加
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Processing document ${i+1}/${parsedDocs.length}, content length: ${pageContent.length}`); // ★ タイムスタンプ追加
       if (!pageContent.trim()) {
-          console.log(`[processAndStoreDocuments] Document ${i+1} is empty, skipping.`); // ★ 追加
+          console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Document ${i+1} is empty, skipping.`); // ★ タイムスタンプ追加
           continue;
       }
       let splitText: string[] = []; // ★ 初期化
       try {
-        console.log(`[processAndStoreDocuments] Calling splitter.splitText for doc ${i+1}...`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Calling splitter.splitText for doc ${i+1}...`); // ★ タイムスタンプ追加
         splitText = await splitter.splitText(pageContent);
-        console.log(`[processAndStoreDocuments] Doc ${i+1} split into ${splitText.length} chunks.`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Doc ${i+1} split into ${splitText.length} chunks.`); // ★ タイムスタンプ追加
       } catch (splitError) {
-        console.error(`[processAndStoreDocuments] Error splitting document ${i+1}:`, splitError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error splitting document ${i+1}:`, splitError); // ★ タイムスタンプ追加
         throw new Error(`Failed to split document: ${splitError instanceof Error ? splitError.message : 'Unknown error'}`);
       }
       
@@ -461,13 +465,13 @@ async function processAndStoreDocuments(
         });
       });
     }
-    console.log(`[processAndStoreDocuments] Total chunks created: ${chunks.length}`); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Total chunks created: ${chunks.length}`); // ★ タイムスタンプ追加
     if (chunks.length === 0) {
-        console.log("[processAndStoreDocuments] No chunks generated, finishing process."); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] No chunks generated, finishing process.`); // ★ タイムスタンプ追加
         return true;
     }
 
-    console.log("[processAndStoreDocuments] Embedding chunks..."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Embedding chunks...`); // ★ タイムスタンプ追加
     const chunkTextsForEmbedding = chunks.map(c => c.chunk_text);
     
     let chunkEmbeddings: number[][];
@@ -475,21 +479,21 @@ async function processAndStoreDocuments(
         if (!embeddingsClient) {
             throw new Error("Embeddings client is not initialized");
         }
-        console.log(`[processAndStoreDocuments] Calling embedDocuments for ${chunkTextsForEmbedding.length} texts...`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Calling embedDocuments for ${chunkTextsForEmbedding.length} texts...`); // ★ タイムスタンプ追加
         chunkEmbeddings = await embeddingsClient.embedDocuments(chunkTextsForEmbedding);
         if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) { 
-            console.error("[processAndStoreDocuments] Embeddings generation returned invalid result:", chunkEmbeddings); // ★ 追加
+            console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Embeddings generation returned invalid result:`, chunkEmbeddings); // ★ タイムスタンプ追加
             throw new Error("Embeddings generation returned invalid result");
         }
-        console.log(`[processAndStoreDocuments] Embeddings generated for ${chunkEmbeddings.length} chunks.`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Embeddings generated for ${chunkEmbeddings.length} chunks.`); // ★ タイムスタンプ追加
     } catch (embeddingError) {
-        console.error("[processAndStoreDocuments] Error during embedding generation:", embeddingError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error during embedding generation:`, embeddingError); // ★ タイムスタンプ追加
         throw new Error(`Embedding generation failed: ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
     }
 
     const chunksToInsert: ChunkObject[] = chunks.map((chunk, i) => {
         if (!chunkEmbeddings[i] || !Array.isArray(chunkEmbeddings[i])) { 
-            console.warn(`[processAndStoreDocuments] Warning: Invalid embedding for chunk ${i}, using empty array. Embedding data:`, chunkEmbeddings[i]); // ★ 追加
+            console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Warning: Invalid embedding for chunk ${i}, using empty array. Embedding data:`, chunkEmbeddings[i]); // ★ タイムスタンプ追加
             return {
                 ...chunk,
                 embedding: [], 
@@ -501,42 +505,42 @@ async function processAndStoreDocuments(
         };
     });
 
-    console.log("[processAndStoreDocuments] Deleting existing chunks..."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Deleting existing chunks...`); // ★ タイムスタンプ追加
     try {
         const { error: deleteChunksError } = await supabaseClient
             .from('manual_chunks')
             .delete()
             .eq('manual_id', manualId);
         if (deleteChunksError) {
-            console.error(`[processAndStoreDocuments] Error deleting existing chunks for manual_id=${manualId}:`, deleteChunksError); // ★ 追加
+            console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error deleting existing chunks for manual_id=${manualId}:`, deleteChunksError); // ★ タイムスタンプ追加
         } else {
-            console.log(`[processAndStoreDocuments] Successfully deleted existing chunks for manual_id=${manualId}`); // ★ 追加
+            console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully deleted existing chunks for manual_id=${manualId}`); // ★ タイムスタンプ追加
         }
     } catch (deleteError) {
-        console.error(`[processAndStoreDocuments] Unexpected error deleting existing chunks for manual_id=${manualId}:`, deleteError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Unexpected error deleting existing chunks for manual_id=${manualId}:`, deleteError); // ★ タイムスタンプ追加
     }
     
-    console.log("[processAndStoreDocuments] Inserting new chunks..."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Inserting new chunks...`); // ★ タイムスタンプ追加
     try {
         const { error: insertChunksError } = await supabaseClient
           .from('manual_chunks')
           .insert(chunksToInsert);
         if (insertChunksError) {
-          console.error("[processAndStoreDocuments] Error inserting new chunks:", insertChunksError); // ★ 追加
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error inserting new chunks:`, insertChunksError); // ★ タイムスタンプ追加
           throw insertChunksError;
         }
-        console.log(`[processAndStoreDocuments] Successfully inserted ${chunksToInsert.length} new chunks.`); // ★ 追加
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully inserted ${chunksToInsert.length} new chunks.`); // ★ タイムスタンプ追加
     } catch (insertError) {
-        console.error("[processAndStoreDocuments] Unexpected error inserting new chunks:", insertError); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Unexpected error inserting new chunks:`, insertError); // ★ タイムスタンプ追加
         throw new Error(`Chunk insertion failed: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`);
     }
     
-    console.log("[processAndStoreDocuments] Successfully completed."); // ★ 追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully completed.`); // ★ タイムスタンプ追加
     return true;
   } catch (error) {
-    console.error(`[processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ 追加
+    console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ タイムスタンプ追加
     if (error instanceof Error) {
-        console.error("[processAndStoreDocuments] Error details:", error.stack || error.message); // ★ 追加
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error details:`, error.stack || error.message); // ★ タイムスタンプ追加
     }
     return false;
   }
