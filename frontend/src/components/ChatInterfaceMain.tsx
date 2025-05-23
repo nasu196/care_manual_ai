@@ -324,10 +324,10 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
             placeholder="質問を入力してください..."
             value={inputValue}
             onChange={(_) => setInputValue(_.target.value)}
-            className="flex-1 h-12 md:h-10"
+            className="flex-1 h-12 text-base md:h-10 md:text-sm"
             disabled={isLoading}
           />
-          <Button type="submit" disabled={isLoading} className="h-12 md:h-10 px-4 md:px-6">
+          <Button type="submit" disabled={isLoading} className="h-12 text-base px-4 md:h-10 md:px-6 md:text-sm">
             {isLoading ? '送信中...' : '送信'}
           </Button>
         </form>

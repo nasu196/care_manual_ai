@@ -463,7 +463,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
             />
             <label
               htmlFor="select-all-sources"
-              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+              className="text-base font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 md:text-sm"
             >
               全てのソースを選択/解除
             </label>
@@ -534,7 +534,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
               <FileText className={`h-5 w-5 ${selectedSourceNames.includes(file.name) ? "text-primary" : "text-gray-500"}`} />
               <label 
                 htmlFor={`source-${file.name}`} 
-                className="text-sm font-medium truncate cursor-pointer flex-grow"
+                className="text-base font-medium truncate cursor-pointer flex-grow md:text-sm"
                 title={file.originalName || file.name}
               >
                 {file.originalName || file.name}

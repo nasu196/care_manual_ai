@@ -115,7 +115,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
               <TabsTrigger 
                 key={panel} 
                 value={panel}
-                className="h-full text-sm font-medium rounded-none border-transparent 
+                className="h-full text-base font-medium rounded-none border-transparent 
                            text-muted-foreground  
                            data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none
                            hover:bg-accent hover:text-accent-foreground 
