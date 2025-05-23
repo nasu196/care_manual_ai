@@ -337,22 +337,39 @@ async function processAndStoreDocuments(
     let existingManualData: { id: string } | null = null;
     let selectQueryError: any = null;
 
-    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Attempting to check for existing manual (before await)...`); // ★ タイムスタンプ追加
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Value of sourceFileName before DB query: '${sourceFileName}' (length: ${sourceFileName.length})`); // ★ 追加: sourceFileNameの値をログ出力
+
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 1: Initializing queryBuilder = supabaseClient.from('manuals')...`);
+    const queryBuilder = supabaseClient.from('manuals');
+    if (!queryBuilder) {
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: supabaseClient.from('manuals') returned null/undefined.`);
+        throw new Error("Failed to initialize query builder: supabaseClient.from('manuals') is null/undefined");
+    }
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 2: Initializing selectBuilder = queryBuilder.select('id')...`);
+    const selectBuilder = queryBuilder.select('id');
+    if (!selectBuilder) {
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: queryBuilder.select('id') returned null/undefined.`);
+        throw new Error("Failed to initialize select builder: queryBuilder.select('id') is null/undefined");
+    }
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Initializing filterBuilder = selectBuilder.eq('file_name', sourceFileName)...`);
+    const filterBuilder = selectBuilder.eq('file_name', sourceFileName);
+    if (!filterBuilder) {
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: selectBuilder.eq('file_name', ...) returned null/undefined.`);
+        throw new Error("Failed to initialize filter builder: selectBuilder.eq() is null/undefined");
+    }
+
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 4: Awaiting filterBuilder.single()...`);
     try {
-        const result = await supabaseClient
-            .from('manuals')
-            .select('id')
-            .eq('file_name', sourceFileName)
-            .single();
+        const result = await filterBuilder.single(); // ★ 分割したクエリを実行
         existingManualData = result.data;
         selectQueryError = result.error;
         console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Supabase select query for existing manual executed successfully.`);
     } catch (e) {
-        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: Exception during supabaseClient.select for existing manual:`, e);
-        // e が null の場合、新しいErrorオブジェクトを作成してスローする
-        const errorToThrow = e === null ? new Error("Supabase select query threw or rejected with null") : e;
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: Exception during filterBuilder.single():`, e);
+        const errorToThrow = e === null ? new Error("filterBuilder.single() threw or rejected with null") : e;
         throw errorToThrow;
     }
+    // --- 修正ここまで。以前の try-catch は上記に統合 ---
 
     if (selectQueryError && selectQueryError.code !== 'PGRST116') { // PGRST116は「該当なし」のエラーコードなので無視
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error from Supabase query (checking existing manual for ${sourceFileName}):`, selectQueryError);
