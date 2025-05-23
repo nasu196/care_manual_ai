@@ -54,14 +54,27 @@ Deno.serve(async (req) => {
         global: { headers: { Authorization: authHeader } }, // ヘッダーを渡す
     })
 
-    // URLからメモのIDを取得
+    // URLからメモのIDを取得（従来の方法）
     const url = new URL(req.url)
     const pathParts = url.pathname.split('/')
-    const memoId = pathParts[pathParts.length - 1] // functions/v1/delete-memo/{id} の {id} を想定
+    const memoIdFromPath = pathParts[pathParts.length - 1] // functions/v1/delete-memo/{id} の {id} を想定
 
-    if (!memoId || memoId === 'delete-memo') {
+    // ボディからメモのIDを取得（新しい方法：supabase.functions.invoke対応）
+    let memoIdFromBody = null;
+    try {
+      const body = await req.json();
+      memoIdFromBody = body?.id;
+    } catch (e) {
+      // ボディがない、またはJSONパースに失敗した場合は無視
+      console.log('No valid JSON body found, checking URL path for ID');
+    }
+
+    // IDの取得順序：ボディ > URLパス
+    const memoId = memoIdFromBody || (memoIdFromPath !== 'delete-memo' ? memoIdFromPath : null);
+
+    if (!memoId) {
       return new Response(
-        JSON.stringify({ error: 'Memo ID is required in the URL path' }),
+        JSON.stringify({ error: 'Memo ID is required in the request body or URL path' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

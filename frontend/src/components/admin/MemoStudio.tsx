@@ -220,38 +220,20 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setDeleteError(null);
 
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !sessionData.session) {
-        // ユーザーが認証されていない場合、適切なエラーメッセージを設定
-        throw new Error('ユーザーが認証されていません。再度ログインしてください。');
-      }
-      const accessToken = sessionData.session.access_token;
-
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (!supabaseUrl) {
-        throw new Error('Supabase URL is not configured.');
-      }
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/delete-memo/${memoId}`, {
+      // supabase.functions.invoke()を使用して他の関数と同じパターンにする
+      const { data, error: functionError } = await supabase.functions.invoke('delete-memo', {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        }
+        body: { id: memoId } // ボディにIDを含める
       });
 
-      if (!response.ok) {
-        let errorDetail = `Failed to delete memo with status: ${response.status}`;
-        try {
-            const errorData = await response.json();
-            errorDetail = errorData.message || errorData.error || JSON.stringify(errorData);
-        } catch (jsonParsingError) {
-            console.error('Failed to parse error response JSON:', jsonParsingError);
-            errorDetail = response.statusText || errorDetail;
-        }
-        throw new Error(errorDetail);
+      if (functionError) {
+        throw functionError;
       }
 
+      // 削除成功時にローカル状態を更新
       setMemos((prevMemos) => prevMemos.filter((memo) => memo.id !== memoId));
+
+      console.log('Memo deleted successfully:', data);
 
     } catch (e) {
       console.error('Failed to delete memo (コンソールエラー):', e);
