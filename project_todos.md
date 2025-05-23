@@ -39,7 +39,7 @@
 | タスク名                                                                 | 担当者 | 期限 | 進捗状況 | 備考                                                       |
 | :----------------------------------------------------------------------- | :----- | :--- | :------- | :--------------------------------------------------------- |
 | 【初期】開発者によるマニュアルのSupabase Storageへの配置とベクトル化処理 |        |      | 完了     | 手動にて r6_koubover2_sogyo1.pdf を manuals バケットに配置 |
-| マニュアルアップロード機能（PDF, Word, PowerPoint, Excel）                 | AI/USER |      | 完了     | `SourceManager.tsx` にて主要なファイル形式（PDF, Word, PowerPoint, Excel）のアップロードUIとSupabase Storage連携、テキスト抽出処理（`process-manual.js`の改修）を実装完了（ファイル名はASCIIのみ）。最新版管理ロジックは今回のスコープ外。 |
+| マニュアルアップロード機能（PDF, Word, PowerPoint, Excel）                 | AI/USER |      | 完了     | `SourceManager.tsx` にて主要なファイル形式（PDF, Word, PowerPoint, Excel）のアップロードUIとSupabase Storage連携、テキスト抽出処理（`process-manual.js`の改修）を実装完了。日本語ファイル名対応完了（Base64エンコード方式）。最新版管理ロジックは今回のスコープ外。 |
 | マニュアル一元管理システム（最新版主義）                                 |        |      | 対象外   | Supabase Database (ユーザー側でバージョン管理を行うため、開発スコープから除外) |
 | 管理者主導型メモ機能バックエンド実装                                 | AI/USER |      | 完了     | Supabase Database, Edge Functions (CRUD API実装済み)         |
 | 研修資料作成支援機能（AI指示によるプロンプト生成）実装                 | AI/USER |      | 完了     | 結果を「管理者作成メモ」に保存                           |
