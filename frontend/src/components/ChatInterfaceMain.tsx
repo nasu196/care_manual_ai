@@ -38,6 +38,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default');
   const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
+  const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -215,6 +216,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     const title = `AIの回答 (${new Date().toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`;
     const content = message.text;
     setNewMemoRequest({ title, content });
+    setMemoViewExpanded(true);
     console.log('New memo request set to store:', { title, content });
   };
 
@@ -300,7 +302,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-8 px-3 text-xs font-medium bg-background/80 hover:bg-accent hover:text-accent-foreground transition-colors"
+                            className="h-8 px-3 text-xs font-medium bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300 text-blue-700 hover:text-blue-800 shadow-sm hover:shadow-md transition-all duration-200 transform hover:scale-105"
                             onClick={() => handleMemoMessage(msg)}
                           >
                             <NotebookPen size={14} className="mr-1.5" />
@@ -324,7 +326,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
             placeholder="質問を入力してください..."
             value={inputValue}
             onChange={(_) => setInputValue(_.target.value)}
-            className="flex-1 h-12 text-base md:h-10 md:text-sm"
+            className="flex-1 h-12 text-base md:h-10 md:text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-gray-300 focus:shadow-none focus-visible:outline-none focus-visible:ring-0"
             disabled={isLoading}
           />
           <Button type="submit" disabled={isLoading} className="h-12 text-base px-4 md:h-10 md:px-6 md:text-sm">

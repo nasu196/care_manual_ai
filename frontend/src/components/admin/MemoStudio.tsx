@@ -433,8 +433,19 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         statusText: statusText,
       };
     });
-    // generatingMemos (新しいものが上) -> memos (更新日時順)
-    return [...transformedGeneratingMemos, ...memos];
+    
+    // メモをソート: 重要フラグありを一番上に、その後に重要フラグなしを日付順で表示
+    const sortedMemos = [...memos].sort((a, b) => {
+      // 1. 重要度で最初にソート (重要 = true が上に)
+      if (a.is_important !== b.is_important) {
+        return a.is_important ? -1 : 1;
+      }
+      // 2. 重要度が同じ場合は更新日時順 (新しいものが上に)
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    });
+    
+    // generatingMemos (新しいものが上) -> sortedMemos (重要度→日付順)
+    return [...transformedGeneratingMemos, ...sortedMemos];
   }, [generatingMemos, memos]);
 
   return (
@@ -442,12 +453,12 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center flex-shrink-0">
         <h2 className="text-lg font-semibold">メモ管理</h2>
         {hasEditPermission && !isEditingNewMemo && !selectedMemo && (
-          <Button variant="outline" size="icon" onClick={() => {
+          <Button variant="outline" size="sm" onClick={() => {
             setIsEditingNewMemo(true);
             setMemoViewExpanded(true); 
           }}>
-            <PlusCircle className="h-5 w-5" />
-            <span className="sr-only">新規メモ</span>
+            <PlusCircle className="h-4 w-4 mr-2" />
+            メモを作成
           </Button>
         )}
       </div>
@@ -518,15 +529,54 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                   </Button>
                   {hasEditPermission && (
                     <div className="flex items-center space-x-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (togglingImportantId === selectedMemo.id) return;
+                          handleToggleImportant(selectedMemo.id, !selectedMemo.is_important);
+                        }}
+                        disabled={togglingImportantId === selectedMemo.id}
+                        className={`transition-all duration-200 ${
+                          selectedMemo.is_important 
+                            ? 'text-red-500 hover:text-red-600 hover:bg-red-100' 
+                            : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                        }`}
+                      >
+                        {togglingImportantId === selectedMemo.id ? (
+                          <span className="animate-spin h-3 w-3 border border-red-500 border-t-transparent rounded-full mr-2"></span>
+                        ) : (
+                          <Flag 
+                            size={14} 
+                            className={`mr-2 transition-all duration-200 ${
+                              selectedMemo.is_important 
+                                ? "text-red-500 fill-red-500 drop-shadow-sm" 
+                                : "hover:scale-110"
+                            }`} 
+                          />
+                        )}
+                        {selectedMemo.is_important ? '重要フラグを外す' : '重要フラグを立てる'}
+                      </Button>
                       <Button variant="default" size="sm" onClick={handleStartEdit}>
                         編集する
                       </Button>
                     </div>
                   )}
                 </div>
-                <h3 className="text-xl font-semibold break-all flex-shrink-0">{selectedMemo.title}</h3>
+                <div className="flex items-center gap-2 mb-2 flex-shrink-0">
+                  {selectedMemo.is_important && (
+                    <Flag size={16} className="text-red-500 fill-red-500 animate-pulse" />
+                  )}
+                  <h3 className={`text-xl font-semibold break-all ${
+                    selectedMemo.is_important ? 'text-red-900' : 'text-gray-900'
+                  }`}>
+                    {selectedMemo.title}
+                  </h3>
+                </div>
                 <div 
-                  className="flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md min-h-0" 
+                  className={`flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md min-h-0 ${
+                    selectedMemo.is_important ? 'border-red-200 bg-red-50/30' : ''
+                  }`}
                   dangerouslySetInnerHTML={{ __html: selectedMemo.content }}
                 />
               </div>
@@ -591,16 +641,26 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                     {displayMemos.map((memo) => (
                       <div
                         key={memo.id}
-                        className={`group cursor-pointer py-3 hover:bg-gray-50 transition-colors duration-150 ${memo.isGenerating ? 'opacity-75' : ''}`}
+                        className={`group cursor-pointer py-3 transition-colors duration-150 ${
+                          memo.isGenerating 
+                            ? 'opacity-75 hover:bg-gray-50' 
+                            : memo.is_important 
+                              ? 'bg-red-50/50 hover:bg-red-100/60 border-l-4 border-l-red-400' 
+                              : 'hover:bg-gray-50'
+                        }`}
                         onClick={() => memo.isGenerating ? null : handleViewMemo(memo.id)}
                       >
-                        <div className={`pl-3 ${memo.is_important && !memo.isGenerating ? 'border-l-2 border-l-red-400' : 'border-l-2 border-l-transparent'}`}>
+                        <div className={`pl-3 ${memo.is_important && !memo.isGenerating ? '' : ''}`}>
                           <div className="flex items-center justify-between mb-1">
                             <div className="flex items-center gap-2 min-w-0 flex-1">
                               {memo.is_important && !memo.isGenerating && (
-                                <Flag size={12} className="text-red-500 fill-red-500 flex-shrink-0" />
+                                <Flag size={12} className="text-red-500 fill-red-500 flex-shrink-0 animate-pulse" />
                               )}
-                              <h4 className="font-medium text-sm text-gray-900 truncate">
+                              <h4 className={`font-medium text-sm truncate ${
+                                memo.is_important && !memo.isGenerating 
+                                  ? 'text-red-900 font-semibold' 
+                                  : 'text-gray-900'
+                              }`}>
                                 {memo.title}
                               </h4>
                             </div>
@@ -617,12 +677,23 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                                         handleToggleImportant(memo.id, !memo.is_important);
                                       }}
                                       disabled={togglingImportantId === memo.id}
-                                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                                      className={`h-6 w-6 p-0 transition-all duration-200 ${
+                                        memo.is_important 
+                                          ? 'text-red-500 hover:text-red-600 hover:bg-red-100 shadow-sm' 
+                                          : 'text-gray-400 hover:text-red-500 hover:bg-red-50'
+                                      }`}
                                     >
                                       {togglingImportantId === memo.id ? (
                                         <span className="animate-spin h-2 w-2 border border-red-500 border-t-transparent rounded-full"></span>
                                       ) : (
-                                        <Flag size={10} className={memo.is_important ? "text-red-500 fill-red-500" : ""} />
+                                        <Flag 
+                                          size={10} 
+                                          className={`transition-all duration-200 ${
+                                            memo.is_important 
+                                              ? "text-red-500 fill-red-500 drop-shadow-sm" 
+                                              : "hover:scale-110"
+                                          }`} 
+                                        />
                                       )}
                                     </Button>
                                     <Button
