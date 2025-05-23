@@ -87,6 +87,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const clearNewMemoRequest = useMemoStore((state) => state.clearNewMemoRequest);
   const memoListLastUpdated = useMemoStore((state) => state.memoListLastUpdated);
   const initialMemoListLastUpdated = useMemoStore.getState().memoListLastUpdated; // ★ ストアの初期値を取得
+  const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded); // ★ 追加
 
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
@@ -196,6 +197,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       setNewMemoTitle('');
       setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
       setIsEditingNewMemo(false); // 作成後は編集モードを解除
+      setMemoViewExpanded(false); // ★ メモ作成完了時も表示状態を終了
     } catch (e) {
       console.error('Failed to create memo:', e);
       if (e instanceof Error) {
@@ -260,6 +262,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setNewMemoContent('');
     setCreateMemoError(null);
     setIsEditingNewMemo(false);
+    setMemoViewExpanded(false); // ★ 新規メモ編集終了時も表示状態を終了
   };
 
   // AIの回答（マークダウン）をHTMLに変換してエディタにセットする関数の例 (将来的に使用)
@@ -280,12 +283,14 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setSelectedMemoId(memoId);
     setIsEditingSelectedMemo(false); // 閲覧モードに切り替える際は編集モードを解除
     setUpdateMemoError(null); // エラー表示をクリア
+    setMemoViewExpanded(true); // ★ メモ表示状態を開始
   };
 
   const handleBackToList = () => {
     setSelectedMemoId(null);
     setIsEditingSelectedMemo(false); // 編集モードも解除
     setUpdateMemoError(null); // エラー表示をクリア
+    setMemoViewExpanded(false); // ★ メモ表示状態を終了
   };
 
   const handleStartEdit = () => {
@@ -294,12 +299,14 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setEditingTitle(selectedMemo.title);
     setEditingContent(selectedMemo.content);
     setUpdateMemoError(null); // エラー表示をクリア
+    // メモ編集も表示状態の一種なので、setMemoViewExpanded(true)は既にhandleViewMemoで設定済み
   };
 
   const handleCancelEdit = () => {
     setIsEditingSelectedMemo(false);
     // editingTitle, editingContent は handleStartEdit で再設定されるのでクリア不要かも
     setUpdateMemoError(null); // エラー表示をクリア
+    // 編集キャンセル後も閲覧モードなので、setMemoViewExpanded(true)のまま
   };
 
   const handleUpdateMemo = async () => {
@@ -343,6 +350,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       }
       
       setIsEditingSelectedMemo(false);
+      // ★ メモ更新完了時は閲覧モードに戻るが、メモ表示状態は継続
 
     } catch (e) {
       console.error('Failed to update memo:', e);
@@ -408,7 +416,10 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-semibold">メモ管理</h2>
           {!isEditingNewMemo && !selectedMemo && (
-            <Button variant="outline" onClick={() => setIsEditingNewMemo(true)}>
+            <Button variant="outline" onClick={() => {
+              setIsEditingNewMemo(true);
+              setMemoViewExpanded(true); // ★ 新規メモ編集開始時も表示状態を開始
+            }}>
               <PlusCircle className="mr-2 h-4 w-4" />
               新規メモ
             </Button>
@@ -475,9 +486,11 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   一覧に戻る
                 </Button>
-                <Button variant="default" size="sm" onClick={handleStartEdit}>
-                  編集する
-                </Button>
+                <div className="flex items-center space-x-2">
+                  <Button variant="default" size="sm" onClick={handleStartEdit}>
+                    編集する
+                  </Button>
+                </div>
               </div>
               <h3 className="text-xl font-semibold break-all">{selectedMemo.title}</h3>
               <div 
@@ -526,62 +539,97 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             {/* {aiGeneratedDisplayMemos.length > 0 && ( ... )} */}
             
             <div>
-              <h3 className="text-sm font-medium text-gray-500 mb-2">作成済みメモ</h3>
-              {isLoading && <p>メモを読み込み中...</p>}
-              {error && <p className="text-red-500">エラー: {error.message || 'メモの読み込みに失敗しました。'}</p>}
+              <h3 className="text-sm font-medium text-gray-500 mb-4">作成済みメモ</h3>
+              {isLoading && <p className="text-center py-8 text-gray-500">メモを読み込み中...</p>}
+              {error && (
+                <div className="p-4 border border-red-200 rounded-lg bg-red-50 text-red-600 text-center">
+                  エラー: {error.message || 'メモの読み込みに失敗しました。'}
+                </div>
+              )}
               {!isLoading && !error && memos.length === 0 && (
-                <div className="p-4 border rounded-md bg-gray-50 text-center text-gray-400">作成済みのメモはありません。</div>
+                <div className="p-8 border-2 border-dashed border-gray-200 rounded-lg bg-gray-50 text-center text-gray-400">
+                  <div className="text-4xl mb-2">📝</div>
+                  <p>作成済みのメモはありません。</p>
+                  <p className="text-xs mt-1">新規メモボタンから最初のメモを作成しましょう。</p>
+                </div>
               )}
               {!isLoading && !error && memos.length > 0 && (
-                <div className="space-y-2 pr-1">
+                <div className="divide-y divide-gray-200">
                   {memos.map((memo) => (
                     <div
                       key={memo.id}
-                      className="p-3 border rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer flex justify-between items-center"
+                      className="group cursor-pointer py-3 hover:bg-gray-50 transition-colors duration-150"
                       onClick={() => handleViewMemo(memo.id)}
                     >
-                      <div className="min-w-0 flex-grow mr-2">
-                        <div className="flex items-center">
-                          {memo.is_important && <Flag size={14} className="mr-1.5 text-red-500 fill-red-500" />}
-                          <h3 className="font-semibold text-sm truncate">{memo.title}</h3>
+                      <div className={`pl-3 ${
+                        memo.is_important ? 'border-l-2 border-l-red-400' : 'border-l-2 border-l-transparent'
+                      }`}>
+                        
+                        {/* ヘッダー行 */}
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-2 min-w-0 flex-1">
+                            {memo.is_important && (
+                              <Flag size={12} className="text-red-500 fill-red-500 flex-shrink-0" />
+                            )}
+                            <h4 className="font-medium text-sm text-gray-900 truncate">
+                              {memo.title}
+                            </h4>
+                          </div>
+                          
+                          {/* アクションボタン */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (togglingImportantId === memo.id) return;
+                                handleToggleImportant(memo.id, !memo.is_important);
+                              }}
+                              disabled={togglingImportantId === memo.id}
+                              className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                            >
+                              {togglingImportantId === memo.id ? (
+                                <span className="animate-spin h-2 w-2 border border-red-500 border-t-transparent rounded-full"></span>
+                              ) : (
+                                <Flag size={10} className={memo.is_important ? "text-red-500 fill-red-500" : ""} />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteMemo(memo.id);
+                              }}
+                              disabled={isDeleting && deletingMemoId === memo.id}
+                              className="h-6 w-6 p-0 text-gray-400 hover:text-red-500"
+                            >
+                              {isDeleting && deletingMemoId === memo.id ? (
+                                <span className="text-xs leading-none">...</span>
+                              ) : (
+                                <Trash2 size={10} />
+                              )}
+                            </Button>
+                          </div>
                         </div>
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          最終更新: {new Date(memo.updated_at).toLocaleDateString('ja-JP')}
-                        </p>
-                        <p className="text-xs text-gray-600 overflow-hidden whitespace-nowrap text-ellipsis w-full mt-1">
-                          {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')}
-                        </p>
-                      </div>
-                      <div className="flex items-center space-x-1 flex-shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (togglingImportantId === memo.id) return;
-                            handleToggleImportant(memo.id, !memo.is_important);
-                          }}
-                          disabled={togglingImportantId === memo.id}
-                          className="p-1 h-auto text-gray-500 hover:text-red-600"
-                        >
-                          {togglingImportantId === memo.id ? (
-                            <span className="animate-spin h-4 w-4 border-2 border-red-500 border-t-transparent rounded-full"></span>
-                          ) : (
-                            <Flag size={16} className={memo.is_important ? "text-red-500 fill-red-500" : "text-gray-400"} />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteMemo(memo.id);
-                          }}
-                          disabled={isDeleting && deletingMemoId === memo.id}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          {isDeleting && deletingMemoId === memo.id ? '削除中...' : <Trash2 size={16} />}
-                        </Button>
+
+                        {/* コンテンツプレビューと日時 */}
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <p className="truncate flex-1 mr-2">
+                            {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').substring(0, 60)}
+                            {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').length > 60 && '...'}
+                          </p>
+                          <span className="flex-shrink-0">
+                            {new Date(memo.updated_at).toLocaleDateString('ja-JP', {
+                              month: 'numeric',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                        
                       </div>
                     </div>
                   ))}

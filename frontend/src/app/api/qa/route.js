@@ -156,6 +156,13 @@ export async function POST(request) {
       ? sourceFilenames 
       : null;
 
+    console.log(`[API /api/qa] Received parameters:`, {
+      query: userQuery,
+      sourceFilenames: validSourceFilenames,
+      verbosity: userVerbosity,
+      verbosityType: typeof userVerbosity
+    });
+
     console.log(`[API /api/qa] User Query: "${userQuery}", Source Filenames:`, validSourceFilenames);
 
     // --- 第1段階: 質問分析と検索クエリ生成 ---
@@ -172,6 +179,8 @@ export async function POST(request) {
     } else if (userVerbosity === 'detailed') {
       verbosityInstruction = "回答は可能な限り詳細に、背景情報や具体例を豊富に盛り込んで記述してください。";
     }
+
+    console.log(`[API /api/qa] Verbosity instruction applied: "${verbosityInstruction}" (from setting: ${userVerbosity})`);
 
     const analysisResultRaw = await queryAnalysisChain.invoke({ 
         user_query: userQuery,
@@ -295,6 +304,15 @@ export async function POST(request) {
         console.error("[Phase 3] LLMからの応答形式が予期したものではありません。", llmResponse);
         return NextResponse.json({ error: 'AIからの回答取得に失敗しました。' }, { status: 500 });
     }
+    
+    // ★ 回答の特徴をログに記録（詳細度設定の効果確認用）
+    console.log("[Phase 3] Generated answer characteristics:", {
+      verbosityUsed: userVerbosity,
+      answerLength: answer.length,
+      answerWordCount: answer.split(/\s+/).length,
+      answerLines: answer.split('\n').length,
+      chunksUsed: allChunks.length
+    });
     console.log("[Phase 3] LLMからの回答受信完了。");
 
     return NextResponse.json({

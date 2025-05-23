@@ -51,7 +51,15 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     setInputValue('');
     setIsLoading(true);
 
+    console.log('[ChatInterfaceMain] Current AI verbosity setting:', aiVerbosity);
     console.log('[ChatInterfaceMain] Selected source files:', selectedSourceNames);
+
+    const apiRequestBody = { 
+      query: userMessage.text,
+      verbosity: aiVerbosity,
+      source_filenames: selectedSourceNames
+    };
+    console.log('[ChatInterfaceMain] API request body:', apiRequestBody);
 
     try {
       const response = await fetch('/api/qa', {
@@ -72,6 +80,13 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       }
 
       const data = await response.json();
+      
+      console.log('[ChatInterfaceMain] API response received:', {
+        answerLength: data.answer?.length || 0,
+        sourcesCount: data.sources?.length || 0,
+        verbosityUsed: aiVerbosity
+      });
+
       const aiMessage: Message = {
         id: Date.now().toString() + '-ai',
         text: data.answer || "回答がありませんでした。",
@@ -101,6 +116,12 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     console.log('New memo request set to store:', { title, content });
   };
 
+  const handleVerbosityChange = (value: string) => {
+    const newVerbosity = value as AiVerbosity;
+    console.log('[ChatInterfaceMain] Verbosity changed from', aiVerbosity, 'to', newVerbosity);
+    setAiVerbosity(newVerbosity);
+  };
+
   useEffect(() => {
     if (scrollAreaRef.current) {
         const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -125,7 +146,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
           <DropdownMenuContent className="w-56">
             <DropdownMenuLabel>回答の詳細度</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => setAiVerbosity(value as AiVerbosity)}>
+            <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => handleVerbosityChange(value)}>
               <DropdownMenuRadioItem value="concise">簡潔に</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="default">標準的</DropdownMenuRadioItem>
               <DropdownMenuRadioItem value="detailed">より丁寧に</DropdownMenuRadioItem>
@@ -156,28 +177,32 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                       <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
                         <ReactMarkdown>{msg.text}</ReactMarkdown>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute bottom-1 right-1 h-7 w-7 text-gray-500 hover:text-primary"
-                        onClick={() => handleMemoMessage(msg)}
-                        title="この回答をメモする"
-                      >
-                        <NotebookPen size={16} />
-                      </Button>
+                      
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-2 pt-2 border-t">
+                          <p className="text-xs font-semibold mb-1">参照元:</p>
+                          <ul className="list-disc list-inside text-xs">
+                            {msg.sources.map(source => (
+                              <li key={source.id} title={`類似度: ${source.similarity.toFixed(3)}`}>
+                                ページ {source.page_number}: {source.text_snippet}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      <div className="mt-3 flex justify-end">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-3 text-xs font-medium bg-background/80 hover:bg-accent hover:text-accent-foreground transition-colors"
+                          onClick={() => handleMemoMessage(msg)}
+                        >
+                          <NotebookPen size={14} className="mr-1.5" />
+                          メモを作成
+                        </Button>
+                      </div>
                     </>
-                  )}
-                  {msg.sender === 'ai' && msg.sources && msg.sources.length > 0 && (
-                    <div className="mt-2 pt-2 border-t">
-                      <p className="text-xs font-semibold mb-1">参照元:</p>
-                      <ul className="list-disc list-inside text-xs">
-                        {msg.sources.map(source => (
-                          <li key={source.id} title={`類似度: ${source.similarity.toFixed(3)}`}>
-                            ページ {source.page_number}: {source.text_snippet}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
                   )}
                 </div>
               </div>
