@@ -328,18 +328,35 @@ async function processAndStoreDocuments(
   
   try {
     let manualId: string;
-    console.log("[processAndStoreDocuments] Checking for existing manual..."); // ★ 追加
-    const { data: existingManual, error: selectError } = await supabaseClient
-      .from('manuals')
-      .select('id')
-      .eq('file_name', sourceFileName)
-      .single();
 
-    if (selectError && selectError.code !== 'PGRST116') {
-      console.error(`[processAndStoreDocuments] Error checking existing manual: ${sourceFileName}`, selectError); // ★ 追加
-      throw selectError;
+    // --- 既存マニュアルのチェック処理を修正 ---
+    let existingManualData: { id: string } | null = null;
+    let selectQueryError: any = null;
+
+    console.log("[processAndStoreDocuments] Attempting to check for existing manual...");
+    try {
+        const result = await supabaseClient
+            .from('manuals')
+            .select('id')
+            .eq('file_name', sourceFileName)
+            .single();
+        existingManualData = result.data;
+        selectQueryError = result.error;
+        console.log("[processAndStoreDocuments] Supabase select query for existing manual executed successfully.");
+    } catch (e) {
+        console.error("[processAndStoreDocuments] CRITICAL: Exception during supabaseClient.select for existing manual:", e);
+        // e が null の場合、新しいErrorオブジェクトを作成してスローする
+        const errorToThrow = e === null ? new Error("Supabase select query threw or rejected with null") : e;
+        throw errorToThrow;
     }
-    console.log(`[processAndStoreDocuments] Existing manual check complete. Found: ${existingManual ? existingManual.id : 'null'}`); // ★ 追加
+
+    if (selectQueryError && selectQueryError.code !== 'PGRST116') { // PGRST116は「該当なし」のエラーコードなので無視
+        console.error(`[processAndStoreDocuments] Error from Supabase query (checking existing manual for ${sourceFileName}):`, selectQueryError);
+        throw selectQueryError;
+    }
+    console.log(`[processAndStoreDocuments] Existing manual check complete. Found: ${existingManualData ? existingManualData.id : 'null'}`);
+    const existingManual = existingManualData; // 後続のロジックのために代入
+    // --- 修正ここまで ---
 
     let summaryText: string | null = null;
     if (parsedDocs.length > 0 && parsedDocs[0] && parsedDocs[0].pageContent) {
