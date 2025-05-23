@@ -21,6 +21,16 @@ interface SourceFile {
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
+interface UploadStatus {
+  id: string;
+  fileName: string;
+  originalFileName: string;
+  status: 'uploading' | 'processing' | 'completed' | 'error';
+  progress?: number;
+  message?: string;
+  error?: string;
+}
+
 // ★ propsの型定義を追加
 interface SourceManagerProps {
   selectedSourceNames: string[];
@@ -28,18 +38,27 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange }) => { // ★ propsを受け取るように変更
-  const [selectedLocalFile, setSelectedLocalFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState<boolean>(false);
-  const [processingFile, setProcessingFile] = useState<boolean>(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
-  
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
-  const [loadingFiles, setLoadingFiles] = useState<boolean>(false);
-
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [uploadQueue, setUploadQueue] = useState<UploadStatus[]>([]);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectAll, setSelectAll] = useState(false);
-  // const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]); // ★ page.tsxからpropsとして受け取るため削除
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // 並行アップロード用のヘルパー関数
+  const updateUploadStatus = (id: string, updates: Partial<UploadStatus>) => {
+    setUploadQueue(prev => prev.map(item => 
+      item.id === id ? { ...item, ...updates } : item
+    ));
+  };
+
+  const removeFromUploadQueue = (id: string) => {
+    setUploadQueue(prev => prev.filter(item => item.id !== id));
+  };
+
+  const addToUploadQueue = (uploadStatus: UploadStatus) => {
+    setUploadQueue(prev => [...prev, uploadStatus]);
+  };
 
   const fetchUploadedFiles = async () => {
     setLoadingFiles(true);
@@ -85,17 +104,19 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const handleLocalFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     setMessage(null);
     if (event.target.files && event.target.files.length > 0) {
-      const file = event.target.files[0];
-      setSelectedLocalFile(file);
-      handleUpload(file);
+      const files = Array.from(event.target.files);
+      console.log(`[handleLocalFileChange] Selected ${files.length} files for upload`);
+      
+      // 複数ファイルを並行してアップロード
+      files.forEach(file => {
+        handleUpload(file);
+      });
+      
       event.target.value = '';
-    } else {
-      setSelectedLocalFile(null);
     }
   };
 
-  const handleUpload = async (fileToUpload: File | null) => {
-    const file = fileToUpload || selectedLocalFile;
+  const handleUpload = async (file: File) => {
     console.log('[handleUpload] Start. File to upload:', file);
 
     if (!file) {
@@ -105,6 +126,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     }
 
     const originalFileName = file.name;
+    const uploadId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
     // 日本語ファイル名対応: Base64エンコーディングを使用
     const encodeFileName = (name: string): string => {
@@ -131,10 +153,14 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     const encodedFileName = encodeFileName(originalFileName);
     console.log(`[handleUpload] Original filename: ${originalFileName}, Encoded: ${encodedFileName}`);
 
-    setUploading(true);
-    setProcessingFile(false);
-    setMessage({ type: 'info', text: `ファイル「${originalFileName}」のアップロードを開始します...` });
-    console.log(`[handleUpload] Uploading file: ${encodedFileName}, size: ${file.size}, type: ${file.type}`);
+    // アップロードキューに追加
+    addToUploadQueue({
+      id: uploadId,
+      fileName: encodedFileName,
+      originalFileName: originalFileName,
+      status: 'uploading',
+      message: `アップロード中...`
+    });
 
     try {
       const bucketName = 'manuals';
@@ -148,20 +174,20 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
       if (uploadError) {
         console.error('[handleUpload] Upload error details:', uploadError);
-        setMessage({ type: 'error', text: `アップロードに失敗しました: ${uploadError.message}` });
-        setUploading(false);
+        updateUploadStatus(uploadId, {
+          status: 'error',
+          error: `アップロードに失敗しました: ${uploadError.message}`,
+          message: `エラー: ${uploadError.message}`
+        });
         return;
       }
       
-      setUploading(false);
-      let currentMessage = `ファイル「${originalFileName}」が正常にアップロードされました。`;
-      setMessage({ type: 'success', text: currentMessage });
-      setSelectedLocalFile(null);
-      await fetchUploadedFiles();
+      updateUploadStatus(uploadId, {
+        status: 'processing',
+        message: `処理中...`
+      });
 
-      setProcessingFile(true);
-      currentMessage += ` 続けてファイルの処理を開始します...`;
-      setMessage({ type: 'info', text: currentMessage });
+      await fetchUploadedFiles();
 
       try {
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -193,16 +219,21 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         }
 
         console.log('[handleUpload] Edge Function call successful:', responseData);
-        setMessage({
-          type: 'success',
-          text: `ファイル「${originalFileName}」のアップロードと処理が全て完了しました。`,
+        updateUploadStatus(uploadId, {
+          status: 'completed',
+          message: `完了`
         });
 
-        // ★ アップロード成功後、そのファイルを選択状態にする（元のファイル名で）
+        // アップロード成功後、そのファイルを選択状態にする（元のファイル名で）
         if (!selectedSourceNames.includes(originalFileName)) {
           onSelectionChange([...selectedSourceNames, originalFileName]);
         }
-        await fetchUploadedFiles(); // ★ Edge Function 成功後に再度ファイルリストを読み込む
+        await fetchUploadedFiles();
+
+        // 3秒後にキューから削除
+        setTimeout(() => {
+          removeFromUploadQueue(uploadId);
+        }, 3000);
 
       } catch (funcError: unknown) {
         console.error('Error calling Edge Function:', funcError);
@@ -210,12 +241,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         if (funcError instanceof Error) {
           errorMessage = funcError.message;
         }
-        setMessage({
-          type: 'error',
-          text: `ファイル「${originalFileName}」の処理中にエラー: ${errorMessage}`,
+        updateUploadStatus(uploadId, {
+          status: 'error',
+          error: errorMessage,
+          message: `処理エラー: ${errorMessage}`
         });
-      } finally {
-        setProcessingFile(false);
       }
     } catch (err: unknown) {
       console.error('Outer catch error during upload:', err);
@@ -223,9 +253,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       if (err instanceof Error) {
         outerErrorMessage = err.message;
       }
-      setMessage({ type: 'error', text: outerErrorMessage });
-      setUploading(false);
-      setProcessingFile(false);
+      updateUploadStatus(uploadId, {
+        status: 'error',
+        error: outerErrorMessage,
+        message: `エラー: ${outerErrorMessage}`
+      });
     }
     console.log('[handleUpload] End.');
   };
@@ -233,20 +265,16 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const handleSelectAllChange = (checked: boolean) => {
     setSelectAll(checked);
     if (checked) {
-      // setSelectedSourceNames(sourceFiles.map(file => file.name)); // ★ onSelectionChange を呼び出すように変更
       onSelectionChange(sourceFiles.map(file => file.name));
     } else {
-      // setSelectedSourceNames([]); // ★ onSelectionChange を呼び出すように変更
       onSelectionChange([]);
     }
   };
 
   const handleSourceSelectionChange = (fileName: string, checked: boolean) => {
     if (checked) {
-      // setSelectedSourceNames(prev => [...prev, fileName]); // ★ onSelectionChange を呼び出すように変更
       onSelectionChange([...selectedSourceNames, fileName]);
     } else {
-      // setSelectedSourceNames(prev => prev.filter(name => name !== fileName)); // ★ onSelectionChange を呼び出すように変更
       onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
     }
   };
@@ -260,6 +288,13 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   }, [selectedSourceNames, sourceFiles]);
 
   const handleDeleteFile = async (fileName: string) => {
+    // アップロード中のファイルは削除できない
+    const uploadingFile = uploadQueue.find(item => item.originalFileName === fileName);
+    if (uploadingFile) {
+      setMessage({ type: 'error', text: `ファイル「${fileName}」はアップロード中のため削除できません。` });
+      return;
+    }
+
     if (!window.confirm(`ファイル「${fileName}」を本当に削除しますか？`)) {
       return;
     }
@@ -272,7 +307,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
     
-    setUploading(true);
     setMessage({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
       // Step 1: Delete from Storage (エンコードされたファイル名を使用)
@@ -281,7 +315,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       if (storageError) {
         console.error('Storage delete error:', storageError);
         setMessage({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${storageError.message}` });
-        setUploading(false);
         return;
       }
 
@@ -297,7 +330,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         console.error('Table delete error:', tableError);
         setMessage({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
         await fetchUploadedFiles();
-        setUploading(false);
         return;
       }
       
@@ -316,10 +348,16 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
       setMessage({ type: 'error', text: deleteErrorMessage });
     }
-    setUploading(false);
   };
 
   const handleRenameFile = async (oldName: string) => {
+    // アップロード中のファイルは名前変更できない
+    const uploadingFile = uploadQueue.find(item => item.originalFileName === oldName);
+    if (uploadingFile) {
+      setMessage({ type: 'error', text: `ファイル「${oldName}」はアップロード中のため名前変更できません。` });
+      return;
+    }
+
     const newNamePromptResult = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
     console.log(`[handleRenameFile] Attempting to rename. Original name: '${oldName}', New name prompt result: '${newNamePromptResult}'`);
 
@@ -327,16 +365,24 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       setMessage({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
       return;
     }
+
     const trimmedNewName = newNamePromptResult.trim();
     if (trimmedNewName === '') {
-      setMessage({ type: 'error', text: 'ファイル名が空です。変更はキャンセルされました。' });
+      setMessage({ type: 'error', text: '新しいファイル名を入力してください。' });
       return;
     }
+
     if (trimmedNewName === oldName) {
-      setMessage({ type: 'info', text: 'ファイル名は変更されませんでした（同じ名前です）。' });
+      setMessage({ type: 'info', text: 'ファイル名に変更はありませんでした。' });
       return;
     }
-    
+
+    // 重複チェック（同じ名前のファイルが既に存在するか）
+    if (sourceFiles.some(file => file.name === trimmedNewName)) {
+      setMessage({ type: 'error', text: `ファイル名「${trimmedNewName}」は既に存在します。` });
+      return;
+    }
+
     // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
     const targetFile = sourceFiles.find(file => file.name === oldName);
     if (!targetFile) {
@@ -345,7 +391,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
 
-    setUploading(true);
     setMessage({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
     console.log(`[handleRenameFile] Updating original_file_name in database for file: ${storageFileName}`);
     
@@ -380,7 +425,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
       setMessage({ type: 'error', text: renameErrorMessage });
     }
-    setUploading(false);
     console.log('[handleRenameFile] End.');
   };
 
@@ -390,7 +434,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold">ソース</h2>
         {/* 右上のアイコンは一旦省略 (例: <PanelRightClose className="h-5 w-5" />) */}
-        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={uploading || processingFile}>
+        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={loadingFiles}>
           <PlusIcon className="mr-2 h-4 w-4" />
           追加
         </Button>
@@ -399,8 +443,9 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           ref={fileInputRef} 
           onChange={handleLocalFileChange} 
           className="hidden" 
-          disabled={uploading || processingFile}
+          disabled={loadingFiles}
           accept=".pdf,.doc,.docx,.ppt,.pptx"
+          multiple={true}
         />
       </div>
 
@@ -421,52 +466,97 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         </div>
       )}
 
-      {/* File List */}
+      {/* File List (統合表示: 完了済み + アップロード中) */}
       <div className="flex-grow overflow-y-auto space-y-1 pr-1">
         {loadingFiles ? (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="mr-2 h-6 w-6 animate-spin text-muted-foreground" />
             <p className="text-muted-foreground">読み込み中...</p>
           </div>
-        ) : sourceFiles.length > 0 ? (
-          sourceFiles.map((file) => (
-            <div key={file.id || file.name} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md">
-              <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-              <span className="flex-grow text-sm truncate" title={file.name}>{file.name}</span>
-              <Checkbox
-                id={`checkbox-${file.id || file.name}`}
-                checked={selectedSourceNames.includes(file.name)}
-                onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
-                className="ml-auto"
-              />
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>{file.name}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
-                    名前を変更
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDeleteFile(file.name)} className="text-red-600">
-                    削除
-                  </DropdownMenuItem>
-                  {/* <DropdownMenuItem onClick={() => console.log('Details:', file.name)}>
-                    詳細
-                  </DropdownMenuItem> */}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ))
         ) : (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-muted-foreground">
-              アップロード済みのファイルはありません。「追加」ボタンからアップロードしてください。
-            </p>
-          </div>
+          <>
+            {/* アップロード中のファイル */}
+            {uploadQueue.map((upload) => (
+              <div key={upload.id} className={`flex items-center space-x-2 p-2 rounded-md border ${
+                upload.status === 'completed' ? 'bg-green-50 border-green-200' :
+                upload.status === 'error' ? 'bg-red-50 border-red-200' :
+                'bg-blue-50 border-blue-200'
+              }`}>
+                {upload.status === 'uploading' || upload.status === 'processing' ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-blue-500 flex-shrink-0" />
+                ) : upload.status === 'completed' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                )}
+                
+                <div className="flex-grow min-w-0">
+                  <div className="text-sm truncate" title={upload.originalFileName}>
+                    {upload.originalFileName}
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {upload.status === 'uploading' ? 'アップロード中' :
+                     upload.status === 'processing' ? '処理中' :
+                     upload.status === 'completed' ? '完了' : 'エラー'}
+                    {upload.message && ` - ${upload.message}`}
+                  </div>
+                  {upload.error && (
+                    <div className="text-xs text-red-600">{upload.error}</div>
+                  )}
+                </div>
+                
+                {/* アップロード中はチェックボックス無効 */}
+                <Checkbox
+                  disabled={true}
+                  className="ml-auto opacity-50"
+                />
+                
+                {/* アップロード中はメニューも無効 */}
+                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-30" disabled>
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            
+            {/* 完了済みのファイル */}
+            {sourceFiles.length > 0 ? (
+              sourceFiles.map((file) => (
+                <div key={file.id || file.name} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md">
+                  <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+                  <span className="flex-grow text-sm truncate" title={file.name}>{file.name}</span>
+                  <Checkbox
+                    id={`checkbox-${file.id || file.name}`}
+                    checked={selectedSourceNames.includes(file.name)}
+                    onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
+                    className="ml-auto"
+                  />
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>{file.name}</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
+                        名前を変更
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleDeleteFile(file.name)} className="text-red-600">
+                        削除
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              ))
+            ) : uploadQueue.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-sm text-muted-foreground">
+                  アップロード済みのファイルはありません。「追加」ボタンからアップロードしてください。
+                </p>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
       
@@ -489,13 +579,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         </div>
       )}
 
-      {(uploading || loadingFiles || processingFile) && (
+      {(loadingFiles) && (
         <div className="flex items-center justify-center p-4">
           <Loader2 className="h-8 w-8 animate-spin text-primary" />
           <span className="ml-2 text-muted-foreground">
-            {uploading && "Storageへアップロード中..."}
             {loadingFiles && "ファイル一覧を読み込み中..."}
-            {processingFile && "サーバーでファイルを処理中..."}
           </span>
         </div>
       )}

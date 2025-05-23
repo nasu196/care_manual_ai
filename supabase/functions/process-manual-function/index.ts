@@ -103,44 +103,109 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
     if (fileExtension === '.pdf') {
       console.log("\npdf-parseでドキュメントを読み込み開始...");
-      const pdfData = await pdfParse(fileBuffer); // ★ PDFLoaderの代わりにpdfParseを使用
-      // pdfParseの結果からページごとの情報を取得するのは少し工夫が必要
-      // LangChainのPDFLoaderはページ単位でDocumentを生成するが、pdf-parseは主にテキスト全体とメタデータを返す
-      // ここではまずテキスト全体を1つのドキュメントとして扱う
-      // 必要であれば、ページ分割のロジックをpdfData.numpagesなどを使って自作することも検討
-      docs = [{
-        pageContent: pdfData.text,
-        metadata: { 
-            source: fileName, 
-            type: 'pdf',
-            totalPages: pdfData.numpages, // pdf-parseから総ページ数を取得
-            // loc: { pageNumber: 1 } // ページ単位ではないため、このような情報は付与しにくい
+      try {
+        const pdfData = await pdfParse(fileBuffer); // ★ PDFLoaderの代わりにpdfParseを使用
+        
+        // pdfDataのnull/undefinedチェック ★
+        if (!pdfData) {
+          throw new Error("pdf-parse returned null/undefined data");
         }
-      }];
-      console.log(`ドキュメントの読み込み完了。合計 ${pdfData.numpages} ページ (テキストは結合)。`);
+        
+        // textプロパティの存在確認 ★
+        const textContent = pdfData.text || '';
+        const numPages = pdfData.numpages || 0;
+        
+        console.log(`PDF解析結果: テキスト長=${textContent.length}文字, ページ数=${numPages}`);
+        
+        if (textContent.length === 0) {
+          console.warn("PDFからテキストが抽出されませんでした。画像のみのPDFか、テキスト抽出に失敗した可能性があります。");
+        }
+        
+        docs = [{
+          pageContent: textContent,
+          metadata: { 
+              source: fileName, 
+              type: 'pdf',
+              totalPages: numPages,
+          }
+        }];
+        console.log(`ドキュメントの読み込み完了。合計 ${numPages} ページ (テキストは結合)。`);
+      } catch (pdfError) {
+        console.error(`PDF処理中にエラーが発生しました:`, pdfError);
+        throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : 'Unknown error'}`);
+      }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
       const data = await new Promise<string>((resolve, reject) => {
-        officeParser.parseOffice(actualTmpFilePath, (content: string, err: Error | null) => {
-          if (err) {
-            console.error(`officeParser.parseOffice エラー: ${fileExtension}`, err);
-            return reject(err);
-          }
-          resolve(content);
-        });
+        try {
+          officeParser.parseOffice(actualTmpFilePath, (content: string, err: Error | null) => {
+            try {
+              if (err) {
+                console.error(`officeParser.parseOffice エラー: ${fileExtension}`, err);
+                // errがnullの場合も考慮
+                const errorToReject = err || new Error(`Unknown error occurred in officeParser for ${fileExtension}`);
+                return reject(errorToReject);
+              }
+              
+              // contentのnull/undefinedチェックを追加 ★
+              if (content === null || content === undefined) {
+                console.warn(`officeParser returned null/undefined content for ${fileExtension}, using empty string`);
+                return resolve(''); // 空文字列として処理
+              }
+              
+              // contentが文字列でない場合も考慘 ★
+              if (typeof content !== 'string') {
+                console.warn(`officeParser returned non-string content for ${fileExtension}:`, typeof content);
+                return resolve(String(content || '')); // 文字列に変換
+              }
+              
+              console.log(`officeParser content length: ${content.length} characters`);
+              resolve(content);
+            } catch (callbackError) {
+              console.error(`Error in officeParser callback for ${fileExtension}:`, callbackError);
+              reject(callbackError || new Error(`Callback error in officeParser for ${fileExtension}`));
+            }
+          });
+        } catch (parseError) {
+          console.error(`Error calling officeParser.parseOffice for ${fileExtension}:`, parseError);
+          reject(parseError || new Error(`Failed to call officeParser for ${fileExtension}`));
+        }
       });
+      
+      // 最終的なdataの検証 ★
+      const validData = data || '';
+      console.log(`${fileExtension} ファイルのテキスト抽出完了。文字数: ${validData.length}`);
+      
       docs = [{
-        pageContent: data,
+        pageContent: validData,
         metadata: {
           source: fileName,
           type: fileExtension.substring(1),
         }
       }];
-      console.log(`${fileExtension} ファイルのテキスト抽出完了。`);
     } else {
       console.warn(`未対応のファイル形式です: ${fileExtension}`);
       return null;
     }
+    
+    // docs の最終検証 ★
+    if (!docs || !Array.isArray(docs) || docs.length === 0) {
+      console.error(`ドキュメント処理結果が無効です: docs=${docs}`);
+      throw new Error("Document processing returned invalid or empty result");
+    }
+    
+    // 各docsのpageContentが有効であることを確認 ★
+    for (let i = 0; i < docs.length; i++) {
+      if (!docs[i] || typeof docs[i].pageContent !== 'string') {
+        console.warn(`Document ${i} has invalid pageContent, replacing with empty string`);
+        docs[i] = {
+          pageContent: '',
+          metadata: docs[i]?.metadata || { source: fileName, type: 'unknown' }
+        };
+      }
+    }
+    
+    console.log(`ファイル処理完了: ${docs.length}個のドキュメントを生成しました`);
     return { docs, tmpFilePath: actualTmpFilePath };
   } catch (error) {
     console.error("\nファイル処理中にエラーが発生しました:", error);
@@ -196,10 +261,42 @@ async function generateSummary(text: string, generativeAiClient: GoogleGenerativ
     console.log("Gemini API を呼び出してサマリー生成を開始...");
     // テキスト生成リクエストを送信します。
     const result = await model.generateContent(prompt);
+    
+    // result の null チェック ★
+    if (!result) {
+      throw new Error("Gemini API returned null result");
+    }
+    
     const response = result.response;
-    const summary = response.text();
-    console.log("サマリー生成成功。");
-    return summary;
+    
+    // response の null チェック ★
+    if (!response) {
+      throw new Error("Gemini API response is null or undefined");
+    }
+    
+    // response.text() の呼び出しをtry-catchで囲む ★
+    let summary: string;
+    try {
+      summary = response.text();
+    } catch (textError) {
+      console.error("Error extracting text from Gemini response:", textError);
+      throw new Error(`Failed to extract text from Gemini response: ${textError instanceof Error ? textError.message : 'Unknown error'}`);
+    }
+    
+    // summary の null/undefined チェック ★
+    if (summary === null || summary === undefined) {
+      console.warn("Gemini API returned null/undefined summary text");
+      return null;
+    }
+    
+    // 空文字列チェック
+    if (typeof summary !== 'string') {
+      console.warn(`Gemini API returned non-string summary: ${typeof summary}`);
+      summary = String(summary || '');
+    }
+    
+    console.log(`サマリー生成成功: ${summary.length}文字`);
+    return summary.length > 0 ? summary : null;
   } catch (error: any) {
     console.error("Gemini API を使用したサマリー生成中にエラーが発生しました:", error);
     // エラーレスポンスに詳細が含まれている場合があるため、ログに出力
@@ -243,28 +340,39 @@ async function processAndStoreDocuments(
     }
 
     let summaryText: string | null = null;
-    if (parsedDocs.length > 0 && parsedDocs[0].pageContent) {
-        summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient); // ★ サマリー生成
+    if (parsedDocs.length > 0 && parsedDocs[0] && parsedDocs[0].pageContent) { // ★ null/undefinedチェック強化
+        try {
+            summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient); // ★ サマリー生成
+            console.log(`サマリー生成結果: ${summaryText ? '成功' : 'スキップ'}`);
+        } catch (summaryError) {
+            console.error("サマリー生成中にエラーが発生しましたが、処理を続行します:", summaryError);
+            summaryText = null; // ★ エラー時は明示的にnullを設定
+        }
     } else {
         console.log("ドキュメントのテキストコンテンツが見つからないため、サマリー生成をスキップします。");
     }
 
-    if (existingManual) {
+    if (existingManual && existingManual.id) { // ★ existingManual.idのnullチェック追加
       manualId = existingManual.id;
       console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
       // 既存マニュアルの場合もサマリーとoriginal_file_nameを更新する
+      const updateData: any = { // ★ 型を明示的に指定
+        original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを更新
+        metadata: { 
+            totalPages: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length) : 1,
+            sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown',
+            lastProcessed: new Date().toISOString() 
+        },
+      };
+      
+      // summaryTextがnullでない場合のみ追加 ★
+      if (summaryText !== null) {
+        updateData.summary = summaryText;
+      }
+
       const { error: updateError } = await supabaseClient
         .from('manuals')
-        .update({ 
-            summary: summaryText,
-            original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを更新
-            // 必要であれば他のメタデータも更新
-            metadata: { 
-                totalPages: parsedDocs[0]?.metadata?.totalPages || (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length),
-                sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown',
-                lastProcessed: new Date().toISOString() 
-            },
-         })
+        .update(updateData)
         .eq('id', manualId);
       if (updateError) {
         console.error(`既存マニュアルの更新中にエラー: ID=${manualId}`, updateError);
@@ -273,23 +381,30 @@ async function processAndStoreDocuments(
         console.log(`既存マニュアルのサマリーとoriginal_file_nameを更新しました。ID: ${manualId}`);
       }
     } else {
-      const totalPages = parsedDocs[0]?.metadata?.totalPages ||
-                         (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length);
+      const totalPages = (parsedDocs[0] && parsedDocs[0].metadata) ? 
+                         (parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length)) : 1;
+      
+      const insertData: any = { // ★ 型を明示的に指定
+        file_name: sourceFileName,
+        original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを追加
+        storage_path: `${BUCKET_NAME}/${sourceFileName}`,
+        metadata: { 
+          totalPages: totalPages,
+          sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown'
+        },
+      };
+      
+      // summaryTextがnullでない場合のみ追加 ★
+      if (summaryText !== null) {
+        insertData.summary = summaryText;
+      }
+
       const { data: newManual, error: insertError } = await supabaseClient
         .from('manuals')
-        .insert({
-          file_name: sourceFileName,
-          original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを追加
-          storage_path: `${BUCKET_NAME}/${sourceFileName}`,
-          summary: summaryText,
-          metadata: { 
-            totalPages: totalPages,
-            sourceType: parsedDocs[0]?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown'
-          },
-        })
+        .insert(insertData)
         .select('id')
         .single();
-      if (insertError || !newManual) {
+      if (insertError || !newManual || !newManual.id) { // ★ nullチェック強化
         console.error(`新規マニュアル情報のDB登録に失敗: ${sourceFileName}`, insertError);
         throw insertError || new Error("Failed to insert new manual and retrieve ID.");
       }
@@ -328,38 +443,73 @@ async function processAndStoreDocuments(
 
     console.log("チャンクのベクトル化とDB保存を開始...");
     const chunkTextsForEmbedding = chunks.map(c => c.chunk_text);
-    const chunkEmbeddings = await embeddingsClient.embedDocuments(chunkTextsForEmbedding);
-    console.log(`${chunkEmbeddings.length} 個のチャンクのベクトル化完了。`);
+    
+    let chunkEmbeddings: number[][];
+    try {
+        if (!embeddingsClient) {
+            throw new Error("Embeddings client is not initialized");
+        }
+        chunkEmbeddings = await embeddingsClient.embedDocuments(chunkTextsForEmbedding);
+        if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) { // ★ null/配列チェック追加
+            throw new Error("Embeddings generation returned invalid result");
+        }
+        console.log(`${chunkEmbeddings.length} 個のチャンクのベクトル化完了。`);
+    } catch (embeddingError) {
+        console.error("エンベディング生成中にエラーが発生しました:", embeddingError);
+        throw new Error(`Embedding generation failed: ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
+    }
 
-    const chunksToInsert: ChunkObject[] = chunks.map((chunk, i) => ({
-      ...chunk,
-      embedding: chunkEmbeddings[i],
-    }));
+    const chunksToInsert: ChunkObject[] = chunks.map((chunk, i) => {
+        if (!chunkEmbeddings[i] || !Array.isArray(chunkEmbeddings[i])) { // ★ 各エンベディングのnullチェック
+            console.warn(`Warning: Invalid embedding for chunk ${i}, using empty array`);
+            return {
+                ...chunk,
+                embedding: [], // ★ 無効な場合は空配列を設定
+            };
+        }
+        return {
+            ...chunk,
+            embedding: chunkEmbeddings[i],
+        };
+    });
 
-    const { error: deleteChunksError } = await supabaseClient
-        .from('manual_chunks')
-        .delete()
-        .eq('manual_id', manualId);
-    if (deleteChunksError) {
-        console.error(`既存チャンクの削除中にエラー: manual_id=${manualId}`, deleteChunksError);
-        // ここではエラーをスローせず、処理を続行する（古いチャンクが残る可能性はある）
-    } else {
-        console.log(`manual_id=${manualId} の既存チャンクを削除しました（もしあれば）。`);
+    // 既存チャンクの削除
+    try {
+        const { error: deleteChunksError } = await supabaseClient
+            .from('manual_chunks')
+            .delete()
+            .eq('manual_id', manualId);
+        if (deleteChunksError) {
+            console.error(`既存チャンクの削除中にエラー: manual_id=${manualId}`, deleteChunksError);
+            // ここではエラーをスローせず、処理を続行する（古いチャンクが残る可能性はある）
+        } else {
+            console.log(`manual_id=${manualId} の既存チャンクを削除しました（もしあれば）。`);
+        }
+    } catch (deleteError) {
+        console.error(`既存チャンク削除中に予期せぬエラー: manual_id=${manualId}`, deleteError);
+        // 削除に失敗しても処理を続行
     }
     
-    const { error: insertChunksError } = await supabaseClient
-      .from('manual_chunks')
-      .insert(chunksToInsert);
-    if (insertChunksError) {
-      console.error("チャンクのDB保存中にエラー:", insertChunksError);
-      throw insertChunksError;
+    // 新しいチャンクの挿入
+    try {
+        const { error: insertChunksError } = await supabaseClient
+          .from('manual_chunks')
+          .insert(chunksToInsert);
+        if (insertChunksError) {
+          console.error("チャンクのDB保存中にエラー:", insertChunksError);
+          throw insertChunksError;
+        }
+        console.log(`${chunksToInsert.length} 個のチャンクをDBに保存しました。`);
+    } catch (insertError) {
+        console.error("チャンク挿入中に予期せぬエラー:", insertError);
+        throw new Error(`Chunk insertion failed: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`);
     }
-    console.log(`${chunksToInsert.length} 個のチャンクをDBに保存しました。`);
+    
     return true;
   } catch (error) {
     console.error(`\nドキュメント処理・保存中にエラーが発生: ${sourceFileName}`, error);
     if (error instanceof Error) {
-        // ここでエラー内容に応じて特別な処理やロギングが可能
+        console.error("エラー詳細:", error.stack || error.message);
     }
     return false;
   }
@@ -449,15 +599,24 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
   } catch (error: any) { // ★ unknown から any へ変更
     console.error(`Error in function handler for file: ${receivedFileName || 'Unknown file'}:`, error);
     
+    // エラーの詳細情報をログに出力 ★
+    if (error instanceof Error) {
+        console.error("Error name:", error.name);
+        console.error("Error message:", error.message);
+        console.error("Error stack:", error.stack);
+    } else {
+        console.error("Non-Error object thrown:", JSON.stringify(error, null, 2));
+    }
+    
     // ロールバック処理: Storageからファイルを削除 (エラー発生時)
     if (receivedFileName && supabase) {
-      console.warn(`処理中にエラー(${error.message})が発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
+      console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
       try {
         const { error: deleteError } = await supabase.storage
           .from(BUCKET_NAME)
           .remove([receivedFileName]); 
         if (deleteError) {
-          if (deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
+          if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
             console.log(`Storageにファイル ${receivedFileName} が見つからなかったため、削除はスキップされました。`);
           } else {
             console.error(`Storageからのファイル ${receivedFileName} の削除に失敗しました。`, deleteError);
@@ -471,7 +630,14 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     }
 
     const message = error instanceof Error ? error.message : "Internal server error during file processing.";
-    return new Response(JSON.stringify({ error: message, detail: error.toString() }), { // error.toString() を追加
+    const detail = error instanceof Error ? error.stack || error.toString() : String(error); // ★ より詳細な情報を追加
+    
+    return new Response(JSON.stringify({ 
+        error: message, 
+        detail: detail,
+        timestamp: new Date().toISOString(), // ★ タイムスタンプ追加
+        file: receivedFileName || 'Unknown' // ★ ファイル名追加
+    }), { 
       status: 500, 
       headers: { ...corsHeaders, "Content-Type": "application/json" } 
     });
@@ -482,7 +648,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             await fs.unlink(tmpFilePathToDelete);
             console.log(`一時ファイルをクリーンアップしました: ${tmpFilePathToDelete}`);
         } catch (e: any) { // ★ unknown から any へ変更
-            if (e.code !== 'ENOENT') { 
+            if (e && e.code !== 'ENOENT') { // ★ eがnullでないことを確認
                  console.warn(`Finallyブロック: 一時ファイルの削除中にエラーが発生しました (無視): ${tmpFilePathToDelete}`, e);
             } else {
                  console.log(`Finallyブロック: 一時ファイルは既に存在しませんでした (無視): ${tmpFilePathToDelete}`);
