@@ -1,9 +1,9 @@
 import React, { useState, ChangeEvent, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+// import { Input } from '@/components/ui/input'; // 未使用のためコメントアウト
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2, Terminal } from 'lucide-react';
+import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react'; // Terminalを削除
 import { supabase } from '@/lib/supabaseClient';
 import {
   DropdownMenu,
@@ -35,9 +35,10 @@ interface UploadStatus {
 interface SourceManagerProps {
   selectedSourceNames: string[];
   onSelectionChange: (selectedNames: string[]) => void;
+  isMobileView?: boolean; // ★ isMobileView props を追加
 }
 
-const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange }) => { // ★ propsを受け取るように変更
+const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
@@ -96,6 +97,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   useEffect(() => {
     fetchUploadedFiles();
   }, []); // 初回マウント時のみ実行
+
+  // 選択状態を親コンポーネントと同期
+  useEffect(() => {
+    const allFilesSelected = sourceFiles.length > 0 && sourceFiles.every(file => selectedSourceNames.includes(file.name));
+    setSelectAll(allFilesSelected);
+  }, [selectedSourceNames, sourceFiles]);
 
   const handleFileTrigger = () => {
     fileInputRef.current?.click();
@@ -299,14 +306,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     }
   };
   
-  useEffect(() => {
-    if (sourceFiles.length > 0 && selectedSourceNames.length === sourceFiles.length) {
-      setSelectAll(true);
-    } else {
-      setSelectAll(false);
-    }
-  }, [selectedSourceNames, sourceFiles]);
-
   const handleDeleteFile = async (fileName: string) => {
     // アップロード中のファイルは削除できない
     const uploadingFile = uploadQueue.find(item => item.originalFileName === fileName);
@@ -449,164 +448,141 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   return (
-    <div className="flex flex-col h-full p-4 space-y-4 bg-card text-card-foreground rounded-lg shadow">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">ソース</h2>
-        {/* 右上のアイコンは一旦省略 (例: <PanelRightClose className="h-5 w-5" />) */}
-        <Button variant="outline" size="sm" onClick={handleFileTrigger} disabled={loadingFiles}>
-          <PlusIcon className="mr-2 h-4 w-4" />
-          追加
-        </Button>
-        <Input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleLocalFileChange} 
-          className="hidden" 
-          disabled={loadingFiles}
-          accept=".pdf,.doc,.docx,.ppt,.pptx"
-          multiple={true}
-        />
-      </div>
-
-      {/* Select All Checkbox */}
-      {sourceFiles.length > 0 && (
-        <div className="flex items-center space-x-2 p-2 border-b">
-          <Checkbox
-            id="select-all-sources"
-            checked={selectAll}
-            onCheckedChange={handleSelectAllChange}
+    <div 
+      className={`flex flex-col h-full ${isMobileView ? "" : "p-4 bg-white rounded-lg shadow"}`}
+    >
+      {/* ヘッダーセクション */}
+      <div className={`mb-4 ${isMobileView ? "p-4" : ""}`}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className={`text-xl font-semibold ${isMobileView ? "text-gray-700" : "text-gray-700"}`}>
+            ソース管理
+          </h2>
+          <Button onClick={handleFileTrigger} size="sm" variant="outline" className={isMobileView ? "bg-primary text-primary-foreground" : ""}>
+            <PlusIcon className="mr-2 h-4 w-4" />
+            ファイル追加
+          </Button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleLocalFileChange}
+            className="hidden"
+            multiple // 複数ファイル選択を許可
+            accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" // 対応ファイル形式
           />
-          <label
-            htmlFor="select-all-sources"
-            className="text-sm font-medium leading-none"
-          >
-            すべてのソースを選択
-          </label>
         </div>
-      )}
-
-      {/* File List (統合表示: 完了済み + アップロード中) */}
-      <div className="flex-grow overflow-y-auto space-y-1 pr-1">
-        {loadingFiles ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="mr-2 h-6 w-6 animate-spin text-muted-foreground" />
-            <p className="text-muted-foreground">読み込み中...</p>
+        {/* 全選択チェックボックス */}
+        {sourceFiles.length > 0 && (
+          <div className="flex items-center space-x-2 mb-3">
+            <Checkbox
+              id="select-all-sources"
+              checked={selectAll}
+              onCheckedChange={handleSelectAllChange}
+            />
+            <label
+              htmlFor="select-all-sources"
+              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+            >
+              全てのソースを選択/解除
+            </label>
           </div>
-        ) : (
-          <>
-            {/* アップロード中のファイル */}
-            {uploadQueue.map((upload) => (
-              <div key={upload.id} className={`flex items-center space-x-2 p-2 rounded-md border ${
-                upload.status === 'completed' ? 'bg-green-50 border-green-200' :
-                upload.status === 'error' ? 'bg-red-50 border-red-200' :
-                'bg-blue-50 border-blue-200'
-              }`}>
-                {upload.status === 'uploading' || upload.status === 'processing' ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-500 flex-shrink-0" />
-                ) : upload.status === 'completed' ? (
-                  <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0" />
-                ) : (
-                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-                )}
-                
-                <div className="flex-grow min-w-0">
-                  <div className="text-sm truncate" title={upload.originalFileName}>
-                    {upload.originalFileName}
-                  </div>
-                  <div className="text-xs text-gray-600">
-                    {upload.status === 'uploading' ? 'アップロード中' :
-                     upload.status === 'processing' ? '処理中' :
-                     upload.status === 'completed' ? '完了' : 'エラー'}
-                    {upload.message && ` - ${upload.message}`}
-                  </div>
-                  {upload.error && (
-                    <div className="text-xs text-red-600">{upload.error}</div>
-                  )}
-                </div>
-                
-                {/* アップロード中はチェックボックス無効 */}
-                <Checkbox
-                  disabled={true}
-                  className="ml-auto opacity-50"
-                />
-                
-                {/* アップロード中はメニューも無効 */}
-                <Button variant="ghost" size="icon" className="h-8 w-8 opacity-30" disabled>
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </div>
-            ))}
-            
-            {/* 完了済みのファイル */}
-            {sourceFiles.length > 0 ? (
-              sourceFiles.map((file) => (
-                <div key={file.id || file.name} className="flex items-center space-x-2 p-2 hover:bg-muted/50 rounded-md">
-                  <FileText className="h-5 w-5 text-muted-foreground flex-shrink-0" />
-                  <span className="flex-grow text-sm truncate" title={file.name}>{file.name}</span>
-                  <Checkbox
-                    id={`checkbox-${file.id || file.name}`}
-                    checked={selectedSourceNames.includes(file.name)}
-                    onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
-                    className="ml-auto"
-                  />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-50 hover:opacity-100">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuLabel>{file.name}</DropdownMenuLabel>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
-                        名前を変更
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleDeleteFile(file.name)} className="text-red-600">
-                        削除
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              ))
-            ) : uploadQueue.length === 0 ? (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-sm text-muted-foreground">
-                  アップロード済みのファイルはありません。「追加」ボタンからアップロードしてください。
-                </p>
-              </div>
-            ) : null}
-          </>
         )}
       </div>
-      
-      {/* Upload Status Message */}
+
       {message && (
-        <div className="mt-auto pt-2">
-            <Alert variant={message.type === 'error' ? "destructive" : "default"} className={
-              message.type === 'success' ? 'bg-green-50 border-green-300 text-green-800' :
-              message.type === 'error' ? 'bg-red-50 border-red-300 text-red-800' :
-              'bg-blue-50 border-blue-300 text-blue-800'
-            }>
-              {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
-              {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
-              {message.type === 'info' && <Terminal className="h-4 w-4" />}
-              <AlertTitle>
-                {message.type === 'success' ? '成功' : message.type === 'error' ? 'エラー' : '情報'}
-              </AlertTitle>
-              <AlertDescription>{message.text}</AlertDescription>
-            </Alert>
-        </div>
+        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mb-4">
+          {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
+          {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
+          <AlertTitle>{message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}</AlertTitle>
+          <AlertDescription>{message.text}</AlertDescription>
+        </Alert>
       )}
 
-      {(loadingFiles) && (
-        <div className="flex items-center justify-center p-4">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2 text-muted-foreground">
-            {loadingFiles && "ファイル一覧を読み込み中..."}
-          </span>
+      {/* アップロードキュー */}
+      {uploadQueue.length > 0 && (
+        <div className={`mb-4 space-y-3 ${isMobileView ? "px-4" : ""}`}>
+          <h3 className="text-md font-semibold text-gray-600">アップロード中のファイル:</h3>
+          {uploadQueue.map((item) => (
+            <div key={item.id} className={`p-3 rounded-md ${isMobileView ? "bg-gray-50" : "bg-gray-50 border"}`}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium truncate w-2/3" title={item.originalFileName}>
+                  {item.originalFileName}
+                </span>
+                {item.status === 'uploading' && <Loader2 className="h-4 w-4 animate-spin text-blue-500" />}
+                {item.status === 'processing' && <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />}
+                {item.status === 'completed' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                {item.status === 'error' && <AlertCircle className="h-4 w-4 text-red-500" />}
+              </div>
+              {item.message && <p className="text-xs text-gray-500 mt-1">{item.message}</p>}
+              {item.error && <p className="text-xs text-red-600 mt-1">{item.error}</p>}
+            </div>
+          ))}
         </div>
       )}
+      
+      {/* ファイルリスト */}
+      <div className={`flex-grow overflow-auto space-y-2 ${isMobileView ? "px-4 pb-4" : ""}`}>
+        {loadingFiles && (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="ml-2 text-muted-foreground">ファイル一覧を読み込み中...</p>
+          </div>
+        )}
+        {!loadingFiles && sourceFiles.length === 0 && (
+          <div className="text-center text-muted-foreground py-8">
+            <FileText className="mx-auto h-12 w-12 text-gray-400 mb-2" />
+            <p className="font-semibold">利用可能なソースファイルがありません。</p>
+            <p className="text-sm">「ファイル追加」ボタンからアップロードしてください。</p>
+          </div>
+        )}
+        {!loadingFiles && sourceFiles.map((file) => (
+          <div
+            key={file.id || file.name} // idが存在しない場合nameを使用
+            className={`flex items-center justify-between p-3 rounded-md transition-colors
+                        ${isMobileView 
+                          ? (selectedSourceNames.includes(file.name) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100")
+                          : (selectedSourceNames.includes(file.name) ? "bg-primary/10 ring-1 ring-primary" : "bg-gray-50 hover:bg-gray-100 border")
+                        }`}
+          >
+            <div className="flex items-center space-x-3 flex-grow min-w-0">
+              <Checkbox
+                id={`source-${file.name}`}
+                checked={selectedSourceNames.includes(file.name)}
+                onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
+                className={isMobileView && selectedSourceNames.includes(file.name) ? "border-primary text-primary focus:ring-primary" : ""}
+              />
+              <FileText className={`h-5 w-5 ${selectedSourceNames.includes(file.name) ? "text-primary" : "text-gray-500"}`} />
+              <label 
+                htmlFor={`source-${file.name}`} 
+                className="text-sm font-medium truncate cursor-pointer flex-grow"
+                title={file.originalName || file.name} // originalNameがあれば表示、なければname
+              >
+                {file.originalName || file.name}
+              </label>
+            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <MoreVertical className="h-4 w-4" />
+                  <span className="sr-only">アクション</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>操作</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleRenameFile(file.name)} disabled> {/* リネームは未実装なのでdisabled */}
+                  名前を変更 (未実装)
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => handleDeleteFile(file.name)} 
+                  className="text-red-600 hover:!bg-red-50 hover:!text-red-700"
+                >
+                  削除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

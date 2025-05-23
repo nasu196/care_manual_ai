@@ -170,7 +170,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                   )
                 );
                 accumulatedData = "";
-              } catch (e) {
+              } catch (_) {
+                console.error("Error during source data chunk processing:", _);
                 console.log("Waiting for more source data chunks...");
               }
           }
@@ -316,17 +317,17 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         </ScrollArea>
       </div>
 
-      <div className="p-6 border-t">
-        <form onSubmit={handleSubmit} className="flex w-full space-x-2">
+      <div className="p-4 md:p-6 border-t">
+        <form onSubmit={handleSubmit} className="flex w-full space-x-2 items-center">
           <Input
             type="text"
             placeholder="質問を入力してください..."
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            className="flex-1"
+            onChange={(_) => setInputValue(_.target.value)}
+            className="flex-1 h-12 md:h-10"
             disabled={isLoading}
           />
-          <Button type="submit" disabled={isLoading}>
+          <Button type="submit" disabled={isLoading} className="h-12 md:h-10 px-4 md:px-6">
             {isLoading ? '送信中...' : '送信'}
           </Button>
         </form>

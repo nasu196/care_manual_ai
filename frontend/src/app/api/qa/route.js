@@ -141,7 +141,7 @@ export async function POST(request) {
         jsonString = jsonString.substring(jsonString.indexOf('\n') + 1);
         if (jsonString.endsWith("```")) {
             jsonString = jsonString.substring(0, jsonString.lastIndexOf('\n'));
-        }
+      }
       }
       analysisData = JSON.parse(jsonString.trim());
     } catch (e) {
@@ -172,7 +172,7 @@ export async function POST(request) {
       });
       if (matchError) {
         console.error(`[Phase 2] チャンク検索エラー (クエリ: "${searchQuery}"):`, matchError);
-        continue;
+        continue; 
       }
       if (chunks && chunks.length > 0) {
         chunks.forEach(chunk => {
