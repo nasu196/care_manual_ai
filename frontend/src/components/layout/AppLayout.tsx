@@ -189,23 +189,23 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
           </div>
         )}
 
-        {/* 中央カラム: チャット (動的幅: 編集権限有り時: 通常41.7%、メモ表示時33.3% / 編集権限なし時: 通常50%、メモ表示時33.3%) */}
+        {/* 中央カラム: チャット (動的幅: 編集権限有り時: 通常41.7%、メモ表示時33.3% / 編集権限なし時: 通常60%、メモ表示時40%) */}
         <div 
           className={`bg-white rounded-lg shadow h-full max-h-full overflow-hidden transition-all duration-300 ease-in-out 
                       ${hasEditPermission 
                         ? (isMemoViewExpanded ? 'w-2/6' : 'w-2/4')
-                        : (isMemoViewExpanded ? 'w-1/3' : 'w-1/2')
+                        : (isMemoViewExpanded ? 'w-2/5' : 'w-3/5')
                       }`}
         >
           {chatSlot}
         </div>
 
-        {/* 右カラム: メモ (動的幅: 編集権限有り時: 通常33.3%、メモ表示時50% / 編集権限なし時: 通常50%、メモ表示時66.7%) */}
+        {/* 右カラム: メモ (動的幅: 編集権限有り時: 通常33.3%、メモ表示時50% / 編集権限なし時: 通常40%、メモ表示時60%) */}
         <div 
           className={`bg-white rounded-lg shadow h-full max-h-full overflow-hidden transition-all duration-300 ease-in-out 
                       ${hasEditPermission 
                         ? (isMemoViewExpanded ? 'w-3/6' : 'w-1/4')
-                        : (isMemoViewExpanded ? 'w-2/3' : 'w-1/2')
+                        : (isMemoViewExpanded ? 'w-3/5' : 'w-2/5')
                       }`}
         >
           {memoSlot || <MemoStudio selectedSourceNames={[]} />}
