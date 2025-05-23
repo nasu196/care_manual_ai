@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FeedbackModal } from '@/components/features/FeedbackModal';
+import { ShareModal } from '@/components/features/ShareModal'; // ShareModalを追加
 import { useMemoStore } from '@/store/memoStore'; // memoStoreを追加
 
 interface TopHeaderProps {
@@ -20,6 +21,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
   const [editableTitle, setEditableTitle] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false); // ShareModal用のstate追加
 
   // ★ 編集権限を取得
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
@@ -28,6 +30,17 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
   useEffect(() => {
     setEditableTitle(title);
   }, [title]);
+
+  // URLパラメータを監視して自動的に閲覧専用モードに設定
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const mode = urlParams.get('mode');
+    
+    if (mode === 'readonly') {
+      setEditPermission(false);
+      console.log('[TopHeader] URLパラメータにより閲覧専用モードに設定しました');
+    }
+  }, [setEditPermission]); // setEditPermissionを依存配列に追加
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -72,6 +85,10 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
     // TODO: 利用規約ページへの遷移など
   };
 
+  const handleShare = () => {
+    setIsShareModalOpen(true); // モーダルを表示するように変更
+  };
+
   return (
     <>
       <div className="flex items-center justify-between px-4 py-2 border-b h-16 bg-background">
@@ -99,13 +116,13 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
 
         {/* 右側: 操作ボタンとユーザーアイコン */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {/* 編集権限切り替えボタン */}
+          {/* 編集権限切り替えボタン（将来的には削除予定 - 共有URL機能に統合） */}
           <Button 
             variant="ghost" 
             size="sm" 
             onClick={() => setEditPermission(!hasEditPermission)}
             className="flex items-center space-x-1.5"
-            title={hasEditPermission ? '閲覧専用モードに切り替え' : '編集モードに切り替え'}
+            title={hasEditPermission ? '閲覧専用モードに切り替え（テスト用）' : '編集モードに切り替え（テスト用）'}
           >
             {hasEditPermission ? <Eye className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}
             <span className="hidden sm:inline">
@@ -113,10 +130,19 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
             </span>
           </Button>
 
-          <Button variant="ghost" size="sm" className="flex items-center space-x-1.5">
-            <Share2 className="h-4 w-4" />
-            <span className="hidden sm:inline">共有</span>
-          </Button>
+          {/* 共有ボタン（編集権限がある場合のみ表示） */}
+          {hasEditPermission && (
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="flex items-center space-x-1.5"
+              onClick={handleShare}
+              title="閲覧専用の共有URLを生成"
+            >
+              <Share2 className="h-4 w-4" />
+              <span className="hidden sm:inline">共有</span>
+            </Button>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -144,6 +170,10 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
       <FeedbackModal 
         isOpen={isFeedbackModalOpen} 
         onOpenChange={setIsFeedbackModalOpen}
+      />
+      <ShareModal 
+        isOpen={isShareModalOpen} 
+        onOpenChange={setIsShareModalOpen}
       />
     </>
   );
