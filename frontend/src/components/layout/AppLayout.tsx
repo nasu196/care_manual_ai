@@ -16,7 +16,8 @@ interface AppLayoutProps {
 
 const MOBILE_BREAKPOINT = 768; // Tailwindのmdブレークポイント (768px)
 const PANELS = ['source', 'chat', 'memo'] as const; // ★ パネルの順番を定義
-type PanelType = typeof PANELS[number];
+const PANELS_NO_EDIT = ['chat', 'memo'] as const; // ★ 編集権限なしの場合のパネル
+type PanelType = 'source' | 'chat' | 'memo';
 
 const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   // const title = headerTitle || '持続化補助金＜創業型＞公募要領'; // タイトルの設定
@@ -24,12 +25,25 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   // ★ メモ表示状態を取得
   const isMemoViewExpanded = useMemoStore((state) => state.isMemoViewExpanded);
+  // ★ 編集権限を取得
+  const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
 
   const [isMobileView, setIsMobileView] = useState(false);
   const [activeMobilePanel, setActiveMobilePanel] = useState<PanelType>('chat');
   
   const [currentPanelWidth, setCurrentPanelWidth] = useState(0); // ★ 現在のパネル幅を保持するstate
   const [translateX, setTranslateX] = useState(0); // ★ 初期値を0に変更
+
+  // 現在有効なパネルリストを取得
+  const currentPanels = hasEditPermission ? PANELS : PANELS_NO_EDIT;
+
+  // 編集権限変更時にアクティブパネルが無効になった場合の処理
+  useEffect(() => {
+    const currentPanelsList = Array.from(currentPanels);
+    if (!currentPanelsList.includes(activeMobilePanel)) {
+      setActiveMobilePanel('chat');
+    }
+  }, [hasEditPermission, currentPanels, activeMobilePanel]);
 
   console.log('[AppLayout] Initial state: isMobileView:', isMobileView, 'activeMobilePanel:', activeMobilePanel, 'translateX:', translateX, 'currentPanelWidth:', currentPanelWidth);
 
@@ -40,7 +54,8 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
       const currentWidth = window.innerWidth; // 現在のウィンドウ幅を取得
       setCurrentPanelWidth(currentWidth); // パネル幅stateを更新
 
-      const newIndex = PANELS.indexOf(activeMobilePanel);
+      const currentPanelsList = Array.from(currentPanels);
+      const newIndex = currentPanelsList.indexOf(activeMobilePanel);
       if (mobile) {
         setTranslateX(newIndex * -currentWidth);
         console.log('[AppLayout] checkMobileView (mobile): panelWidth:', currentWidth, 'newIndex:', newIndex, 'translateX:', newIndex * -currentWidth);
@@ -52,23 +67,25 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     checkMobileView();
     window.addEventListener('resize', checkMobileView);
     return () => window.removeEventListener('resize', checkMobileView);
-  }, [activeMobilePanel]); 
+  }, [activeMobilePanel, currentPanels]);
 
   useEffect(() => {
     if (isMobileView) {
       if (currentPanelWidth > 0) { // currentPanelWidthが設定されてから計算
-        const newIndex = PANELS.indexOf(activeMobilePanel);
+        const currentPanelsList = Array.from(currentPanels);
+        const newIndex = currentPanelsList.indexOf(activeMobilePanel);
         setTranslateX(newIndex * -currentPanelWidth);
         console.log('[AppLayout] activeMobilePanel or isMobileView changed (mobile): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'newTranslateX (px):', newIndex * -currentPanelWidth);
       }
     } else {
       if (currentPanelWidth > 0) { // PC表示でも念のためcurrentPanelWidthを考慮
-        const newIndex = PANELS.indexOf(activeMobilePanel);
+        const currentPanelsList = Array.from(currentPanels);
+        const newIndex = currentPanelsList.indexOf(activeMobilePanel);
         setTranslateX(newIndex * -currentPanelWidth); 
         console.log('[AppLayout] activeMobilePanel or isMobileView changed (PC): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'translateX set to (px):', newIndex * -currentPanelWidth);
       }
     }
-  }, [activeMobilePanel, isMobileView, currentPanelWidth]); // currentPanelWidthも依存配列に追加
+  }, [activeMobilePanel, isMobileView, currentPanelWidth, currentPanels]); // currentPanelsも依存配列に追加
 
   const handleTitleChange = (newTitle: string) => {
     setTitle(newTitle);
@@ -81,17 +98,19 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   const swipeHandlers = useSwipeable({
     onSwipedLeft: () => {
-      const currentIndex = PANELS.indexOf(activeMobilePanel);
+      const currentPanelsList = Array.from(currentPanels);
+      const currentIndex = currentPanelsList.indexOf(activeMobilePanel);
       console.log('[AppLayout] onSwipedLeft: currentIndex:', currentIndex); // ★ スワイプ左ログ
-      if (currentIndex < PANELS.length - 1) {
-        setActiveMobilePanel(PANELS[currentIndex + 1]);
+      if (currentIndex < currentPanelsList.length - 1) {
+        setActiveMobilePanel(currentPanelsList[currentIndex + 1] as PanelType);
       }
     },
     onSwipedRight: () => {
-      const currentIndex = PANELS.indexOf(activeMobilePanel);
+      const currentPanelsList = Array.from(currentPanels);
+      const currentIndex = currentPanelsList.indexOf(activeMobilePanel);
       console.log('[AppLayout] onSwipedRight: currentIndex:', currentIndex); // ★ スワイプ右ログ
       if (currentIndex > 0) {
-        setActiveMobilePanel(PANELS[currentIndex - 1]);
+        setActiveMobilePanel(currentPanelsList[currentIndex - 1] as PanelType);
       }
     },
     trackMouse: true, // マウスでのスワイプも有効にする場合
@@ -110,8 +129,8 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
           onValueChange={(value) => setActiveMobilePanel(value as PanelType)} 
           className="w-full bg-white border-b"
         >
-          <TabsList className="grid w-full grid-cols-3 h-12 rounded-none bg-white">
-            {PANELS.map(panel => (
+          <TabsList className={`grid w-full h-12 rounded-none bg-white ${hasEditPermission ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            {currentPanels.map(panel => (
               <TabsTrigger 
                 key={panel} 
                 value={panel}
@@ -130,21 +149,22 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
         {/* スワイプとアニメーションのためのコンテナ */}
         <div className="flex-grow relative overflow-hidden" {...swipeHandlers}>
           <div 
-            className="flex h-full absolute top-0 left-0 w-[300%]" // 3パネル分なので300%
+            className={`flex h-full absolute top-0 left-0 ${hasEditPermission ? 'w-[300%]' : 'w-[200%]'}`} // 編集権限に応じて幅を変更
             style={{
               transform: `translateX(${translateX}px)`, 
               transition: 'transform 0.3s ease-in-out', 
             }}
           >
-            {console.log('[AppLayout] Mobile panel container style - transform:', `translateX(${translateX}px)`)}
-            <div className="w-1/3 h-full overflow-auto bg-white">
-              {sourceSlot ? React.cloneElement(sourceSlot as React.ReactElement, { isMobileView }) : <SourceManager isMobileView={isMobileView} />}
-            </div>
-            <div className="w-1/3 h-full overflow-auto bg-white">  {/* チャット、背景を白に */}
+            {hasEditPermission && (
+              <div className="w-1/3 h-full overflow-auto bg-white">
+                {sourceSlot || <SourceManager selectedSourceNames={[]} onSelectionChange={() => {}} isMobileView={isMobileView} />}
+              </div>
+            )}
+            <div className={`${hasEditPermission ? 'w-1/3' : 'w-1/2'} h-full overflow-auto bg-white`}>  {/* チャット、背景を白に */}
               {chatSlot}
             </div>
-            <div className="w-1/3 h-full overflow-auto bg-white"> {/* ★ p-3 を削除 (メモパネルも統一) */}
-              {memoSlot || <MemoStudio />}
+            <div className={`${hasEditPermission ? 'w-1/3' : 'w-1/2'} h-full overflow-auto bg-white`}> {/* ★ p-3 を削除 (メモパネルも統一) */}
+              {memoSlot || <MemoStudio selectedSourceNames={[]} />}
             </div>
           </div>
         </div>
@@ -154,33 +174,41 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   // PC表示 (既存のレイアウトをTailwindで少し調整)
   return (
-    <div className="flex flex-col h-screen bg-muted/40">
+    <div className="flex flex-col h-screen max-h-screen bg-muted/40 overflow-hidden">
       <TopHeader title={title} onTitleChange={handleTitleChange} />
       
-      {/* 3カラムFlexエリア - アニメーションのためGridからFlexに変更 */}
-      <div className="flex-grow flex gap-x-2 p-2">
-        {/* 左カラム: ソース (動的幅: 通常25%、メモ表示時16.7%) */}
-        <div 
-          className={`bg-white rounded-lg shadow h-full overflow-hidden transition-all duration-300 ease-in-out 
-                      ${isMemoViewExpanded ? 'w-1/6' : 'w-1/4'}`}
-        >
-          {sourceSlot ? React.cloneElement(sourceSlot as React.ReactElement, { isMobileView }) : <SourceManager isMobileView={isMobileView} />}
-        </div>
+      {/* 3カラムFlexエリア - 画面の高さを確実に制限 */}
+      <div className="flex-grow flex gap-x-2 p-2 min-h-0 max-h-full overflow-hidden">
+        {/* 左カラム: ソース (動的幅: 通常25%、メモ表示時16.7%) - 編集権限がある場合のみ表示 */}
+        {hasEditPermission && (
+          <div 
+            className={`bg-white rounded-lg shadow h-full max-h-full overflow-hidden transition-all duration-300 ease-in-out 
+                        ${isMemoViewExpanded ? 'w-1/6' : 'w-1/4'}`}
+          >
+            {sourceSlot || <SourceManager selectedSourceNames={[]} onSelectionChange={() => {}} isMobileView={isMobileView} />}
+          </div>
+        )}
 
-        {/* 中央カラム: チャット (動的幅: 通常41.7%、メモ表示時33.3%) */}
+        {/* 中央カラム: チャット (動的幅: 編集権限有り時: 通常41.7%、メモ表示時33.3% / 編集権限なし時: 通常50%、メモ表示時33.3%) */}
         <div 
-          className={`bg-white rounded-lg shadow h-full overflow-hidden transition-all duration-300 ease-in-out 
-                      ${isMemoViewExpanded ? 'w-2/6' : 'w-2/4'}`} // 背景を白に
+          className={`bg-white rounded-lg shadow h-full max-h-full overflow-hidden transition-all duration-300 ease-in-out 
+                      ${hasEditPermission 
+                        ? (isMemoViewExpanded ? 'w-2/6' : 'w-2/4')
+                        : (isMemoViewExpanded ? 'w-1/3' : 'w-1/2')
+                      }`}
         >
           {chatSlot}
         </div>
 
-        {/* 右カラム: メモ (動的幅: 通常33.3%、メモ表示時50%) */}
+        {/* 右カラム: メモ (動的幅: 編集権限有り時: 通常33.3%、メモ表示時50% / 編集権限なし時: 通常50%、メモ表示時66.7%) */}
         <div 
-          className={`bg-white rounded-lg shadow h-full overflow-hidden transition-all duration-300 ease-in-out 
-                      ${isMemoViewExpanded ? 'w-3/6' : 'w-1/4'}`} // 背景を白に
+          className={`bg-white rounded-lg shadow h-full max-h-full overflow-hidden transition-all duration-300 ease-in-out 
+                      ${hasEditPermission 
+                        ? (isMemoViewExpanded ? 'w-3/6' : 'w-1/4')
+                        : (isMemoViewExpanded ? 'w-2/3' : 'w-1/2')
+                      }`}
         >
-          {memoSlot || <MemoStudio />}
+          {memoSlot || <MemoStudio selectedSourceNames={[]} />}
         </div>
       </div>
     </div>

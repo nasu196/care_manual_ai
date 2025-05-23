@@ -3,12 +3,12 @@ import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
-import type { FunctionInvokeError } from '@supabase/supabase-js';
+import type { FunctionsError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from 'framer-motion';
 import { marked } from 'marked';
-import { useMemoStore, GeneratingMemo } from '@/store/memoStore';
+import { useMemoStore } from '@/store/memoStore';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -216,18 +216,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         errorMessage = err.message;
       }
 
-      const functionError = err as FunctionInvokeError;
+      const functionError = err as FunctionsError;
       if (functionError && typeof functionError === 'object' && functionError !== null) {
         if (functionError.message && errorMessage !== functionError.message) {
             errorMessage = `${errorMessage} (${functionError.message})`.trim();
-        }
-        if (functionError.details && typeof functionError.details === 'string') {
-          errorMessage = `${errorMessage} Details: ${functionError.details}`.trim();
-        } else if (functionError.context && typeof functionError.context === 'object' && functionError.context !== null) {
-          const contextError = functionError.context.error;
-          if (contextError && typeof contextError === 'object' && contextError !== null && 'message' in contextError && typeof contextError.message === 'string') {
-            errorMessage = `${errorMessage} Context: ${contextError.message}`.trim();
-          }
         }
       }
       setError(errorMessage.replace(/^\(不明なエラーが発生しました。\) /,''));
@@ -273,7 +265,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       if (!promptResponse.ok) {
         const errorText = await promptResponse.text(); 
         let errorJson = {};
-        try { errorJson = JSON.parse(errorText); } catch (_e) {}
+        try { errorJson = JSON.parse(errorText); } catch {}
         const errorMessage = (typeof errorJson === 'object' && errorJson !== null && 'error' in errorJson && typeof errorJson.error === 'string') 
                            ? errorJson.error 
                            : errorText || 'プロンプト作成リクエストの処理中に不明なエラーが発生しました。';

@@ -22,6 +22,10 @@ interface MemoStoreState {
   isMemoViewExpanded: boolean; // ★ 追加: メモ表示・編集中かどうか
   setMemoViewExpanded: (expanded: boolean) => void; // ★ 追加: メモ表示状態を設定
 
+  // ★★★ 編集権限管理用 ★★★
+  hasEditPermission: boolean; // ★ 追加: 編集権限があるかどうか
+  setEditPermission: (hasPermission: boolean) => void; // ★ 追加: 編集権限を設定
+
   // ★★★ 生成中メモの進捗管理用 state と actions ★★★
   generatingMemos: GeneratingMemo[];
   addGeneratingMemo: (memo: GeneratingMemo) => void;
@@ -37,6 +41,10 @@ export const useMemoStore = create<MemoStoreState>((set) => ({
   triggerMemoListRefresh: () => set({ memoListLastUpdated: Date.now() }), // ★ 実装
   isMemoViewExpanded: false, // ★ 初期値を設定
   setMemoViewExpanded: (expanded) => set({ isMemoViewExpanded: expanded }), // ★ 実装
+
+  // ★★★ 編集権限管理用 ★★★
+  hasEditPermission: true, // ★ 初期値を true に変更（デフォルトで編集可能）
+  setEditPermission: (hasPermission) => set({ hasEditPermission: hasPermission }), // ★ 実装
 
   // ★★★ 生成中メモの進捗管理用 state と actions の実装 ★★★
   generatingMemos: [],

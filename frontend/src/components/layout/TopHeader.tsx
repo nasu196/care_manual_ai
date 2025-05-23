@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Settings, Share2, UserCircle } from 'lucide-react'; // UserCircleはClerkの代替, MoreHorizontalを削除
+import { Settings, Share2, UserCircle, Edit3, Eye } from 'lucide-react'; // Edit3とEyeを追加
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FeedbackModal } from '@/components/features/FeedbackModal';
+import { useMemoStore } from '@/store/memoStore'; // memoStoreを追加
 
 interface TopHeaderProps {
   title: string;
@@ -19,6 +20,10 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
   const [editableTitle, setEditableTitle] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+
+  // ★ 編集権限を取得
+  const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
+  const setEditPermission = useMemoStore((state) => state.setEditPermission);
 
   useEffect(() => {
     setEditableTitle(title);
@@ -94,6 +99,20 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
 
         {/* 右側: 操作ボタンとユーザーアイコン */}
         <div className="flex items-center space-x-2 sm:space-x-3">
+          {/* 編集権限切り替えボタン */}
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setEditPermission(!hasEditPermission)}
+            className="flex items-center space-x-1.5"
+            title={hasEditPermission ? '閲覧専用モードに切り替え' : '編集モードに切り替え'}
+          >
+            {hasEditPermission ? <Eye className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}
+            <span className="hidden sm:inline">
+              {hasEditPermission ? '閲覧専用' : '編集モード'}
+            </span>
+          </Button>
+
           <Button variant="ghost" size="sm" className="flex items-center space-x-1.5">
             <Share2 className="h-4 w-4" />
             <span className="hidden sm:inline">共有</span>
