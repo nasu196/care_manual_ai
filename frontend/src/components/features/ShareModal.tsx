@@ -67,7 +67,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
                 value={shareUrl}
                 readOnly
                 className="flex-1 text-xs h-9"
-                onClick={(e) => e.target.select()}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
               />
               <Button
                 size="sm"
