@@ -315,19 +315,20 @@ async function processAndStoreDocuments(
     embeddingsClient: GoogleGenerativeAIEmbeddings,
     generativeAiClient: GoogleGenerativeAI // ★ 引数追加
 ) {
+  console.log("[processAndStoreDocuments] Start"); // ★ 追加
   if (!supabaseClient) throw new Error("Supabase client not initialized");
   if (!embeddingsClient) throw new Error("Embeddings client not initialized");
-  // generativeAiClient のチェックはサマリー生成関数内で行う
-
+  
   if (!processedFile || !processedFile.docs || processedFile.docs.length === 0) {
-    console.log("解析されたドキュメントがないため、処理をスキップします。");
+    console.log("[processAndStoreDocuments] No parsed documents, skipping."); // ★ 追加
     return false;
   }
   const parsedDocs = processedFile.docs;
-  console.log(`\nドキュメントのチャンク化とDB保存を開始... ファイル名: ${sourceFileName} (元ファイル名: ${originalFileName || '未指定'})`);
+  console.log(`[processAndStoreDocuments] Processing file: ${sourceFileName}, original: ${originalFileName || 'N/A'}, Parsed doc count: ${parsedDocs.length}`); // ★ 追加
   
   try {
     let manualId: string;
+    console.log("[processAndStoreDocuments] Checking for existing manual..."); // ★ 追加
     const { data: existingManual, error: selectError } = await supabaseClient
       .from('manuals')
       .select('id')
@@ -335,83 +336,80 @@ async function processAndStoreDocuments(
       .single();
 
     if (selectError && selectError.code !== 'PGRST116') {
-      console.error(`既存マニュアルの確認中にエラー: ${sourceFileName}`, selectError);
+      console.error(`[processAndStoreDocuments] Error checking existing manual: ${sourceFileName}`, selectError); // ★ 追加
       throw selectError;
     }
+    console.log(`[processAndStoreDocuments] Existing manual check complete. Found: ${existingManual ? existingManual.id : 'null'}`); // ★ 追加
 
     let summaryText: string | null = null;
-    if (parsedDocs.length > 0 && parsedDocs[0] && parsedDocs[0].pageContent) { // ★ null/undefinedチェック強化
+    if (parsedDocs.length > 0 && parsedDocs[0] && parsedDocs[0].pageContent) {
+        console.log("[processAndStoreDocuments] Generating summary..."); // ★ 追加
         try {
-            summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient); // ★ サマリー生成
-            console.log(`サマリー生成結果: ${summaryText ? '成功' : 'スキップ'}`);
+            summaryText = await generateSummary(parsedDocs[0].pageContent, generativeAiClient);
+            console.log(`[processAndStoreDocuments] Summary generation result: ${summaryText ? 'Success' : 'Skipped/Null'}, Length: ${summaryText?.length || 0}`); // ★ 追加
         } catch (summaryError) {
-            console.error("サマリー生成中にエラーが発生しましたが、処理を続行します:", summaryError);
-            summaryText = null; // ★ エラー時は明示的にnullを設定
+            console.error("[processAndStoreDocuments] Error during summary generation (continuing):", summaryError); // ★ 追加
+            summaryText = null; 
         }
     } else {
-        console.log("ドキュメントのテキストコンテンツが見つからないため、サマリー生成をスキップします。");
+        console.log("[processAndStoreDocuments] No content for summary, skipping."); // ★ 追加
     }
 
-    if (existingManual && existingManual.id) { // ★ existingManual.idのnullチェック追加
+    if (existingManual && existingManual.id) {
       manualId = existingManual.id;
-      console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
-      // 既存マニュアルの場合もサマリーとoriginal_file_nameを更新する
-      const updateData: any = { // ★ 型を明示的に指定
-        original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを更新
+      console.log(`[processAndStoreDocuments] Using existing manual ID: ${manualId}`); // ★ 追加
+      const updateData: any = {
+        original_file_name: originalFileName || sourceFileName,
         metadata: { 
             totalPages: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length) : 1,
             sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown',
             lastProcessed: new Date().toISOString() 
         },
       };
-      
-      // summaryTextがnullでない場合のみ追加 ★
       if (summaryText !== null) {
         updateData.summary = summaryText;
       }
-
+      console.log("[processAndStoreDocuments] Updating existing manual with data:", updateData); // ★ 追加
       const { error: updateError } = await supabaseClient
         .from('manuals')
         .update(updateData)
         .eq('id', manualId);
       if (updateError) {
-        console.error(`既存マニュアルの更新中にエラー: ID=${manualId}`, updateError);
-        // エラーが発生しても処理を続行する（サマリーが更新されないだけ）
+        console.error(`[processAndStoreDocuments] Error updating existing manual ID=${manualId}:`, updateError); // ★ 追加
       } else {
-        console.log(`既存マニュアルのサマリーとoriginal_file_nameを更新しました。ID: ${manualId}`);
+        console.log(`[processAndStoreDocuments] Successfully updated existing manual ID=${manualId}`); // ★ 追加
       }
     } else {
+      console.log("[processAndStoreDocuments] Creating new manual record..."); // ★ 追加
       const totalPages = (parsedDocs[0] && parsedDocs[0].metadata) ? 
                          (parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length)) : 1;
-      
-      const insertData: any = { // ★ 型を明示的に指定
+      const insertData: any = {
         file_name: sourceFileName,
-        original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを追加
+        original_file_name: originalFileName || sourceFileName, 
         storage_path: `${BUCKET_NAME}/${sourceFileName}`,
         metadata: { 
           totalPages: totalPages,
           sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown'
         },
       };
-      
-      // summaryTextがnullでない場合のみ追加 ★
       if (summaryText !== null) {
         insertData.summary = summaryText;
       }
-
+      console.log("[processAndStoreDocuments] Inserting new manual with data:", insertData); // ★ 追加
       const { data: newManual, error: insertError } = await supabaseClient
         .from('manuals')
         .insert(insertData)
         .select('id')
         .single();
-      if (insertError || !newManual || !newManual.id) { // ★ nullチェック強化
-        console.error(`新規マニュアル情報のDB登録に失敗: ${sourceFileName}`, insertError);
+      if (insertError || !newManual || !newManual.id) { 
+        console.error(`[processAndStoreDocuments] Error inserting new manual for ${sourceFileName}:`, insertError); // ★ 追加
         throw insertError || new Error("Failed to insert new manual and retrieve ID.");
       }
       manualId = newManual.id;
-      console.log(`新規マニュアル情報をDBに登録しました。ID: ${manualId}`);
+      console.log(`[processAndStoreDocuments] New manual created with ID: ${manualId}`); // ★ 追加
     }
 
+    console.log(`[processAndStoreDocuments] Manual ID set to: ${manualId}`); // ★ 追加
     const splitter = new RecursiveCharacterTextSplitter({
       chunkSize: 2500,
       chunkOverlap: 400,
@@ -419,14 +417,25 @@ async function processAndStoreDocuments(
     });
 
     const chunks: ChunkObject[] = [];
+    console.log("[processAndStoreDocuments] Splitting documents into chunks..."); // ★ 追加
     for (let i = 0; i < parsedDocs.length; i++) {
       const doc = parsedDocs[i];
       const pageContent = doc.pageContent || "";
+      console.log(`[processAndStoreDocuments] Processing document ${i+1}/${parsedDocs.length}, content length: ${pageContent.length}`); // ★ 追加
       if (!pageContent.trim()) {
-          console.log(`ドキュメント ${i+1} は空の内容のためスキップします。`);
+          console.log(`[processAndStoreDocuments] Document ${i+1} is empty, skipping.`); // ★ 追加
           continue;
       }
-      const splitText: string[] = await splitter.splitText(pageContent);
+      let splitText: string[] = []; // ★ 初期化
+      try {
+        console.log(`[processAndStoreDocuments] Calling splitter.splitText for doc ${i+1}...`); // ★ 追加
+        splitText = await splitter.splitText(pageContent);
+        console.log(`[processAndStoreDocuments] Doc ${i+1} split into ${splitText.length} chunks.`); // ★ 追加
+      } catch (splitError) {
+        console.error(`[processAndStoreDocuments] Error splitting document ${i+1}:`, splitError); // ★ 追加
+        throw new Error(`Failed to split document: ${splitError instanceof Error ? splitError.message : 'Unknown error'}`);
+      }
+      
       splitText.forEach((text: string, index: number) => {
         chunks.push({
           manual_id: manualId,
@@ -435,13 +444,13 @@ async function processAndStoreDocuments(
         });
       });
     }
-    console.log(`合計 ${chunks.length} 個のチャンクに分割しました。`);
+    console.log(`[processAndStoreDocuments] Total chunks created: ${chunks.length}`); // ★ 追加
     if (chunks.length === 0) {
-        console.log("チャンクが生成されませんでした。処理を終了します。");
+        console.log("[processAndStoreDocuments] No chunks generated, finishing process."); // ★ 追加
         return true;
     }
 
-    console.log("チャンクのベクトル化とDB保存を開始...");
+    console.log("[processAndStoreDocuments] Embedding chunks..."); // ★ 追加
     const chunkTextsForEmbedding = chunks.map(c => c.chunk_text);
     
     let chunkEmbeddings: number[][];
@@ -449,22 +458,24 @@ async function processAndStoreDocuments(
         if (!embeddingsClient) {
             throw new Error("Embeddings client is not initialized");
         }
+        console.log(`[processAndStoreDocuments] Calling embedDocuments for ${chunkTextsForEmbedding.length} texts...`); // ★ 追加
         chunkEmbeddings = await embeddingsClient.embedDocuments(chunkTextsForEmbedding);
-        if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) { // ★ null/配列チェック追加
+        if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) { 
+            console.error("[processAndStoreDocuments] Embeddings generation returned invalid result:", chunkEmbeddings); // ★ 追加
             throw new Error("Embeddings generation returned invalid result");
         }
-        console.log(`${chunkEmbeddings.length} 個のチャンクのベクトル化完了。`);
+        console.log(`[processAndStoreDocuments] Embeddings generated for ${chunkEmbeddings.length} chunks.`); // ★ 追加
     } catch (embeddingError) {
-        console.error("エンベディング生成中にエラーが発生しました:", embeddingError);
+        console.error("[processAndStoreDocuments] Error during embedding generation:", embeddingError); // ★ 追加
         throw new Error(`Embedding generation failed: ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
     }
 
     const chunksToInsert: ChunkObject[] = chunks.map((chunk, i) => {
-        if (!chunkEmbeddings[i] || !Array.isArray(chunkEmbeddings[i])) { // ★ 各エンベディングのnullチェック
-            console.warn(`Warning: Invalid embedding for chunk ${i}, using empty array`);
+        if (!chunkEmbeddings[i] || !Array.isArray(chunkEmbeddings[i])) { 
+            console.warn(`[processAndStoreDocuments] Warning: Invalid embedding for chunk ${i}, using empty array. Embedding data:`, chunkEmbeddings[i]); // ★ 追加
             return {
                 ...chunk,
-                embedding: [], // ★ 無効な場合は空配列を設定
+                embedding: [], 
             };
         }
         return {
@@ -473,43 +484,42 @@ async function processAndStoreDocuments(
         };
     });
 
-    // 既存チャンクの削除
+    console.log("[processAndStoreDocuments] Deleting existing chunks..."); // ★ 追加
     try {
         const { error: deleteChunksError } = await supabaseClient
             .from('manual_chunks')
             .delete()
             .eq('manual_id', manualId);
         if (deleteChunksError) {
-            console.error(`既存チャンクの削除中にエラー: manual_id=${manualId}`, deleteChunksError);
-            // ここではエラーをスローせず、処理を続行する（古いチャンクが残る可能性はある）
+            console.error(`[processAndStoreDocuments] Error deleting existing chunks for manual_id=${manualId}:`, deleteChunksError); // ★ 追加
         } else {
-            console.log(`manual_id=${manualId} の既存チャンクを削除しました（もしあれば）。`);
+            console.log(`[processAndStoreDocuments] Successfully deleted existing chunks for manual_id=${manualId}`); // ★ 追加
         }
     } catch (deleteError) {
-        console.error(`既存チャンク削除中に予期せぬエラー: manual_id=${manualId}`, deleteError);
-        // 削除に失敗しても処理を続行
+        console.error(`[processAndStoreDocuments] Unexpected error deleting existing chunks for manual_id=${manualId}:`, deleteError); // ★ 追加
     }
     
-    // 新しいチャンクの挿入
+    console.log("[processAndStoreDocuments] Inserting new chunks..."); // ★ 追加
     try {
         const { error: insertChunksError } = await supabaseClient
           .from('manual_chunks')
           .insert(chunksToInsert);
         if (insertChunksError) {
-          console.error("チャンクのDB保存中にエラー:", insertChunksError);
+          console.error("[processAndStoreDocuments] Error inserting new chunks:", insertChunksError); // ★ 追加
           throw insertChunksError;
         }
-        console.log(`${chunksToInsert.length} 個のチャンクをDBに保存しました。`);
+        console.log(`[processAndStoreDocuments] Successfully inserted ${chunksToInsert.length} new chunks.`); // ★ 追加
     } catch (insertError) {
-        console.error("チャンク挿入中に予期せぬエラー:", insertError);
+        console.error("[processAndStoreDocuments] Unexpected error inserting new chunks:", insertError); // ★ 追加
         throw new Error(`Chunk insertion failed: ${insertError instanceof Error ? insertError.message : 'Unknown error'}`);
     }
     
+    console.log("[processAndStoreDocuments] Successfully completed."); // ★ 追加
     return true;
   } catch (error) {
-    console.error(`\nドキュメント処理・保存中にエラーが発生: ${sourceFileName}`, error);
+    console.error(`[processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ 追加
     if (error instanceof Error) {
-        console.error("エラー詳細:", error.stack || error.message);
+        console.error("[processAndStoreDocuments] Error details:", error.stack || error.message); // ★ 追加
     }
     return false;
   }

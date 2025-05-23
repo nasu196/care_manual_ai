@@ -246,6 +246,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           error: errorMessage,
           message: `処理エラー: ${errorMessage}`
         });
+        // ★ エラーの場合も10秒後にキューから削除
+        setTimeout(() => {
+          removeFromUploadQueue(uploadId);
+        }, 10000);
       }
     } catch (err: unknown) {
       console.error('Outer catch error during upload:', err);
@@ -258,6 +262,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         error: outerErrorMessage,
         message: `エラー: ${outerErrorMessage}`
       });
+      // ★ エラーの場合も10秒後にキューから削除
+      setTimeout(() => {
+        removeFromUploadQueue(uploadId);
+      }, 10000);
     }
     console.log('[handleUpload] End.');
   };
