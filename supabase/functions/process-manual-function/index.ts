@@ -615,6 +615,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
     if (success) {
       console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
+      console.log(`[Handler] Preparing successful response for ${receivedFileName}. Body:`, { message: `Successfully processed ${receivedFileName}` }); // ★ 追加
       return new Response(JSON.stringify({ message: `Successfully processed ${receivedFileName}` }), { 
         status: 200, 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
@@ -659,6 +660,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     const message = error instanceof Error ? error.message : "Internal server error during file processing.";
     const detail = error instanceof Error ? error.stack || error.toString() : String(error); // ★ より詳細な情報を追加
     
+    console.log(`[Handler] Preparing error response for ${receivedFileName || 'Unknown file'}. Error: ${message}, Detail: ${detail}`); // ★ 追加
     return new Response(JSON.stringify({ 
         error: message, 
         detail: detail,
@@ -682,10 +684,15 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             }
         }
     }
+    console.log(`[Handler] Finally block completed for ${receivedFileName || 'request associated with this handler invocation'}`); // ★ 変更: より詳細なメッセージ
   }
 }
 
-serve(handler); // ポート指定を削除。Deno Deployでは自動的に割り当てられる。ローカルテスト時はデフォルト(8000)
+// serve(handler); // ポート指定を削除。Deno Deployでは自動的に割り当てられる。ローカルテスト時はデフォルト(8000)
+
+console.log("[Global] Setting up server with handler (Version: AddResponseLogging)..."); // ★ 追加
+serve(handler);
+console.log("[Global] Server setup complete. Waiting for requests (Version: AddResponseLogging)."); // ★ 追加
 
 console.log("Process manual function (Deno native HTTP) server running!");
 
