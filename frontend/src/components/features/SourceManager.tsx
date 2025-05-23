@@ -63,14 +63,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
   const fetchUploadedFiles = async () => {
     setLoadingFiles(true);
-    console.log('[fetchUploadedFiles] Fetching file list from manuals TABLE...');
     try {
       const { data, error } = await supabase
         .from('manuals')
         .select('file_name, original_file_name')
         .order('file_name', { ascending: true });
-
-      console.log('[fetchUploadedFiles] select() from manuals table returned. Error:', error, 'Raw data:', data);
 
       if (error) {
         console.error('Error fetching file list from manuals table:', error);
@@ -82,7 +79,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           originalName: item.original_file_name || item.file_name,
           id: item.file_name 
         })) || [];
-        console.log('[fetchUploadedFiles] Mapped files for UI from manuals table:', files);
         setSourceFiles(files);
       }
     } catch (err) {
@@ -124,11 +120,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const handleUpload = async (file: File) => {
-    console.log('[handleUpload] Start. File to upload:', file);
-
     if (!file) {
       setMessage({ type: 'error', text: 'アップロードするファイルを選択してください。' });
-      console.log('[handleUpload] No file selected.');
       return;
     }
 
@@ -142,18 +135,14 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         const fileNameOnly = lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name;
         const extension = lastDotIndex !== -1 ? name.substring(lastDotIndex) : '';
 
-        // 1. ファイル名部分をUTF-8のバイト配列にエンコード
         const utf8Bytes = new TextEncoder().encode(fileNameOnly);
         
-        // 2. バイト配列をBase64文字列にエンコード
-        //    Uint8Arrayの各要素を文字コードとして扱い、バイナリ文字列に変換
         let binaryString = '';
         utf8Bytes.forEach((byte) => {
           binaryString += String.fromCharCode(byte);
         });
         let base64Encoded = btoa(binaryString);
         
-        // URLセーフな文字に置換し、パディングを削除
         base64Encoded = base64Encoded
           .replace(/\+/g, '-')
           .replace(/\//g, '_')
@@ -162,7 +151,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         return `${base64Encoded}${extension}`;
       } catch (error) {
         console.error('Failed to encode filename:', error);
-        // エンコードに失敗した場合は英数字のみに変換し、拡張子を保持
         const safeName = name.substring(0, name.lastIndexOf('.')).replace(/[^a-zA-Z0-9-]/g, '_');
         const ext = name.substring(name.lastIndexOf('.'));
         return `${safeName}${ext}`;
@@ -170,7 +158,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     };
 
     const encodedFileName = encodeFileName(originalFileName);
-    console.log(`[handleUpload] Original filename: ${originalFileName}, Encoded: ${encodedFileName}`);
 
     // アップロードキューに追加
     addToUploadQueue({
@@ -286,7 +273,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         removeFromUploadQueue(uploadId);
       }, 10000);
     }
-    console.log('[handleUpload] End.');
   };
 
   const handleSelectAllChange = (checked: boolean) => {
@@ -448,31 +434,28 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   return (
-    <div 
-      className={`flex flex-col h-full ${isMobileView ? "" : "p-4 bg-white rounded-lg shadow"}`}
-    >
+    <div className="flex flex-col h-full">
       {/* ヘッダーセクション */}
-      <div className={`mb-4 ${isMobileView ? "p-4" : ""}`}>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className={`text-xl font-semibold ${isMobileView ? "text-gray-700" : "text-gray-700"}`}>
-            ソース管理
-          </h2>
-          <Button onClick={handleFileTrigger} size="sm" variant="outline" className={isMobileView ? "bg-primary text-primary-foreground" : ""}>
-            <PlusIcon className="mr-2 h-4 w-4" />
-            ファイル追加
-          </Button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleLocalFileChange}
-            className="hidden"
-            multiple // 複数ファイル選択を許可
-            accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" // 対応ファイル形式
-          />
-        </div>
-        {/* 全選択チェックボックス */}
-        {sourceFiles.length > 0 && (
-          <div className="flex items-center space-x-2 mb-3">
+      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
+        <h2 className="text-lg font-semibold">ソース管理</h2>
+        <Button onClick={handleFileTrigger} size="icon" variant="outline">
+          <PlusIcon className="h-5 w-5" />
+          <span className="sr-only">ファイル追加</span>
+        </Button>
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleLocalFileChange}
+          className="hidden"
+          multiple
+          accept=".pdf,.txt,.md,.docx,.pptx,.xlsx,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        />
+      </div>
+
+      {/* 全選択チェックボックス */}
+      {sourceFiles.length > 0 && (
+        <div className="p-4 pt-3">
+          <div className="flex items-center space-x-2">
             <Checkbox
               id="select-all-sources"
               checked={selectAll}
@@ -485,11 +468,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
               全てのソースを選択/解除
             </label>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {message && (
-        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mb-4">
+        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mx-4 mb-4">
           {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
           {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
           <AlertTitle>{message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}</AlertTitle>
@@ -499,10 +482,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
       {/* アップロードキュー */}
       {uploadQueue.length > 0 && (
-        <div className={`mb-4 space-y-3 ${isMobileView ? "px-4" : ""}`}>
+        <div className="px-4 mb-4 space-y-3">
           <h3 className="text-md font-semibold text-gray-600">アップロード中のファイル:</h3>
           {uploadQueue.map((item) => (
-            <div key={item.id} className={`p-3 rounded-md ${isMobileView ? "bg-gray-50" : "bg-gray-50 border"}`}>
+            <div key={item.id} className="p-3 rounded-md bg-gray-50">
               <div className="flex items-center justify-between text-sm">
                 <span className="font-medium truncate w-2/3" title={item.originalFileName}>
                   {item.originalFileName}
@@ -520,7 +503,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       )}
       
       {/* ファイルリスト */}
-      <div className={`flex-grow overflow-auto space-y-2 ${isMobileView ? "px-4 pb-4" : ""}`}>
+      <div className="flex-grow overflow-y-auto px-4 space-y-2">
         {loadingFiles && (
           <div className="flex items-center justify-center h-full">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -536,25 +519,23 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         )}
         {!loadingFiles && sourceFiles.map((file) => (
           <div
-            key={file.id || file.name} // idが存在しない場合nameを使用
+            key={file.id || file.name}
             className={`flex items-center justify-between p-3 rounded-md transition-colors
-                        ${isMobileView 
-                          ? (selectedSourceNames.includes(file.name) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100")
-                          : (selectedSourceNames.includes(file.name) ? "bg-primary/10 ring-1 ring-primary" : "bg-gray-50 hover:bg-gray-100 border")
-                        }`}
+                        ${selectedSourceNames.includes(file.name) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100"}
+                        `}
           >
             <div className="flex items-center space-x-3 flex-grow min-w-0">
               <Checkbox
                 id={`source-${file.name}`}
                 checked={selectedSourceNames.includes(file.name)}
                 onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
-                className={isMobileView && selectedSourceNames.includes(file.name) ? "border-primary text-primary focus:ring-primary" : ""}
+                className={isMobileView && selectedSourceNames.includes(file.name) ? "text-primary focus:ring-primary" : ""}
               />
               <FileText className={`h-5 w-5 ${selectedSourceNames.includes(file.name) ? "text-primary" : "text-gray-500"}`} />
               <label 
                 htmlFor={`source-${file.name}`} 
                 className="text-sm font-medium truncate cursor-pointer flex-grow"
-                title={file.originalName || file.name} // originalNameがあれば表示、なければname
+                title={file.originalName || file.name}
               >
                 {file.originalName || file.name}
               </label>
@@ -568,7 +549,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>操作</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => handleRenameFile(file.name)} disabled> {/* リネームは未実装なのでdisabled */}
+                <DropdownMenuItem onClick={() => handleRenameFile(file.name)} disabled>
                   名前を変更 (未実装)
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

@@ -235,7 +235,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-4 border-b flex justify-between items-center">
+      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
         <h2 className="text-lg font-semibold">AIチャット</h2>
         
         <DropdownMenu>

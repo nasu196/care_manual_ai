@@ -158,11 +158,11 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
       <TopHeader title={title} onTitleChange={handleTitleChange} />
       
       {/* 3カラムFlexエリア - アニメーションのためGridからFlexに変更 */}
-      <div className="flex-grow flex gap-x-2 p-2 overflow-hidden">
+      <div className="flex-grow flex gap-x-2 p-2">
         {/* 左カラム: ソース (動的幅: 通常25%、メモ表示時16.7%) */}
         <div 
           className={`bg-white rounded-lg shadow h-full overflow-hidden transition-all duration-300 ease-in-out 
-                      ${isMemoViewExpanded ? 'w-1/6' : 'w-1/4'}`} // 背景を白に
+                      ${isMemoViewExpanded ? 'w-1/6' : 'w-1/4'}`}
         >
           {sourceSlot ? React.cloneElement(sourceSlot as React.ReactElement, { isMobileView }) : <SourceManager isMobileView={isMobileView} />}
         </div>

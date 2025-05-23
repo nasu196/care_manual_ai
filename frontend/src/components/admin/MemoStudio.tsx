@@ -456,19 +456,17 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="p-4 pb-2 sticky top-0 z-10 border-b">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-semibold">メモ管理</h2>
-          {!isEditingNewMemo && !selectedMemo && (
-            <Button variant="outline" onClick={() => {
-              setIsEditingNewMemo(true);
-              setMemoViewExpanded(true); 
-            }}>
-              <PlusCircle className="mr-2 h-4 w-4" />
-              新規メモ
-            </Button>
-          )}
-        </div>
+      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
+        <h2 className="text-lg font-semibold">メモ管理</h2>
+        {!isEditingNewMemo && !selectedMemo && (
+          <Button variant="outline" size="icon" onClick={() => {
+            setIsEditingNewMemo(true);
+            setMemoViewExpanded(true); 
+          }}>
+            <PlusCircle className="h-5 w-5" />
+            <span className="sr-only">新規メモ</span>
+          </Button>
+        )}
       </div>
 
       <div className="flex-grow overflow-y-auto p-4 space-y-4">
