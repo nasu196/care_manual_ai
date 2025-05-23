@@ -17,6 +17,7 @@ import {
 interface SourceFile {
   id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
   name: string;
+  originalName: string; // ★ 元のファイル名を追加
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
@@ -46,7 +47,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     try {
       const { data, error } = await supabase
         .from('manuals')
-        .select('file_name')
+        .select('file_name, original_file_name')
         .order('file_name', { ascending: true });
 
       console.log('[fetchUploadedFiles] select() from manuals table returned. Error:', error, 'Raw data:', data);
@@ -56,7 +57,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         setMessage({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
         setSourceFiles([]);
       } else {
-        const files = data?.map(item => ({ name: item.file_name, id: item.file_name })) || [];
+        const files = data?.map(item => ({ 
+          name: item.original_file_name || item.file_name, 
+          originalName: item.original_file_name || item.file_name,
+          id: item.file_name 
+        })) || [];
         console.log('[fetchUploadedFiles] Mapped files for UI from manuals table:', files);
         setSourceFiles(files);
       }
@@ -99,27 +104,43 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       return;
     }
 
-    const fileName = file.name;
-    const allowedCharsRegex = /^[\w\-\.]+$/;
-    if (!allowedCharsRegex.test(fileName)) {
-      setMessage({
-        type: 'error',
-        text: `ファイル名「${fileName}」には使用できない文字が含まれています。半角の英数字、ハイフン(-)、アンダースコア(_)、ピリオド(.)のみ使用できます。アップロードを中止しました。`
-      });
-      setSelectedLocalFile(null);
-      return;
-    }
+    const originalFileName = file.name;
+    
+    // 日本語ファイル名対応: Base64エンコーディングを使用
+    const encodeFileName = (name: string): string => {
+      try {
+        // ファイル名と拡張子を分離
+        const lastDotIndex = name.lastIndexOf('.');
+        const fileName = lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name;
+        const extension = lastDotIndex !== -1 ? name.substring(lastDotIndex) : '';
+        
+        // ファイル名部分をBase64エンコード（URLセーフ）
+        const encodedName = btoa(encodeURIComponent(fileName))
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+        
+        return `${encodedName}${extension}`;
+      } catch (error) {
+        console.error('Failed to encode filename:', error);
+        // エンコードに失敗した場合は英数字のみに変換
+        return name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      }
+    };
+
+    const encodedFileName = encodeFileName(originalFileName);
+    console.log(`[handleUpload] Original filename: ${originalFileName}, Encoded: ${encodedFileName}`);
 
     setUploading(true);
     setProcessingFile(false);
-    setMessage({ type: 'info', text: `ファイル「${fileName}」のアップロードを開始します...` });
-    console.log(`[handleUpload] Uploading file: ${fileName}, size: ${file.size}, type: ${file.type}`);
+    setMessage({ type: 'info', text: `ファイル「${originalFileName}」のアップロードを開始します...` });
+    console.log(`[handleUpload] Uploading file: ${encodedFileName}, size: ${file.size}, type: ${file.type}`);
 
     try {
       const bucketName = 'manuals';
       const { error: uploadError } = await supabase.storage
         .from(bucketName)
-        .upload(`${fileName}`, file, {
+        .upload(`${encodedFileName}`, file, {
           cacheControl: '3600',
           upsert: true,
         });
@@ -133,7 +154,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
       
       setUploading(false);
-      let currentMessage = `ファイル「${file.name}」が正常にアップロードされました。`;
+      let currentMessage = `ファイル「${originalFileName}」が正常にアップロードされました。`;
       setMessage({ type: 'success', text: currentMessage });
       setSelectedLocalFile(null);
       await fetchUploadedFiles();
@@ -154,12 +175,15 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           throw new Error("Supabase project reference ID could not be determined from NEXT_PUBLIC_SUPABASE_URL.");
         }
         const finalFunctionUrl = `https://${projectRef}.supabase.co/functions/v1/process-manual-function`;
-        console.log(`[handleUpload] Calling Edge Function: ${finalFunctionUrl} for file: ${file.name}`);
+        console.log(`[handleUpload] Calling Edge Function: ${finalFunctionUrl} for file: ${encodedFileName}`);
 
         const response = await fetch(finalFunctionUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fileName: file.name }),
+          body: JSON.stringify({ 
+            fileName: encodedFileName,
+            originalFileName: originalFileName  // 元のファイル名も送信
+          }),
         });
 
         const responseData = await response.json();
@@ -171,12 +195,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         console.log('[handleUpload] Edge Function call successful:', responseData);
         setMessage({
           type: 'success',
-          text: `ファイル「${file.name}」のアップロードと処理が全て完了しました。`,
+          text: `ファイル「${originalFileName}」のアップロードと処理が全て完了しました。`,
         });
 
-        // ★ アップロード成功後、そのファイルを選択状態にする
-        if (!selectedSourceNames.includes(file.name)) {
-          onSelectionChange([...selectedSourceNames, file.name]);
+        // ★ アップロード成功後、そのファイルを選択状態にする（元のファイル名で）
+        if (!selectedSourceNames.includes(originalFileName)) {
+          onSelectionChange([...selectedSourceNames, originalFileName]);
         }
         await fetchUploadedFiles(); // ★ Edge Function 成功後に再度ファイルリストを読み込む
 
@@ -188,7 +212,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         }
         setMessage({
           type: 'error',
-          text: `ファイル「${file.name}」の処理中にエラー: ${errorMessage}`,
+          text: `ファイル「${originalFileName}」の処理中にエラー: ${errorMessage}`,
         });
       } finally {
         setProcessingFile(false);
@@ -239,11 +263,20 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     if (!window.confirm(`ファイル「${fileName}」を本当に削除しますか？`)) {
       return;
     }
-    setUploading(true); // Consider renaming this state if it's used for more than just uploads
+    
+    // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
+    const targetFile = sourceFiles.find(file => file.name === fileName);
+    if (!targetFile) {
+      setMessage({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
+      return;
+    }
+    const storageFileName = targetFile.id; // エンコードされたファイル名
+    
+    setUploading(true);
     setMessage({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
-      // Step 1: Delete from Storage
-      const { error: storageError } = await supabase.storage.from('manuals').remove([fileName]);
+      // Step 1: Delete from Storage (エンコードされたファイル名を使用)
+      const { error: storageError } = await supabase.storage.from('manuals').remove([storageFileName]);
 
       if (storageError) {
         console.error('Storage delete error:', storageError);
@@ -252,27 +285,23 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         return;
       }
 
-      console.log(`File「${fileName}」deleted from storage.`);
+      console.log(`File「${storageFileName}」deleted from storage.`);
 
-      // Step 2: Delete from manuals table
+      // Step 2: Delete from manuals table (エンコードされたファイル名で検索)
       const { error: tableError } = await supabase
         .from('manuals')
         .delete()
-        .eq('file_name', fileName);
+        .eq('file_name', storageFileName);
 
       if (tableError) {
         console.error('Table delete error:', tableError);
-        // Storageからは削除成功したがテーブルからは失敗した場合のリカバリは難しい。
-        // ユーザーにはエラーを通知し、手動での確認を促すか、あるいはより複雑な補償トランザクションを検討する必要がある。
-        // ここでは、エラーメッセージに両方の状況を含めることを検討する。
         setMessage({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
-        // この場合でもリストは再読み込みして、テーブルの現状を反映する
         await fetchUploadedFiles();
         setUploading(false);
         return;
       }
       
-      console.log(`Record for「${fileName}」deleted from manuals table.`);
+      console.log(`Record for「${storageFileName}」deleted from manuals table.`);
 
       // Step 3: Fetch updated list and update UI
       await fetchUploadedFiles();
@@ -307,37 +336,42 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       setMessage({ type: 'info', text: 'ファイル名は変更されませんでした（同じ名前です）。' });
       return;
     }
-    const allowedCharsRegex = /^[\w\-\.]+$/;
-    if (!allowedCharsRegex.test(trimmedNewName)) {
-      setMessage({
-        type: 'error',
-        text: 'ファイル名には半角の英数字、ハイフン(-)、アンダースコア(_)、ピリオド(.)のみ使用できます。'
-      });
+    
+    // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
+    const targetFile = sourceFiles.find(file => file.name === oldName);
+    if (!targetFile) {
+      setMessage({ type: 'error', text: `ファイル「${oldName}」が見つかりません。` });
       return;
     }
+    const storageFileName = targetFile.id; // エンコードされたファイル名
+
     setUploading(true);
     setMessage({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
-    console.log(`[handleRenameFile] Calling supabase.storage.from('manuals').move('${oldName}', '${trimmedNewName}')`);
+    console.log(`[handleRenameFile] Updating original_file_name in database for file: ${storageFileName}`);
+    
     try {
-      const { data, error } = await supabase.storage.from('manuals').move(oldName, trimmedNewName);
-      console.log('[handleRenameFile] Supabase move call returned. Error:', JSON.stringify(error, null, 2), 'Data:', JSON.stringify(data, null, 2));
-      if (error) {
-        console.error('[handleRenameFile] Detailed rename error object from Supabase:', error);
-        setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${error.message}` });
+      // Storageファイル名は変更せず、manualsテーブルのoriginal_file_nameのみ更新
+      const { error: updateError } = await supabase
+        .from('manuals')
+        .update({ original_file_name: trimmedNewName })
+        .eq('file_name', storageFileName);
+        
+      console.log('[handleRenameFile] Database update call returned. Error:', JSON.stringify(updateError, null, 2));
+      
+      if (updateError) {
+        console.error('[handleRenameFile] Database update error:', updateError);
+        setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${updateError.message}` });
       } else {
         setMessage({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
         await fetchUploadedFiles();
         
-        // ★ 選択状態の更新ロジック修正
+        // 選択状態の更新ロジック
         const newSelectedNames = selectedSourceNames.map(name => 
           name === oldName ? trimmedNewName : name
         );
         if (JSON.stringify(newSelectedNames) !== JSON.stringify(selectedSourceNames)) {
           onSelectionChange(newSelectedNames);
         }
-        // setSelectedSourceNames(prev =>
-        //   prev.map(name => name === oldName ? trimmedNewName : name)
-        // );
       }
     } catch (err: unknown) {
       let renameErrorMessage = 'ファイル名変更中に予期せぬエラーが発生しました。';

@@ -213,6 +213,7 @@ async function generateSummary(text: string, generativeAiClient: GoogleGenerativ
 async function processAndStoreDocuments(
     processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, any> }>, tmpFilePath: string } | null, 
     sourceFileName: string, 
+    originalFileName: string | null,
     supabaseClient: SupabaseClient,
     embeddingsClient: GoogleGenerativeAIEmbeddings,
     generativeAiClient: GoogleGenerativeAI // ★ 引数追加
@@ -226,7 +227,7 @@ async function processAndStoreDocuments(
     return false;
   }
   const parsedDocs = processedFile.docs;
-  console.log(`\nドキュメントのチャンク化とDB保存を開始... ファイル名: ${sourceFileName}`);
+  console.log(`\nドキュメントのチャンク化とDB保存を開始... ファイル名: ${sourceFileName} (元ファイル名: ${originalFileName || '未指定'})`);
   
   try {
     let manualId: string;
@@ -251,11 +252,12 @@ async function processAndStoreDocuments(
     if (existingManual) {
       manualId = existingManual.id;
       console.log(`既存のマニュアル情報を利用します。ID: ${manualId}`);
-      // 既存マニュアルの場合もサマリーを更新する
+      // 既存マニュアルの場合もサマリーとoriginal_file_nameを更新する
       const { error: updateError } = await supabaseClient
         .from('manuals')
         .update({ 
             summary: summaryText,
+            original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを更新
             // 必要であれば他のメタデータも更新
             metadata: { 
                 totalPages: parsedDocs[0]?.metadata?.totalPages || (parsedDocs[0]?.metadata?.type !== 'pdf' ? 1 : parsedDocs.length),
@@ -265,10 +267,10 @@ async function processAndStoreDocuments(
          })
         .eq('id', manualId);
       if (updateError) {
-        console.error(`既存マニュアルのサマリー更新中にエラー: ID=${manualId}`, updateError);
+        console.error(`既存マニュアルの更新中にエラー: ID=${manualId}`, updateError);
         // エラーが発生しても処理を続行する（サマリーが更新されないだけ）
       } else {
-        console.log(`既存マニュアルのサマリーを更新しました。ID: ${manualId}`);
+        console.log(`既存マニュアルのサマリーとoriginal_file_nameを更新しました。ID: ${manualId}`);
       }
     } else {
       const totalPages = parsedDocs[0]?.metadata?.totalPages ||
@@ -277,6 +279,7 @@ async function processAndStoreDocuments(
         .from('manuals')
         .insert({
           file_name: sourceFileName,
+          original_file_name: originalFileName || sourceFileName, // ★ original_file_nameを追加
           storage_path: `${BUCKET_NAME}/${sourceFileName}`,
           summary: summaryText,
           metadata: { 
@@ -404,7 +407,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
     console.log(`\nリクエストボディの解析を開始: ${new Date().toISOString()}`);
     const body = await req.json();
-    const { fileName } = body;
+    const { fileName, originalFileName } = body;
     receivedFileName = fileName; // ★ fileName を receivedFileName に保存
 
     if (!receivedFileName || typeof receivedFileName !== 'string') {
@@ -414,7 +417,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    console.log(`処理対象ファイル: ${receivedFileName}`);
+    console.log(`処理対象ファイル: ${receivedFileName} (元ファイル名: ${originalFileName || '未指定'})`);
 
     const processedFile = await downloadAndProcessFile(receivedFileName, supabase);
     
@@ -431,7 +434,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     }
     
     console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
-    const success = await processAndStoreDocuments(processedFile, receivedFileName, supabase, embeddings, genAI);
+    const success = await processAndStoreDocuments(processedFile, receivedFileName, originalFileName, supabase, embeddings, genAI);
 
     if (success) {
       console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
