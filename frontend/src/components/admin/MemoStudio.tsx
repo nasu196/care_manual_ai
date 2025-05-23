@@ -567,7 +567,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                   {selectedMemo.is_important && (
                     <Flag size={16} className="text-red-500 fill-red-500 animate-pulse" />
                   )}
-                  <h3 className={`text-xl font-semibold break-all ${
+                  <h3 className={`text-base sm:text-xl font-semibold whitespace-nowrap truncate max-w-[90vw] ${
                     selectedMemo.is_important ? 'text-red-900' : 'text-gray-900'
                   }`}>
                     {selectedMemo.title}

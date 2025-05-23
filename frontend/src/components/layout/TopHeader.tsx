@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Settings, Share2, UserCircle, Edit3, Eye } from 'lucide-react'; // Edit3とEyeを追加
 import {
@@ -13,13 +13,9 @@ import { useMemoStore } from '@/store/memoStore'; // memoStoreを追加
 
 interface TopHeaderProps {
   title: string;
-  onTitleChange: (newTitle: string) => void;
 }
 
-const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [editableTitle, setEditableTitle] = useState(title);
-  const inputRef = useRef<HTMLInputElement>(null);
+const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false); // ShareModal用のstate追加
 
@@ -27,11 +23,6 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
 
-  useEffect(() => {
-    setEditableTitle(title);
-  }, [title]);
-
-  // URLパラメータを監視して自動的に閲覧専用モードに設定
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode');
@@ -41,40 +32,6 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
       console.log('[TopHeader] URLパラメータにより閲覧専用モードに設定しました');
     }
   }, [setEditPermission]); // setEditPermissionを依存配列に追加
-
-  useEffect(() => {
-    if (isEditing && inputRef.current) {
-      inputRef.current.focus();
-      inputRef.current.select();
-    }
-  }, [isEditing]);
-
-  const handleTitleClick = () => {
-    setIsEditing(true);
-  };
-
-  const handleTitleBlur = () => {
-    setIsEditing(false);
-    if (editableTitle.trim() === '') {
-      setEditableTitle(title);
-    } else {
-      onTitleChange(editableTitle.trim());
-    }
-  };
-
-  const handleTitleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') {
-      setIsEditing(false);
-      if (editableTitle.trim() === '') {
-        onTitleChange(title);
-      } else {
-        onTitleChange(editableTitle.trim());
-      }
-    } else if (event.key === 'Escape') {
-      setIsEditing(false);
-      setEditableTitle(title);
-    }
-  };
 
   const openFeedbackModal = () => {
     setIsFeedbackModalOpen(true);
@@ -97,20 +54,8 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title, onTitleChange }) => {
           {/* アイコン用プレースホルダー */}
           <div className="h-8 w-8 bg-slate-300 rounded mr-3 flex-shrink-0"></div>
           
-          <div className="text-lg font-semibold text-foreground flex-grow mr-4" onClick={handleTitleClick} style={{ cursor: 'pointer' }}>
-            {isEditing ? (
-              <input
-                ref={inputRef}
-                type="text"
-                value={editableTitle}
-                onChange={(e) => setEditableTitle(e.target.value)}
-                onBlur={handleTitleBlur}
-                onKeyDown={handleTitleKeyDown}
-                className="text-lg font-semibold bg-transparent border-b border-primary focus:outline-none w-full"
-              />
-            ) : (
-              <span title="クリックして編集">{title}</span>
-            )}
+          <div className="text-base sm:text-lg font-semibold text-foreground flex-grow mr-4 whitespace-nowrap truncate max-w-[80vw]">
+            <span>{title}</span>
           </div>
         </div>
 

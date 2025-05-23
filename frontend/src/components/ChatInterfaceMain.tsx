@@ -41,6 +41,9 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
 
+  // 追加: ユーザーが一番下を見ているかどうかのstate
+  const [isAtBottom, setIsAtBottom] = useState(true);
+
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
@@ -228,13 +231,24 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   };
 
   useEffect(() => {
-    if (scrollAreaRef.current) {
-        const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-        if (viewport) {
-            viewport.scrollTop = viewport.scrollHeight;
-        }
+    const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (!viewport) return;
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      setIsAtBottom(scrollHeight - scrollTop - clientHeight < 5); // 5px以内なら一番下
+    };
+
+    viewport.addEventListener('scroll', handleScroll);
+    return () => viewport.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const viewport = scrollAreaRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (viewport && isAtBottom) {
+      viewport.scrollTop = viewport.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isAtBottom]);
 
   return (
     <div className="h-full flex flex-col">
@@ -272,12 +286,12 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                   className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`p-3 rounded-lg ${
+                    className={`p-3 rounded-lg break-words ${
                       msg.sender === 'user'
-                        ? 'bg-primary text-primary-foreground max-w-[70%]'
+                        ? 'bg-primary text-primary-foreground max-w-[90vw] sm:max-w-[70%]'
                         : msg.text === '' && msg.isStreaming
-                        ? 'bg-muted text-muted-foreground animate-pulse max-w-[95%] relative'
-                        : 'bg-muted text-muted-foreground max-w-[95%] relative'
+                        ? 'bg-muted text-muted-foreground animate-pulse max-w-[98vw] sm:max-w-[95%] relative'
+                        : 'bg-muted text-muted-foreground max-w-[98vw] sm:max-w-[95%] relative'
                     }`}
                   >
                     {msg.sender === 'user' ? (
@@ -302,12 +316,13 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                         )}
                         
                         {!msg.isStreaming && msg.text && (
-                          <div className="mt-3 flex justify-end">
+                          <div className="mt-3 flex justify-end px-1 max-w-full">
                             <Button
                               variant="outline"
                               size="sm"
                               className="h-8 px-3 text-xs font-medium bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300 text-blue-700 hover:text-blue-800 shadow-sm hover:shadow-md transition-all duration-200 transform hover:scale-105"
                               onClick={() => handleMemoMessage(msg)}
+                              style={{ maxWidth: '100%' }}
                             >
                               <NotebookPen size={14} className="mr-1.5" />
                               メモを作成
