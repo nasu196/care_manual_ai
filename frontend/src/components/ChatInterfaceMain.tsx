@@ -283,55 +283,57 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`mb-3 flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                  className={`mb-3 ${msg.sender === 'user' ? 'flex justify-end' : ''}`}
                 >
-                  <div
-                    className={`p-3 rounded-lg break-words ${
-                      msg.sender === 'user'
-                        ? 'bg-primary text-primary-foreground max-w-[90vw] sm:max-w-[70%]'
-                        : msg.text === '' && msg.isStreaming
-                        ? 'bg-muted text-muted-foreground animate-pulse max-w-[98vw] sm:max-w-[95%] relative'
-                        : 'bg-muted text-muted-foreground max-w-[98vw] sm:max-w-[95%] relative'
-                    }`}
-                  >
-                    {msg.sender === 'user' ? (
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
-                    ) : (
-                      <>
-                        <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
-                          {msg.text === '' && msg.isStreaming ? 'AIが考え中...' : <ReactMarkdown>{msg.text}</ReactMarkdown>}
-                        </div>
-                        
-                        {msg.sources && !msg.isStreaming && msg.sources.length > 0 && (
-                          <div className="mt-2 pt-2 border-t">
-                            <p className="text-xs font-semibold mb-1">参照元:</p>
-                            <ul className="list-disc list-inside text-xs">
-                              {msg.sources.map(source => (
-                                <li key={source.id} title={`類似度: ${source.similarity.toFixed(3)}`}>
-                                  ページ {source.page_number}: {source.text_snippet}
-                                </li>
-                              ))}
-                            </ul>
+                  <div className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`p-3 rounded-lg break-words ${
+                        msg.sender === 'user'
+                          ? 'bg-primary text-primary-foreground max-w-[90vw] sm:max-w-[70%]'
+                          : msg.text === '' && msg.isStreaming
+                          ? 'bg-muted text-muted-foreground animate-pulse max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
+                          : 'bg-muted text-muted-foreground max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
+                      }`}
+                    >
+                      {msg.sender === 'user' ? (
+                        <p className="whitespace-pre-wrap">{msg.text}</p>
+                      ) : (
+                        <>
+                          <div className="prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-xl break-words">
+                            {msg.text === '' && msg.isStreaming ? 'AIが考え中...' : <ReactMarkdown>{msg.text}</ReactMarkdown>}
                           </div>
-                        )}
-                        
-                        {!msg.isStreaming && msg.text && (
-                          <div className="mt-3 flex justify-end px-1 max-w-full">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 px-3 text-xs font-medium bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300 text-blue-700 hover:text-blue-800 shadow-sm hover:shadow-md transition-all duration-200 transform hover:scale-105"
-                              onClick={() => handleMemoMessage(msg)}
-                              style={{ maxWidth: '100%' }}
-                            >
-                              <NotebookPen size={14} className="mr-1.5" />
-                              メモを作成
-                            </Button>
-                          </div>
-                        )}
-                      </>
-                    )}
+                          
+                          {msg.sources && !msg.isStreaming && msg.sources.length > 0 && (
+                            <div className="mt-2 pt-2 border-t">
+                              <p className="text-xs font-semibold mb-1">参照元:</p>
+                              <ul className="list-disc list-inside text-xs">
+                                {msg.sources.map(source => (
+                                  <li key={source.id} title={`類似度: ${source.similarity.toFixed(3)}`}>
+                                    ページ {source.page_number}: {source.text_snippet}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
+                  
+                  {/* メモを作成ボタン - AIメッセージの下に表示 */}
+                  {msg.sender === 'ai' && !msg.isStreaming && msg.text && (
+                    <div className="mt-2 flex justify-start">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs font-medium bg-blue-50 hover:bg-blue-100 border-blue-200 hover:border-blue-300 text-blue-700 hover:text-blue-800 shadow-sm hover:shadow-md transition-all duration-200 transform hover:scale-105"
+                        onClick={() => handleMemoMessage(msg)}
+                      >
+                        <NotebookPen size={14} className="mr-1.5" />
+                        メモを作成
+                      </Button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
