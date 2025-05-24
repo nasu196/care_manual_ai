@@ -294,66 +294,103 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       console.log(`[${tempMemoId}] MemoWriterLLM successful.`);
       
       updateGeneratingMemoStatus(tempMemoId, 'saving');
-      console.log(`[${tempMemoId}] Auto-saving AI generated memo for: ${memoTitle}`);
+      // console.log(`[${tempMemoId}] Auto-saving AI generated memo for: ${memoTitle}`); // 既存のログ
       
-      let htmlContent = '';
+      // MarkdownをHTMLに変換 (既存の処理)
+      let htmlContent = ''; // もしプレーンテキストで保存したい場合はこの変換は不要
       try {
-        htmlContent = marked.parse(generated_memo) as string;
+        // 注意: `generated_memo` が undefined や null でないことを確認
+        if (typeof generated_memo === 'string') {
+          htmlContent = marked.parse(generated_memo) as string;
+        } else {
+          // generated_memo が期待通りでない場合のフォールバック処理
+          console.warn(`[${tempMemoId}] generated_memo was not a string, using empty content. Received:`, generated_memo);
+          htmlContent = ''; // またはエラーをスローする
+        }
       } catch (e) {
-        console.error("Markdownの解析に失敗しました (MemoTemplateSuggestions):", e);
-        throw new Error("メモ内容のMarkdown解析に失敗しました。保存できません。");
+        console.error(`[${tempMemoId}] Markdown parsing failed:`, e);
+        updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: メモ内容のMarkdown解析に失敗しました。");
+        // エラー発生時に5秒後に自動的にメモ項目を削除 (既存の処理を参考に)
+        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+        return; // 解析失敗時はここで処理中断
       }
 
-      // デバッグログ追加
+      // === セッション取得とユーザーID特定 (デバッグログ込み) ===
+      let userId = null;
       try {
         const { data: { user: currentUserForDebug } , error: getUserErrorForDebug } = await supabase.auth.getUser();
         console.log('[Debug] Current user (before save block getSession):', currentUserForDebug, 'Error:', getUserErrorForDebug);
+
+        const { data: userSession, error: sessionError } = await supabase.auth.getSession();
+        console.log('[Debug] supabase.auth.getSession() result in save block:');
+        console.log('[Debug]   User session data:', userSession);
+        console.log('[Debug]   Session error data:', sessionError);
+
+        if (sessionError || !userSession?.session?.user) {
+          console.error('[Debug] Error getting user session or user not authenticated in save block. Session Error:', sessionError, 'Session Object:', userSession?.session);
+          // ユーザー情報を再確認 (念のため)
+          const { data: { user: freshUser }, error: freshUserError } = await supabase.auth.getUser();
+          console.log('[Debug] Fresh user check after getSession failure: user=', freshUser, 'error=', freshUserError);
+          
+          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: 自動保存のためにはユーザーが認証されている必要があります。');
+          setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+          return; 
+        }
+        userId = userSession.session.user.id;
       } catch (e) {
-        console.error('[Debug] Exception in supabase.auth.getUser() before save block:', e);
+        console.error('[Debug] Exception during session/user retrieval:', e);
+        updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザー情報の取得中に予期せぬエラーが発生しました。');
+        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+        return;
       }
 
-      const { data: userSession, error: sessionError } = await supabase.auth.getSession();
-      // デバッグログ追加
-      console.log('[Debug] supabase.auth.getSession() result in save block:');
-      console.log('[Debug]   User session data:', userSession);
-      console.log('[Debug]   Session error data:', sessionError);
-
-      if (sessionError || !userSession?.session?.user) {
-        console.error('[Debug] Error getting user session or user not authenticated in save block. Session Error:', sessionError, 'Session Object:', userSession?.session);
-        // ユーザー情報を再確認
-        try {
-            const { data: { user: freshUser }, error: freshUserError } = await supabase.auth.getUser();
-            console.log('[Debug] Fresh user check after getSession failure: user=', freshUser, 'error=', freshUserError);
-        } catch (e) {
-            console.error('[Debug] Exception in fresh supabase.auth.getUser() check:', e);
-        }
-        updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: 自動保存のためにはユーザーが認証されている必要があります。');
-        // エラー時はここで早期リターン
-        if (abortControllerRef.current[currentIdeaForProcessing.id]) {
-            abortControllerRef.current[currentIdeaForProcessing.id]?.abort();
-        }
-        return; 
+      if (!userId) { // userIdが取得できなかった場合の最終チェック
+        console.error('[Debug] User ID is null or undefined before attempting to save memo.');
+        updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザーIDが特定できませんでした。');
+        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+        return;
       }
-      const userId = userSession.session.user.id;
+      // === ここまでセッション取得とユーザーID特定 ===
 
-      const { data: savedMemo, error: createError } = await supabase.functions.invoke('create-memo', {
-        body: { 
-          title: memoTitle, 
-          content: htmlContent,
-          created_by: userId,
-          is_ai_generated: true,
-          ai_generation_sources: sources,
-        },
-      });
+      // === データベースへの保存処理 (supabase.from('memos').insert) ===
+      console.log(`[${tempMemoId}] Attempting to save memo to DB with userId: ${userId}`);
+      const { data: savedMemo, error: saveError } = await supabase
+        .from('memos')
+        .insert([
+          {
+            title: memoTitle,
+            // content: htmlContent, // HTMLとして保存する場合
+            content: generated_memo, // Markdownのまま保存する場合 (こちらを推奨することが多い)
+            user_id: userId,
+            generated_by_ai: true,
+            ai_model_name: 'gemini-1.5-flash', // (仮。実際のモデル名に合わせる)
+            // idea_title: currentIdeaForProcessing.title, // 必要であれば追加
+            // idea_description: currentIdeaForProcessing.description, // 必要であれば追加
+            // idea_source_files: currentIdeaForProcessing.source_files, // 必要であれば追加
+            ai_sources: sources, // AIが参照したソース情報
+            last_accessed_at: new Date().toISOString(),
+          },
+        ])
+        .select() // 保存されたデータを取得するため
+        .single(); // 1件のみのはずなので single()
 
-      if (createError) {
-        console.error("Error auto-saving AI memo via Edge Function:", createError);
-        throw new Error(createError.message || 'AI生成メモの自動保存に失敗しました。');
+      if (saveError) {
+        console.error(`[${tempMemoId}] Error saving memo to DB:`, saveError);
+        updateGeneratingMemoStatus(tempMemoId, 'error', `メモの保存に失敗しました: ${saveError.message}`);
+        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+      } else if (savedMemo) {
+        console.log(`[${tempMemoId}] Memo saved successfully to DB with ID:`, savedMemo.id);
+        removeGeneratingMemo(tempMemoId);
+        triggerMemoListRefresh();
+        setMessage({ type: 'success', text: `「${memoTitle}」のメモが正常に作成されました。` });
+        setTimeout(() => setMessage(null), 5000);
+      } else {
+        // saveError もなく savedMemo もないという稀なケース
+        console.warn(`[${tempMemoId}] Memo saving did not return an error but no data was returned.`);
+        updateGeneratingMemoStatus(tempMemoId, 'error', 'メモの保存結果が不明です。');
+        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
       }
-
-      console.log(`[${tempMemoId}] AI generated memo auto-saved successfully for: ${memoTitle}`);
-      removeGeneratingMemo(tempMemoId);
-      triggerMemoListRefresh();
+      // === ここまでデータベースへの保存処理 ===
 
     } catch (err: unknown) {
       console.error(`[${tempMemoId}] Error in memo generation/auto-save process for ${memoTitle}:`, err);
