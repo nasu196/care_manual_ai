@@ -7,7 +7,6 @@ import type { FunctionsError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { motion, AnimatePresence } from 'framer-motion';
-import { marked } from 'marked';
 import { useMemoStore } from '@/store/memoStore';
 import {
   DropdownMenu,
@@ -293,26 +292,26 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       const { generated_memo, sources } = await memoResponse.json();
       console.log(`[${tempMemoId}] MemoWriterLLM successful.`);
       
-      updateGeneratingMemoStatus(tempMemoId, 'saving');
+      updateGeneratingMemoStatus(tempMemoId, 'saving'); // ステータスを「保存中」に更新
       // console.log(`[${tempMemoId}] Auto-saving AI generated memo for: ${memoTitle}`); // 既存のログ
       
-      // MarkdownをHTMLに変換 (既存の処理)
-      let htmlContent = ''; // もしプレーンテキストで保存したい場合はこの変換は不要
+      // generated_memo が文字列であるかの確認と基本的なエラーハンドリング
       try {
-        // 注意: `generated_memo` が undefined や null でないことを確認
-        if (typeof generated_memo === 'string') {
-          htmlContent = marked.parse(generated_memo) as string;
-        } else {
-          // generated_memo が期待通りでない場合のフォールバック処理
+        if (typeof generated_memo !== 'string') {
           console.warn(`[${tempMemoId}] generated_memo was not a string, using empty content. Received:`, generated_memo);
-          htmlContent = ''; // またはエラーをスローする
+          // generated_memo が文字列でない場合、エラーとして処理するか、空文字で続行するかを決定
+          // ここではエラーとして処理し、ユーザーに通知する
+          updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: AIからのメモ内容が予期しない形式です。");
+          setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+          return; // 処理中断
         }
-      } catch (e) {
-        console.error(`[${tempMemoId}] Markdown parsing failed:`, e);
-        updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: メモ内容のMarkdown解析に失敗しました。");
-        // エラー発生時に5秒後に自動的にメモ項目を削除 (既存の処理を参考に)
+        // Markdownのパースはここでは行わない (htmlContentを使用しないため)
+        // もしプレビューなどでHTMLが必要な場合は、表示コンポーネント側で行う
+      } catch (e) { // このcatchは typeofチェックでは通常到達しないはずだが念のため
+        console.error(`[${tempMemoId}] Error during generated_memo validation:`, e);
+        updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: メモ内容の検証中に問題が発生しました。");
         setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-        return; // 解析失敗時はここで処理中断
+        return; // 処理中断
       }
 
       // === セッション取得とユーザーID特定 (デバッグログ込み) ===
