@@ -641,12 +641,14 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                     {displayMemos.map((memo) => (
                       <div
                         key={memo.id}
-                        className={`group cursor-pointer py-3 transition-colors duration-150 ${
+                        className={`group py-3 transition-colors duration-150 ${
                           memo.isGenerating 
-                            ? 'opacity-75 hover:bg-gray-50' 
+                            ? memo.statusText?.includes('エラー') 
+                              ? 'opacity-75 bg-red-50 border-l-4 border-l-red-400' 
+                              : 'opacity-75 hover:bg-gray-50'
                             : memo.is_important 
-                              ? 'bg-red-50/50 hover:bg-red-100/60 border-l-4 border-l-red-400' 
-                              : 'hover:bg-gray-50'
+                              ? 'bg-red-50/50 hover:bg-red-100/60 border-l-4 border-l-red-400 cursor-pointer' 
+                              : 'hover:bg-gray-50 cursor-pointer'
                         }`}
                         onClick={() => memo.isGenerating ? null : handleViewMemo(memo.id)}
                       >
@@ -719,8 +721,16 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                           </div>
                           <div className="flex items-center justify-between text-xs text-gray-500">
                             {memo.isGenerating ? (
-                              <div className="flex items-center text-blue-600">
-                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              <div className={`flex items-center ${
+                                memo.statusText?.includes('エラー') 
+                                  ? 'text-red-600' 
+                                  : 'text-blue-600'
+                              }`}>
+                                {memo.statusText?.includes('エラー') ? (
+                                  <XCircle className="mr-1 h-3 w-3" />
+                                ) : (
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                )}
                                 <span>{memo.statusText}</span>
                               </div>
                             ) : (

@@ -56,7 +56,6 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   // メモ生成モーダル関連のstate
   const [isGenerateMemoModalOpen, setIsGenerateMemoModalOpen] = useState(false);
   const [selectedIdeaForModal, setSelectedIdeaForModal] = useState<Suggestion | null>(null);
-  const [isGeneratingMemo, setIsGeneratingMemo] = useState(false); // メモ生成API呼び出し中のローディング
   const [generateMemoError, setGenerateMemoError] = useState<string | null>(null); // メモ生成時のエラー
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default'); // 詳細度のためのstateを追加
 
@@ -247,8 +246,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
     addGeneratingMemo({ id: tempMemoId, title: memoTitle, status: 'prompt_creating' });
     
-    setIsGeneratingMemo(true);
-    setGenerateMemoError(null);
+    // 個別のアイデア処理のためのコントローラを分離
+    const currentIdeaForProcessing = selectedIdeaForModal;
+    setSelectedIdeaForModal(null); // すぐにクリアして他のアイデアの処理を可能にする
+    
     console.log("Generating memo for:", memoTitle);
 
     try {
@@ -257,9 +258,9 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ideaTitle: selectedIdeaForModal.title,
-          ideaDescription: selectedIdeaForModal.description,
-          sourceFileNames: selectedIdeaForModal.source_files || [],
+          ideaTitle: currentIdeaForProcessing.title,
+          ideaDescription: currentIdeaForProcessing.description,
+          sourceFileNames: currentIdeaForProcessing.source_files || [],
         }),
       });
       if (!promptResponse.ok) {
@@ -281,7 +282,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           crafted_prompt: generatedPrompt,
-          source_filenames: selectedIdeaForModal.source_files || [],
+          source_filenames: currentIdeaForProcessing.source_files || [],
           verbosity: aiVerbosity,
         }),
       });
@@ -335,8 +336,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       console.error(`[${tempMemoId}] Error in memo generation/auto-save process for ${memoTitle}:`, err);
       const errorMessage = err instanceof Error ? err.message : 'メモの生成または自動保存中に不明なエラーが発生しました。';
       updateGeneratingMemoStatus(tempMemoId, 'error', errorMessage);
-    } finally {
-      setSelectedIdeaForModal(null);
+      
+      // エラー発生時に5秒後に自動的にメモ項目を削除
+      setTimeout(() => {
+        removeGeneratingMemo(tempMemoId);
+      }, 5000);
     }
   };
 
@@ -472,16 +476,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                 <Button 
                   variant="outline" 
                   onClick={() => { setIsGenerateMemoModalOpen(false); setGenerateMemoError(null); }} 
-                  disabled={isGeneratingMemo}
                 >
                   キャンセル
                 </Button>
-                <Button onClick={handleConfirmGenerateMemo} disabled={isGeneratingMemo}>
-                  {isGeneratingMemo ? (
-                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> 作成中...</>
-                  ) : (
-                    '作成する'
-                  )}
+                <Button onClick={handleConfirmGenerateMemo}>
+                  作成する
                 </Button>
               </div>
             </motion.div>
