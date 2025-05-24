@@ -289,7 +289,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
           {messages.length === 0 ? (
             <ChatEmptyState />
           ) : (
-            <div className="pt-4 pb-4 pr-6">
+            <div className="pt-4 pb-4 pr-2">
               {messages.map((msg) => (
                 <div
                   key={msg.id}
@@ -299,7 +299,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                     <div
                       className={`p-3 rounded-lg break-words ${
                         msg.sender === 'user'
-                          ? 'bg-primary text-primary-foreground max-w-[90vw] sm:max-w-[70%]'
+                          ? 'bg-primary text-primary-foreground w-auto max-w-4xl lg:max-w-5xl'
                           : msg.text === '' && msg.isStreaming
                           ? 'bg-muted text-muted-foreground animate-pulse max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
                           : 'bg-muted text-muted-foreground max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
