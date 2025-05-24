@@ -357,16 +357,54 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       // === Edge Function 'create-memo' を呼び出して保存 ===
       try {
         console.log(`[${tempMemoId}] Getting user info for create-memo Edge Function.`);
-        const { data: { user } } = await supabase.auth.getUser();
-        let userId = user?.id;
+        
+        // 最初にセッションをリフレッシュ（Vercel環境での認証状態を確実にする）
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          console.warn(`[${tempMemoId}] Failed to refresh session:`, refreshError);
+        }
+        
+        // ユーザー情報を取得（リトライロジック付き）
+        let retryCount = 0;
+        let userId: string | undefined;
+        
+        while (retryCount < 3 && !userId) {
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          
+          if (userError) {
+            console.error(`[${tempMemoId}] Attempt ${retryCount + 1}: Error getting user:`, userError);
+            retryCount++;
+            
+            if (retryCount < 3) {
+              // 短い待機時間を入れてリトライ
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              // 再度セッションをリフレッシュ
+              await supabase.auth.refreshSession();
+            }
+          } else {
+            userId = user?.id;
+            if (userId) {
+              console.log(`[${tempMemoId}] Successfully got user ID: ${userId} on attempt ${retryCount + 1}`);
+            }
+          }
+        }
 
         // 開発用にユーザーIDが取れない場合はダミーIDを使用 (本番では削除または適切な処理)
         if (!userId && process.env.NODE_ENV === 'development') {
-          console.warn(`[${tempMemoId}] User ID not found, using dummy_user_id for development.`);
+          console.warn(`[${tempMemoId}] User ID not found after retries, using dummy_user_id for development.`);
           userId = 'dummy_user_id_dev'; 
         } else if (!userId) {
-          console.error(`[${tempMemoId}] User ID not found in production mode.`);
-          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザーが認証されていません。ログインしてください。');
+          console.error(`[${tempMemoId}] User ID not found after ${retryCount} attempts in production mode.`);
+          
+          // 最終的なセッション状態をログ出力
+          const { data: { session } } = await supabase.auth.getSession();
+          console.error(`[${tempMemoId}] Final session state:`, { 
+            hasSession: !!session,
+            sessionUser: session?.user?.id,
+            accessToken: !!session?.access_token 
+          });
+          
+          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザーが認証されていません。ページを再読み込みしてログイン状態を確認してください。');
           setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
           return;
         }
