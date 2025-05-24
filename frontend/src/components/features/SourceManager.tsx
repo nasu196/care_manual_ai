@@ -209,19 +209,45 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         const finalFunctionUrl = `https://${projectRef}.supabase.co/functions/v1/process-manual-function`;
         console.log(`[handleUpload] Calling Edge Function: ${finalFunctionUrl} for file: ${encodedFileName}`);
 
-        const response = await fetch(finalFunctionUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            fileName: encodedFileName,
-            originalFileName: originalFileName  // 元のファイル名も送信
-          }),
-        });
+        // ★ より詳細なエラーハンドリングを追加
+        let response;
+        try {
+          response = await fetch(finalFunctionUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              fileName: encodedFileName,
+              originalFileName: originalFileName  // 元のファイル名も送信
+            }),
+          });
+        } catch (fetchError) {
+          console.error(`[handleUpload] Network error during Edge Function call:`, fetchError);
+          throw new Error(`Edge Function呼び出し時のネットワークエラー: ${fetchError instanceof Error ? fetchError.message : '不明なエラー'}`);
+        }
 
-        const responseData = await response.json();
+        // ★ レスポンスの詳細ログを追加
+        console.log(`[handleUpload] Edge Function response status: ${response.status}`);
+        console.log(`[handleUpload] Edge Function response headers:`, Object.fromEntries(response.headers.entries()));
+        
+        let responseData;
+        try {
+          const responseText = await response.text();
+          console.log(`[handleUpload] Edge Function raw response text:`, responseText);
+          
+          if (responseText.trim()) {
+            responseData = JSON.parse(responseText);
+          } else {
+            responseData = { error: 'Edge Functionからの空のレスポンス' };
+          }
+        } catch (parseError) {
+          console.error(`[handleUpload] Failed to parse Edge Function response:`, parseError);
+          throw new Error(`Edge Functionのレスポンス解析に失敗: ${parseError instanceof Error ? parseError.message : '不明なエラー'}`);
+        }
+
         if (!response.ok) {
           console.error('[handleUpload] Edge Function call failed:', response.status, responseData);
-          throw new Error(responseData.error || `Edge Functionの実行に失敗 (status: ${response.status})`);
+          const errorMessage = responseData?.error || responseData?.message || `Edge Functionの実行に失敗 (status: ${response.status})`;
+          throw new Error(errorMessage);
         }
 
         console.log('[handleUpload] Edge Function call successful:', responseData);

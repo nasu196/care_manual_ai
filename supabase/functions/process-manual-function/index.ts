@@ -21,6 +21,23 @@ import { Buffer } from "node:buffer";
 import "npm:dotenv/config";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai"; // ★ 追加
 
+// ★ テキストサニタイズ関数を追加
+function sanitizeText(text: string): string {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+  
+  return text
+    // NULL文字を除去
+    .replace(/\u0000/g, '')
+    // その他の制御文字を除去（改行・タブ・スペースは保持）
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    // 連続する空白を単一スペースに変換
+    .replace(/\s+/g, ' ')
+    // 前後の空白を除去
+    .trim();
+}
+
 // Supabaseクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
@@ -475,11 +492,17 @@ async function processAndStoreDocuments(
       }
       
       splitText.forEach((text: string, index: number) => {
-        chunks.push({
-          manual_id: manualId,
-          chunk_text: text,
-          chunk_order: index + 1,
-        });
+        // ★ チャンクテキストをサニタイズ
+        const sanitizedChunkText = sanitizeText(text);
+        if (sanitizedChunkText.length > 0) { // 空のチャンクは除外
+          chunks.push({
+            manual_id: manualId,
+            chunk_text: sanitizedChunkText,
+            chunk_order: index + 1,
+          });
+        } else {
+          console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Empty chunk after sanitization, skipping chunk ${index} from doc ${i+1}`);
+        }
       });
     }
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Total chunks created: ${chunks.length}`); // ★ タイムスタンプ追加

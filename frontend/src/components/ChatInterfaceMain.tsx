@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { SlidersHorizontal, NotebookPen } from 'lucide-react';
+import { Gauge, NotebookPen } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +43,14 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
   // 追加: ユーザーが一番下を見ているかどうかのstate
   const [isAtBottom, setIsAtBottom] = useState(true);
+
+  // localStorageからaiVerbosity設定を読み込む
+  useEffect(() => {
+    const savedVerbosity = localStorage.getItem('aiVerbosity');
+    if (savedVerbosity && ['concise', 'default', 'detailed'].includes(savedVerbosity)) {
+      setAiVerbosity(savedVerbosity as AiVerbosity);
+    }
+  }, []);
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -228,6 +236,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     const newVerbosity = value as AiVerbosity;
     console.log('[ChatInterfaceMain] Verbosity changed from', aiVerbosity, 'to', newVerbosity);
     setAiVerbosity(newVerbosity);
+    // localStorageに保存
+    localStorage.setItem('aiVerbosity', newVerbosity);
   };
 
   useEffect(() => {
@@ -258,7 +268,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon">
-              <SlidersHorizontal className="h-5 w-5" />
+              <Gauge className="h-5 w-5" />
               <span className="sr-only">回答の詳細度を設定</span>
             </Button>
           </DropdownMenuTrigger>
