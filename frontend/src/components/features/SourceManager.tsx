@@ -573,19 +573,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
                   <span className="sr-only">アクション</span>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuLabel>操作</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => handleRenameFile(file.name)} disabled>
-                  名前を変更 (未実装)
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem 
-                  onClick={() => handleDeleteFile(file.name)} 
-                  className="text-red-600 hover:!bg-red-50 hover:!text-red-700"
-                >
-                  削除
-                </DropdownMenuItem>
-              </DropdownMenuContent>
+                            <DropdownMenuContent align="end">                <DropdownMenuLabel>操作</DropdownMenuLabel>                <DropdownMenuSeparator />                <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>                  名前を変更                </DropdownMenuItem>                <DropdownMenuItem                   onClick={() => handleDeleteFile(file.name)}                   className="text-red-600 hover:!bg-red-50 hover:!text-red-700"                >                  削除                </DropdownMenuItem>              </DropdownMenuContent>
             </DropdownMenu>
           </div>
         ))}
