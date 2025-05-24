@@ -38,16 +38,127 @@ function sanitizeText(text: string): string {
     .trim();
 }
 
+// ★ OCR判定関数：テキスト抽出が不十分かどうかを判定
+function isTextExtractionInsufficient(text: string, numPages: number): boolean {
+  const cleanText = sanitizeText(text);
+  const textLength = cleanText.length;
+  
+  // 判定基準
+  const minTextPerPage = 50; // 1ページあたり最低50文字
+  const minTotalText = 100;  // 総文字数最低100文字
+  
+  console.log(`[OCR判定] テキスト長: ${textLength}, ページ数: ${numPages}, ページあたり: ${Math.round(textLength / Math.max(numPages, 1))}`);
+  
+  if (textLength < minTotalText) {
+    console.log(`[OCR判定] 総文字数不足 (${textLength} < ${minTotalText})`);
+    return true;
+  }
+  
+  if (numPages > 0 && (textLength / numPages) < minTextPerPage) {
+    console.log(`[OCR判定] 1ページあたりの文字数不足 (${Math.round(textLength / numPages)} < ${minTextPerPage})`);
+    return true;
+  }
+  
+  console.log(`[OCR判定] テキスト抽出は十分です`);
+  return false;
+}
+
+// ★ PDF画像変換関数（簡易版）
+async function convertPdfPageToImage(pdfBuffer: ArrayBuffer, pageNumber: number = 1): Promise<string | null> {
+  try {
+    // 現在は基本的なPDF→Base64変換のみ実装
+    // 実際の画像変換は複雑なため、まずはPDFバイナリをそのまま送信する方式
+    const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(pdfBuffer)));
+    console.log(`[PDF変換] PDF を Base64 に変換しました (${base64Pdf.length} 文字)`);
+    return base64Pdf;
+  } catch (error) {
+    console.error(`[PDF変換] エラー:`, error);
+    return null;
+  }
+}
+
+// ★ Google Vision API OCR実行関数
+async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
+  if (!googleVisionApiKey) {
+    console.warn(`[OCR] Google Vision API キーが設定されていないため、OCRをスキップします`);
+    return null;
+  }
+  
+  try {
+    console.log(`[OCR] Google Vision API を使用してOCR処理を開始...`);
+    
+    // PDF→Base64変換
+    const base64Image = await convertPdfPageToImage(pdfBuffer);
+    if (!base64Image) {
+      throw new Error("PDF の画像変換に失敗しました");
+    }
+    
+    // Google Vision API リクエスト
+    const visionApiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${googleVisionApiKey}`;
+    
+    const requestBody = {
+      requests: [{
+        image: {
+          content: base64Image
+        },
+        features: [{
+          type: 'TEXT_DETECTION',
+          maxResults: 1
+        }]
+      }]
+    };
+    
+    console.log(`[OCR] Vision API にリクエスト送信中...`);
+    const response = await fetch(visionApiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[OCR] Vision API エラー (${response.status}):`, errorText);
+      throw new Error(`Vision API request failed: ${response.status} - ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log(`[OCR] Vision API レスポンス受信`);
+    
+    // OCR結果からテキストを抽出
+    if (result.responses && result.responses[0] && result.responses[0].textAnnotations) {
+      const textAnnotations = result.responses[0].textAnnotations;
+      if (textAnnotations.length > 0) {
+        const extractedText = textAnnotations[0].description || '';
+        console.log(`[OCR] テキスト抽出成功: ${extractedText.length} 文字`);
+        return sanitizeText(extractedText);
+      }
+    }
+    
+    console.log(`[OCR] テキストが検出されませんでした`);
+    return null;
+    
+  } catch (error) {
+    console.error(`[OCR] Google Vision API エラー:`, error);
+    return null;
+  }
+}
+
 // Supabaseクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
+const googleVisionApiKey = Deno.env.get("GOOGLE_VISION_API_KEY"); // ★ Google Vision API キーを追加
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("エラー: SUPABASE_URL または SUPABASE_ANON_KEY が環境変数に設定されていません。");
 }
 if (!geminiApiKey) {
   console.error("エラー: GEMINI_API_KEY が環境変数に設定されていません。");
+}
+if (!googleVisionApiKey) {
+  console.warn("警告: GOOGLE_VISION_API_KEY が環境変数に設定されていません。OCR機能は無効になります。");
 }
 
 let supabase: SupabaseClient;
@@ -132,10 +243,27 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
         }
         
         // textプロパティの存在確認 ★
-        const textContent = pdfData.text || '';
+        let textContent = pdfData.text || '';
         const numPages = pdfData.numpages || 0;
         
         console.log(`PDF解析結果: テキスト長=${textContent.length}文字, ページ数=${numPages}`);
+        
+        // ★ OCR判定とOCR処理の統合
+        if (isTextExtractionInsufficient(textContent, numPages)) {
+          console.log(`[OCR] PDFテキスト抽出が不十分です。OCR処理を実行します...`);
+          
+          const ocrText = await performOCROnPdf(fileBuffer.buffer);
+          if (ocrText && ocrText.length > 0) {
+            console.log(`[OCR] OCR完了: ${ocrText.length}文字追加`);
+            // 既存テキストとOCRテキストを統合
+            textContent = textContent.length > 0 ? 
+              `${textContent}\n\n[OCR抽出テキスト]\n${ocrText}` : 
+              ocrText;
+            console.log(`[OCR] 統合後テキスト長: ${textContent.length}文字`);
+          } else {
+            console.warn(`[OCR] OCR処理に失敗したか、テキストが検出されませんでした`);
+          }
+        }
         
         if (textContent.length === 0) {
           console.warn("PDFからテキストが抽出されませんでした。画像のみのPDFか、テキスト抽出に失敗した可能性があります。");
@@ -147,6 +275,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
               source: fileName, 
               type: 'pdf',
               totalPages: numPages,
+              hasOCR: textContent.includes('[OCR抽出テキスト]'), // ★ OCR使用フラグ
           }
         }];
         console.log(`ドキュメントの読み込み完了。合計 ${numPages} ページ (テキストは結合)。`);
