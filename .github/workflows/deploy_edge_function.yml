@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - develop  # developブランチへのpushをトリガーにする
+      - main     # mainブランチへのpushもトリガーにする
 
 jobs:
   deploy:
