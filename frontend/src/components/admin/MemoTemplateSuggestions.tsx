@@ -356,44 +356,27 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
       // === Edge Function 'create-memo' を呼び出して保存 ===
       try {
-        console.log(`[${tempMemoId}] Attempting to get session to invoke create-memo Edge Function.`);
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        console.log(`[${tempMemoId}] Getting user info for create-memo Edge Function.`);
+        const { data: { user } } = await supabase.auth.getUser();
+        let userId = user?.id;
 
-        if (sessionError || !session) {
-          console.error(`[${tempMemoId}] Error getting session for create-memo invoke:`, sessionError, "Session object:", session);
-          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザー認証情報を取得できませんでした。ログイン状態を確認してください。');
-          // 念のため、より詳細なユーザー情報をログに出す
-          const { data: { user: freshUserDebug }, error: freshUserErrorDebug } = await supabase.auth.getUser();
-          console.log('[Debug] Fresh user check after getSession failure in create-memo invoke path: user=', freshUserDebug, 'error=', freshUserErrorDebug);
+        // 開発用にユーザーIDが取れない場合はダミーIDを使用 (本番では削除または適切な処理)
+        if (!userId && process.env.NODE_ENV === 'development') {
+          console.warn(`[${tempMemoId}] User ID not found, using dummy_user_id for development.`);
+          userId = 'dummy_user_id_dev'; 
+        } else if (!userId) {
+          console.error(`[${tempMemoId}] User ID not found in production mode.`);
+          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザーが認証されていません。ログインしてください。');
           setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
           return;
         }
 
-        const user = session.user;
-        if (!user) {
-          console.error(`[${tempMemoId}] User not found in session for create-memo invoke. Session:`, session);
-          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: ユーザー情報が見つかりません。再度ログインしてください。');
-          setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-          return;
-        }
-
-        const token = session.access_token;
-        if (!token) {
-          console.error(`[${tempMemoId}] Access token not found in session for create-memo invoke. Session:`, session);
-          updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: 認証トークンが見つかりません。再度ログインしてください。');
-          setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-          return;
-        }
-
-        console.log(`[${tempMemoId}] Invoking create-memo Edge Function with userId: ${user.id}`);
+        console.log(`[${tempMemoId}] Invoking create-memo Edge Function with userId: ${userId}`);
         const { data: createdMemoData, error: invokeError } = await supabase.functions.invoke('create-memo', {
-            headers: {
-                Authorization: `Bearer ${token}`,
-            },
             body: {
                 title: memoTitle,
                 content: generated_memo, // Markdownのまま
-                created_by: user.id,     
+                created_by: userId,     
                 is_ai_generated: true,
                 ai_generation_sources: sources,
                 // tags: [], // 必要であれば追加
@@ -416,18 +399,20 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
             console.log(`[${tempMemoId}] Memo saved successfully via Edge Function with ID:`, createdMemoData.memo.id);
             removeGeneratingMemo(tempMemoId);
             triggerMemoListRefresh();
-            setMessage({ type: 'success', text: `「${memoTitle}」のメモが正常に作成されました。` });
-            setTimeout(() => setMessage(null), 5000);
         } else {
             console.warn(`[${tempMemoId}] create-memo Edge Function did not return expected data or memo object. Response:`, createdMemoData);
             updateGeneratingMemoStatus(tempMemoId, 'error', 'メモの保存結果がサーバーから正しく返されませんでした。');
             setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
         }
 
-    } catch (e: any) {
+    } catch (e: unknown) {
         console.error(`[${tempMemoId}] Unexpected error during create-memo invocation or session handling:`, e);
         let errMsg = 'メモ保存処理中に予期せぬエラーが発生しました。';
-        if (e && e.message) errMsg = e.message;
+        if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
+            errMsg = (e as { message: string }).message;
+        } else if (typeof e === 'string') {
+            errMsg = e;
+        }
         updateGeneratingMemoStatus(tempMemoId, 'error', errMsg);
         setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
     }
