@@ -40,11 +40,40 @@ interface SourceManagerProps {
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [uploadQueue, setUploadQueue] = useState<UploadStatus[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectAll, setSelectAll] = useState(false);
+
+  // ★ メッセージ設定ヘルパー関数（自動消去機能付き）
+  const setMessageWithAutoHide = (msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 10000) => {
+    // 既存のタイマーをクリア
+    if (messageTimerRef.current) {
+      clearTimeout(messageTimerRef.current);
+      messageTimerRef.current = null;
+    }
+    
+    setMessage(msg);
+    
+    // 成功メッセージの場合のみ自動消去
+    if (msg && msg.type === 'success') {
+      messageTimerRef.current = setTimeout(() => {
+        setMessage(null);
+        messageTimerRef.current = null;
+      }, autoHideDelay);
+    }
+  };
+
+  // ★ コンポーネントのクリーンアップ
+  useEffect(() => {
+    return () => {
+      if (messageTimerRef.current) {
+        clearTimeout(messageTimerRef.current);
+      }
+    };
+  }, []);
 
   // 並行アップロード用のヘルパー関数
   const updateUploadStatus = (id: string, updates: Partial<UploadStatus>) => {
@@ -71,7 +100,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
       if (error) {
         console.error('Error fetching file list from manuals table:', error);
-        setMessage({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
+        setMessageWithAutoHide({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
         setSourceFiles([]);
       } else {
         const files = data?.map(item => ({ 
@@ -83,7 +112,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
     } catch (err) {
       console.error('Unexpected error fetching files:', err);
-      setMessage({ type: 'error', text: 'ファイル一覧取得中に予期せぬエラーが発生しました。' });
+      setMessageWithAutoHide({ type: 'error', text: 'ファイル一覧取得中に予期せぬエラーが発生しました。' });
       setSourceFiles([]);
     } finally {
       setLoadingFiles(false);
@@ -105,7 +134,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const handleLocalFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setMessage(null);
+    setMessageWithAutoHide(null);
     if (event.target.files && event.target.files.length > 0) {
       const files = Array.from(event.target.files);
       console.log(`[handleLocalFileChange] Selected ${files.length} files for upload`);
@@ -121,7 +150,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
   const handleUpload = async (file: File) => {
     if (!file) {
-      setMessage({ type: 'error', text: 'アップロードするファイルを選択してください。' });
+      setMessageWithAutoHide({ type: 'error', text: 'アップロードするファイルを選択してください。' });
       return;
     }
 
@@ -322,7 +351,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     // アップロード中のファイルは削除できない
     const uploadingFile = uploadQueue.find(item => item.originalFileName === fileName);
     if (uploadingFile) {
-      setMessage({ type: 'error', text: `ファイル「${fileName}」はアップロード中のため削除できません。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」はアップロード中のため削除できません。` });
       return;
     }
 
@@ -333,19 +362,19 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
     const targetFile = sourceFiles.find(file => file.name === fileName);
     if (!targetFile) {
-      setMessage({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
       return;
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
     
-    setMessage({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
+    setMessageWithAutoHide({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
       // Step 1: Delete from Storage (エンコードされたファイル名を使用)
       const { error: storageError } = await supabase.storage.from('manuals').remove([storageFileName]);
 
       if (storageError) {
         console.error('Storage delete error:', storageError);
-        setMessage({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${storageError.message}` });
+        setMessageWithAutoHide({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${storageError.message}` });
         return;
       }
 
@@ -359,7 +388,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
       if (tableError) {
         console.error('Table delete error:', tableError);
-        setMessage({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
+        setMessageWithAutoHide({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
         await fetchUploadedFiles();
         return;
       }
@@ -369,7 +398,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       // Step 3: Fetch updated list and update UI
       await fetchUploadedFiles();
       onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
-      setMessage({ type: 'success', text: `ファイル「${fileName}」を完全に削除しました。` });
+      setMessageWithAutoHide({ type: 'success', text: `ファイル「${fileName}」を完全に削除しました。` });
 
     } catch (err: unknown) {
       console.error('Generic delete error:', err);
@@ -377,7 +406,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       if (err instanceof Error) {
         deleteErrorMessage = err.message;
       }
-      setMessage({ type: 'error', text: deleteErrorMessage });
+      setMessageWithAutoHide({ type: 'error', text: deleteErrorMessage });
     }
   };
 
@@ -385,7 +414,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     // アップロード中のファイルは名前変更できない
     const uploadingFile = uploadQueue.find(item => item.originalFileName === oldName);
     if (uploadingFile) {
-      setMessage({ type: 'error', text: `ファイル「${oldName}」はアップロード中のため名前変更できません。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイル「${oldName}」はアップロード中のため名前変更できません。` });
       return;
     }
 
@@ -393,36 +422,36 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     console.log(`[handleRenameFile] Attempting to rename. Original name: '${oldName}', New name prompt result: '${newNamePromptResult}'`);
 
     if (newNamePromptResult === null) {
-      setMessage({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
+      setMessageWithAutoHide({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
       return;
     }
 
     const trimmedNewName = newNamePromptResult.trim();
     if (trimmedNewName === '') {
-      setMessage({ type: 'error', text: '新しいファイル名を入力してください。' });
+      setMessageWithAutoHide({ type: 'error', text: '新しいファイル名を入力してください。' });
       return;
     }
 
     if (trimmedNewName === oldName) {
-      setMessage({ type: 'info', text: 'ファイル名に変更はありませんでした。' });
+      setMessageWithAutoHide({ type: 'info', text: 'ファイル名に変更はありませんでした。' });
       return;
     }
 
     // 重複チェック（同じ名前のファイルが既に存在するか）
     if (sourceFiles.some(file => file.name === trimmedNewName)) {
-      setMessage({ type: 'error', text: `ファイル名「${trimmedNewName}」は既に存在します。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイル名「${trimmedNewName}」は既に存在します。` });
       return;
     }
 
     // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
     const targetFile = sourceFiles.find(file => file.name === oldName);
     if (!targetFile) {
-      setMessage({ type: 'error', text: `ファイル「${oldName}」が見つかりません。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイル「${oldName}」が見つかりません。` });
       return;
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
 
-    setMessage({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
+    setMessageWithAutoHide({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
     console.log(`[handleRenameFile] Updating original_file_name in database for file: ${storageFileName}`);
     
     try {
@@ -436,9 +465,9 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       
       if (updateError) {
         console.error('[handleRenameFile] Database update error:', updateError);
-        setMessage({ type: 'error', text: `ファイル名の変更に失敗しました: ${updateError.message}` });
+        setMessageWithAutoHide({ type: 'error', text: `ファイル名の変更に失敗しました: ${updateError.message}` });
       } else {
-        setMessage({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
+        setMessageWithAutoHide({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
         await fetchUploadedFiles();
         
         // 選択状態の更新ロジック
@@ -454,7 +483,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       if (err instanceof Error) {
         renameErrorMessage = err.message;
       }
-      setMessage({ type: 'error', text: renameErrorMessage });
+      setMessageWithAutoHide({ type: 'error', text: renameErrorMessage });
     }
     console.log('[handleRenameFile] End.');
   };
@@ -498,11 +527,21 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       )}
 
       {message && (
-        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mx-4 mb-4">
-          {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
-          {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
-          <AlertTitle>{message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}</AlertTitle>
-          <AlertDescription>{message.text}</AlertDescription>
+        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mx-4 mb-4 max-w-full">
+          <div className="flex items-start space-x-2 min-w-0">
+            <div className="flex-shrink-0">
+              {message.type === 'error' && <AlertCircle className="h-4 w-4 mt-0.5" />}
+              {message.type === 'success' && <CheckCircle2 className="h-4 w-4 mt-0.5" />}
+            </div>
+            <div className="flex-grow min-w-0">
+              <AlertTitle className="text-sm md:text-base">
+                {message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}
+              </AlertTitle>
+              <AlertDescription className="break-words text-sm md:text-base">
+                {message.text}
+              </AlertDescription>
+            </div>
+          </div>
         </Alert>
       )}
 
