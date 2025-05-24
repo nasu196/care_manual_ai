@@ -304,16 +304,39 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         throw new Error("メモ内容のMarkdown解析に失敗しました。保存できません。");
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
-      let userId = user?.id;
-      if (!userId && process.env.NODE_ENV === 'development') {
-        console.warn("User ID not found, using dummy_user_id_dev for auto-save.");
-        userId = 'dummy_user_id_dev_ai_generated'; 
-      } else if (!userId) {
-        throw new Error('自動保存のためにはユーザーが認証されている必要があります。');
+      // デバッグログ追加
+      try {
+        const { data: { user: currentUserForDebug } , error: getUserErrorForDebug } = await supabase.auth.getUser();
+        console.log('[Debug] Current user (before save block getSession):', currentUserForDebug, 'Error:', getUserErrorForDebug);
+      } catch (e) {
+        console.error('[Debug] Exception in supabase.auth.getUser() before save block:', e);
       }
-      
-      const { error: createError } = await supabase.functions.invoke('create-memo', {
+
+      const { data: userSession, error: sessionError } = await supabase.auth.getSession();
+      // デバッグログ追加
+      console.log('[Debug] supabase.auth.getSession() result in save block:');
+      console.log('[Debug]   User session data:', userSession);
+      console.log('[Debug]   Session error data:', sessionError);
+
+      if (sessionError || !userSession?.session?.user) {
+        console.error('[Debug] Error getting user session or user not authenticated in save block. Session Error:', sessionError, 'Session Object:', userSession?.session);
+        // ユーザー情報を再確認
+        try {
+            const { data: { user: freshUser }, error: freshUserError } = await supabase.auth.getUser();
+            console.log('[Debug] Fresh user check after getSession failure: user=', freshUser, 'error=', freshUserError);
+        } catch (e) {
+            console.error('[Debug] Exception in fresh supabase.auth.getUser() check:', e);
+        }
+        updateGeneratingMemoStatus(tempMemoId, 'error', 'エラー: 自動保存のためにはユーザーが認証されている必要があります。');
+        // エラー時はここで早期リターン
+        if (abortControllerRef.current[currentIdeaForProcessing.id]) {
+            abortControllerRef.current[currentIdeaForProcessing.id]?.abort();
+        }
+        return; 
+      }
+      const userId = userSession.session.user.id;
+
+      const { data: savedMemo, error: createError } = await supabase.functions.invoke('create-memo', {
         body: { 
           title: memoTitle, 
           content: htmlContent,
