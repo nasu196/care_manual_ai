@@ -526,23 +526,24 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         </div>
       )}
 
+      {/* Alertメッセージ表示エリア (左右にパディングを追加) */}
       {message && (
-        <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mx-4 mb-4 max-w-full">
-          <div className="flex items-start space-x-2 min-w-0">
-            <div className="flex-shrink-0">
-              {message.type === 'error' && <AlertCircle className="h-4 w-4 mt-0.5" />}
-              {message.type === 'success' && <CheckCircle2 className="h-4 w-4 mt-0.5" />}
-            </div>
-            <div className="flex-grow min-w-0">
-              <AlertTitle className="text-sm md:text-base">
-                {message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}
-              </AlertTitle>
-              <AlertDescription className="break-words text-sm md:text-base">
-                {message.text}
-              </AlertDescription>
-            </div>
-          </div>
-        </Alert>
+        <div className="px-4">
+          <Alert variant={message.type === 'error' ? 'destructive' : 'default'} className="mb-4 w-full">
+            {/* アイコンをAlertの直接の子要素として配置 */}
+            {message.type === 'error' && <AlertCircle className="h-4 w-4" />}
+            {message.type === 'success' && <CheckCircle2 className="h-4 w-4" />}
+            {/* TODO: message.type === 'info' の場合のアイコンも追加検討 */}
+
+            {/* AlertTitleとAlertDescriptionはアイコンの兄弟要素として配置 */}
+            <AlertTitle className="break-words">
+              {message.type === 'error' ? 'エラー' : message.type === 'success' ? '成功' : '情報'}
+            </AlertTitle>
+            <AlertDescription className="break-words whitespace-pre-wrap">
+              {message.text}
+            </AlertDescription>
+          </Alert>
+        </div>
       )}
 
       {/* アップロードキュー */}
@@ -612,7 +613,19 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
                   <span className="sr-only">アクション</span>
                 </Button>
               </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">                <DropdownMenuLabel>操作</DropdownMenuLabel>                <DropdownMenuSeparator />                <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>                  名前を変更                </DropdownMenuItem>                <DropdownMenuItem                   onClick={() => handleDeleteFile(file.name)}                   className="text-red-600 hover:!bg-red-50 hover:!text-red-700"                >                  削除                </DropdownMenuItem>              </DropdownMenuContent>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>操作</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
+                  名前を変更
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleDeleteFile(file.name)}
+                  className="text-red-600 hover:!bg-red-50 hover:!text-red-700"
+                >
+                  削除
+                </DropdownMenuItem>
+              </DropdownMenuContent>
             </DropdownMenu>
           </div>
         ))}
