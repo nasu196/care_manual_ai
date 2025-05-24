@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 // import { Input } from '@/components/ui/input'; // 未使用のためコメントアウト
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react'; // Terminalを削除
+import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/lib/supabaseClient';
 import {
   DropdownMenu,
@@ -13,6 +13,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface SourceFile {
   id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
@@ -46,6 +53,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const [uploadQueue, setUploadQueue] = useState<UploadStatus[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectAll, setSelectAll] = useState(false);
+  
+  // ★ ソースデータ表示用のstate
+  const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
+  const [selectedFileForSource, setSelectedFileForSource] = useState<string>('');
+  const [sourceTextData, setSourceTextData] = useState<string>('');
+  const [loadingSourceData, setLoadingSourceData] = useState(false);
 
   // ★ メッセージ設定ヘルパー関数（自動消去機能付き）
   const setMessageWithAutoHide = (msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 10000) => {
@@ -488,6 +501,59 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     console.log('[handleRenameFile] End.');
   };
 
+  // ★ ソースデータ取得関数
+  const fetchSourceData = async (fileName: string) => {
+    setLoadingSourceData(true);
+    try {
+      // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
+      const targetFile = sourceFiles.find(file => file.name === fileName);
+      if (!targetFile) {
+        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
+        return;
+      }
+      const storageFileName = targetFile.id; // エンコードされたファイル名
+
+      // manualsテーブルからmanual_idを取得
+      const { data: manualData, error: manualError } = await supabase
+        .from('manuals')
+        .select('id')
+        .eq('file_name', storageFileName)
+        .single();
+
+      if (manualError || !manualData) {
+        console.error('Manual not found:', manualError);
+        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のデータが見つかりません。` });
+        return;
+      }
+
+      // manual_chunksからテキストデータを取得
+      const { data: chunksData, error: chunksError } = await supabase
+        .from('manual_chunks')
+        .select('chunk_text, chunk_order')
+        .eq('manual_id', manualData.id)
+        .order('chunk_order', { ascending: true });
+
+      if (chunksError) {
+        console.error('Error fetching chunks:', chunksError);
+        setMessageWithAutoHide({ type: 'error', text: `テキストデータの取得に失敗しました: ${chunksError.message}` });
+        return;
+      }
+
+      // チャンクを結合してテキストデータを作成
+      const combinedText = chunksData?.map(chunk => chunk.chunk_text).join('\n\n') || '';
+      
+      setSourceTextData(combinedText);
+      setSelectedFileForSource(fileName);
+      setIsSourceModalOpen(true);
+
+    } catch (err) {
+      console.error('Unexpected error fetching source data:', err);
+      setMessageWithAutoHide({ type: 'error', text: 'ソースデータ取得中に予期せぬエラーが発生しました。' });
+    } finally {
+      setLoadingSourceData(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* ヘッダーセクション */}
@@ -616,6 +682,9 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>操作</DropdownMenuLabel>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => fetchSourceData(file.name)}>
+                  ソース元データを表示
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
                   名前を変更
                 </DropdownMenuItem>
@@ -630,6 +699,30 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           </div>
         ))}
       </div>
+
+      {/* ソースデータ表示モーダル */}
+      <Dialog open={isSourceModalOpen} onOpenChange={setIsSourceModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
+          <DialogHeader>
+            <DialogTitle>ソース元データ - {selectedFileForSource}</DialogTitle>
+            <DialogDescription>
+              PDFから抽出されたテキストデータです。OCR抽出部分は [OCR抽出テキスト] マーカーで識別されます。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 overflow-y-auto max-h-[60vh] border rounded-md p-4 bg-gray-50">
+            {loadingSourceData ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin mr-2" />
+                <span>データを読み込み中...</span>
+              </div>
+            ) : (
+              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">
+                {sourceTextData || 'テキストデータが見つかりません。'}
+              </pre>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
