@@ -25,6 +25,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   // ★ メモ表示状態を取得
   const isMemoViewExpanded = useMemoStore((state) => state.isMemoViewExpanded);
+  const isAnyModalOpen = useMemoStore((state) => state.isAnyModalOpen); // ★ 追加
   // ★ 編集権限を取得
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
 
@@ -74,18 +75,24 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
       if (currentPanelWidth > 0) { // currentPanelWidthが設定されてから計算
         const currentPanelsList = Array.from(currentPanels);
         const newIndex = currentPanelsList.indexOf(activeMobilePanel);
-        setTranslateX(newIndex * -currentPanelWidth);
-        console.log('[AppLayout] activeMobilePanel or isMobileView changed (mobile): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'newTranslateX (px):', newIndex * -currentPanelWidth);
+        const newTranslateX = newIndex * -currentPanelWidth;
+        if (!isAnyModalOpen) { // モーダル非表示時のみtranslateXを更新
+          setTranslateX(newTranslateX);
+          console.log('[AppLayout] activeMobilePanel changed (mobile, no modal): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'newTranslateX (px):', newTranslateX);
+        } else {
+          console.log('[AppLayout] activeMobilePanel changed (mobile, modal open): skipping translateX update. Current translateX:', translateX);
+        }
       }
     } else {
-      if (currentPanelWidth > 0) { // PC表示でも念のためcurrentPanelWidthを考慮
+      // PC表示のロジック (モーダル影響なし)
+      if (currentPanelWidth > 0) { 
         const currentPanelsList = Array.from(currentPanels);
         const newIndex = currentPanelsList.indexOf(activeMobilePanel);
         setTranslateX(newIndex * -currentPanelWidth); 
-        console.log('[AppLayout] activeMobilePanel or isMobileView changed (PC): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'translateX set to (px):', newIndex * -currentPanelWidth);
+        console.log('[AppLayout] activeMobilePanel changed (PC): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'translateX set to (px):', newIndex * -currentPanelWidth);
       }
     }
-  }, [activeMobilePanel, isMobileView, currentPanelWidth, currentPanels]); // currentPanelsも依存配列に追加
+  }, [activeMobilePanel, isMobileView, currentPanelWidth, currentPanels, isAnyModalOpen]); // isAnyModalOpenを依存配列に追加
 
   // TabsのonValueChangeで直接activeMobilePanelを更新するため、この関数は不要
   // const handleTabSelect = (panel: PanelType) => {
@@ -147,8 +154,8 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
           <div 
             className={`flex h-full absolute top-0 left-0 ${hasEditPermission ? 'w-[300%]' : 'w-[200%]'}`} // 編集権限に応じて幅を変更
             style={{
-              transform: `translateX(${translateX}px)`, 
-              transition: 'transform 0.3s ease-in-out', 
+              transform: `translateX(${translateX}px)`,
+              transition: isAnyModalOpen && isMobileView ? 'none' : 'transform 0.3s ease-in-out',
             }}
           >
             {hasEditPermission && (

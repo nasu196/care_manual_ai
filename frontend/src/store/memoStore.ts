@@ -31,6 +31,8 @@ interface MemoStoreState {
   addGeneratingMemo: (memo: GeneratingMemo) => void;
   updateGeneratingMemoStatus: (id: string, status: GeneratingMemo['status'], errorMessage?: string) => void;
   removeGeneratingMemo: (id: string) => void;
+  isAnyModalOpen: boolean; // ★ 追加: アプリ全体のモーダル表示状態
+  setIsAnyModalOpen: (isOpen: boolean) => void; // ★ 追加
 }
 
 export const useMemoStore = create<MemoStoreState>((set) => ({
@@ -60,4 +62,6 @@ export const useMemoStore = create<MemoStoreState>((set) => ({
     set((state) => ({ 
       generatingMemos: state.generatingMemos.filter((m) => m.id !== id) 
     })),
+  isAnyModalOpen: false, // ★ 初期値
+  setIsAnyModalOpen: (isOpen) => set({ isAnyModalOpen: isOpen }), // ★ セッター
 })); 

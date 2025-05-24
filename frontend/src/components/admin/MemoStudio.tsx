@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabaseClient';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { marked } from 'marked';
+import ReactMarkdown from 'react-markdown';
 import { AIGeneratedMemoSource } from '@/components/admin/MemoTemplateSuggestions';
 
 // メモの型定義 (仮。実際のEdge Functionの返り値に合わせる)
@@ -577,8 +578,9 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                   className={`flex-grow prose dark:prose-invert max-w-none overflow-y-auto p-2 border rounded-md min-h-0 ${
                     selectedMemo.is_important ? 'border-red-200 bg-red-50/30' : ''
                   }`}
-                  dangerouslySetInnerHTML={{ __html: selectedMemo.content }}
-                />
+                >
+                  <ReactMarkdown>{selectedMemo.content}</ReactMarkdown>
+                </div>
               </div>
             )
           ) : isEditingNewMemo ? (
@@ -735,8 +737,17 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                               </div>
                             ) : (
                               <p className="truncate flex-1 mr-2">
-                                {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').substring(0, 60)}
-                                {memo.content.replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').length > 60 && '...'}
+                                {memo.content
+                                  .replace(/#+\s/g, '')          // ヘッダー記号を除去
+                                  .replace(/\*\*(.*?)\*\*/g, '$1') // ボールドの**を除去
+                                  .replace(/\*(.*?)\*/g, '$1')     // イタリックの*を除去
+                                  .replace(/`(.*?)`/g, '$1')       // インラインコードの`を除去
+                                  .replace(/\[(.*?)\]\(.*?\)/g, '$1') // リンクからテキスト部分のみ抽出
+                                  .replace(/\n/g, ' ')             // 改行をスペースに変換
+                                  .replace(/\s+/g, ' ')            // 連続するスペースを1つに
+                                  .trim()
+                                  .substring(0, 60)}
+                                {memo.content.length > 60 && '...'}
                               </p>
                             )}
                             <span className="flex-shrink-0">

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
@@ -62,6 +63,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const addGeneratingMemo = useMemoStore((state) => state.addGeneratingMemo);
   const updateGeneratingMemoStatus = useMemoStore((state) => state.updateGeneratingMemoStatus);
   const removeGeneratingMemo = useMemoStore((state) => state.removeGeneratingMemo);
+  const setIsAnyModalOpen = useMemoStore((state) => state.setIsAnyModalOpen);
 
   useEffect(() => {
     const checkAuthStatus = async () => {
@@ -256,6 +258,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     setSelectedIdeaForModal(suggestion);
     setGenerateMemoError(null); // モーダルを開くときに前回のエラーをクリア
     setIsGenerateMemoModalOpen(true);
+    setIsAnyModalOpen(true);
   };
 
   // モーダルで「作成」が押されたときのハンドラ
@@ -284,6 +287,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     // ここまでデバッグログ
 
     setIsGenerateMemoModalOpen(false);
+    setIsAnyModalOpen(false);
     
     const tempMemoId = Date.now().toString();
     const memoTitle = selectedIdeaForModal.title;
@@ -553,14 +557,20 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       )}
 
       {/* メモ生成モーダル */}
-      <AnimatePresence>
-        {isGenerateMemoModalOpen && selectedIdeaForModal && (
+      {isGenerateMemoModalOpen && selectedIdeaForModal && createPortal(
+        <AnimatePresence>
           <div 
-            className="fixed inset-0 flex items-center justify-center p-4 z-50" 
-            style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}
+            className="fixed inset-0 flex items-center justify-center p-4"
+            style={{ 
+              backgroundColor: 'rgba(0, 0, 0, 0.1)',
+              zIndex: 999999
+            }}
           >
             <motion.div 
-              className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full"
+              className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full relative"
+              style={{ 
+                zIndex: 1000000
+              }}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
@@ -594,14 +604,18 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                 </DropdownMenu>
               </div>
               {generateMemoError && (
-                  <div className="mb-3 p-2 bg-red-100 text-red-700 rounded-md text-sm">
-                      <p>エラー: {generateMemoError}</p>
-                  </div>
+                <div className="mb-3 p-2 bg-red-100 text-red-700 rounded-md text-sm">
+                  <p>エラー: {generateMemoError}</p>
+                </div>
               )}
               <div className="flex justify-end gap-2 mt-5">
                 <Button 
                   variant="outline" 
-                  onClick={() => { setIsGenerateMemoModalOpen(false); setGenerateMemoError(null); }} 
+                  onClick={() => { 
+                    setIsGenerateMemoModalOpen(false); 
+                    setGenerateMemoError(null); 
+                    setIsAnyModalOpen(false);
+                  }} 
                 >
                   キャンセル
                 </Button>
@@ -611,8 +625,9 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 };
