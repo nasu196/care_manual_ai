@@ -63,13 +63,23 @@ function isTextExtractionInsufficient(text: string, numPages: number): boolean {
   return false;
 }
 
-// ★ PDF画像変換関数（簡易版）
+// ★ PDF画像変換関数（安全なBase64変換版）
 async function convertPdfPageToImage(pdfBuffer: ArrayBuffer, pageNumber: number = 1): Promise<string | null> {
   try {
-    // 現在は基本的なPDF→Base64変換のみ実装
-    // 実際の画像変換は複雑なため、まずはPDFバイナリをそのまま送信する方式
-    const base64Pdf = btoa(String.fromCharCode(...new Uint8Array(pdfBuffer)));
-    console.log(`[PDF変換] PDF を Base64 に変換しました (${base64Pdf.length} 文字)`);
+    console.log(`[PDF変換] PDF を Base64 に変換開始 (サイズ: ${pdfBuffer.byteLength} bytes)`);
+    
+    // 安全なBase64変換（チャンク単位）
+    const uint8Array = new Uint8Array(pdfBuffer);
+    const chunkSize = 8192; // 8KBずつ処理
+    let binaryString = '';
+    
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.slice(i, i + chunkSize);
+      binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    
+    const base64Pdf = btoa(binaryString);
+    console.log(`[PDF変換] PDF を Base64 に変換完了 (${base64Pdf.length} 文字)`);
     return base64Pdf;
   } catch (error) {
     console.error(`[PDF変換] エラー:`, error);
@@ -86,6 +96,12 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
   
   try {
     console.log(`[OCR] Google Vision API を使用してOCR処理を開始...`);
+    
+    // ファイルサイズチェック（Vision APIの制限: 20MB）
+    if (pdfBuffer.byteLength > 20 * 1024 * 1024) {
+      console.warn(`[OCR] PDFファイルが大きすぎます (${Math.round(pdfBuffer.byteLength / 1024 / 1024)}MB > 20MB制限)`);
+      return null;
+    }
     
     // PDF→Base64変換
     const base64Image = await convertPdfPageToImage(pdfBuffer);
@@ -108,7 +124,7 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
       }]
     };
     
-    console.log(`[OCR] Vision API にリクエスト送信中...`);
+    console.log(`[OCR] Vision API にリクエスト送信中... (データサイズ: ${Math.round(base64Image.length / 1024)}KB)`);
     const response = await fetch(visionApiUrl, {
       method: 'POST',
       headers: {
@@ -120,18 +136,40 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[OCR] Vision API エラー (${response.status}):`, errorText);
-      throw new Error(`Vision API request failed: ${response.status} - ${errorText}`);
+      
+      // APIエラーの詳細分析
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error && errorJson.error.message) {
+          console.error(`[OCR] API エラー詳細: ${errorJson.error.message}`);
+        }
+      } catch (parseError) {
+        console.error(`[OCR] エラーレスポンスの解析に失敗:`, parseError);
+      }
+      
+      throw new Error(`Vision API request failed: ${response.status} - ${errorText.substring(0, 200)}`);
     }
     
     const result = await response.json();
-    console.log(`[OCR] Vision API レスポンス受信`);
+    console.log(`[OCR] Vision API レスポンス受信`, { 
+      hasResponses: !!result.responses, 
+      responseCount: result.responses?.length || 0 
+    });
     
     // OCR結果からテキストを抽出
-    if (result.responses && result.responses[0] && result.responses[0].textAnnotations) {
-      const textAnnotations = result.responses[0].textAnnotations;
-      if (textAnnotations.length > 0) {
-        const extractedText = textAnnotations[0].description || '';
+    if (result.responses && result.responses[0]) {
+      const firstResponse = result.responses[0];
+      
+      // エラーチェック
+      if (firstResponse.error) {
+        console.error(`[OCR] Vision API応答エラー:`, firstResponse.error);
+        return null;
+      }
+      
+      if (firstResponse.textAnnotations && firstResponse.textAnnotations.length > 0) {
+        const extractedText = firstResponse.textAnnotations[0].description || '';
         console.log(`[OCR] テキスト抽出成功: ${extractedText.length} 文字`);
+        console.log(`[OCR] 抽出テキスト（最初の100文字）: ${extractedText.substring(0, 100)}...`);
         return sanitizeText(extractedText);
       }
     }
@@ -141,6 +179,13 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
     
   } catch (error) {
     console.error(`[OCR] Google Vision API エラー:`, error);
+    
+    // エラーの詳細情報を出力
+    if (error instanceof Error) {
+      console.error(`[OCR] エラー名: ${error.name}`);
+      console.error(`[OCR] エラーメッセージ: ${error.message}`);
+    }
+    
     return null;
   }
 }
