@@ -21,7 +21,7 @@ type PanelType = 'source' | 'chat' | 'memo';
 
 const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   // const title = headerTitle || '持続化補助金＜創業型＞公募要領'; // タイトルの設定
-  const [title, setTitle] = useState('Care Manual AI'); // 固定タイトルに変更（一時的）
+  const title = 'Care Manual AI'; // 固定タイトルに変更（一時的）
 
   // ★ メモ表示状態を取得
   const isMemoViewExpanded = useMemoStore((state) => state.isMemoViewExpanded);
@@ -87,10 +87,6 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     }
   }, [activeMobilePanel, isMobileView, currentPanelWidth, currentPanels]); // currentPanelsも依存配列に追加
 
-  const handleTitleChange = (newTitle: string) => {
-    setTitle(newTitle);
-  };
-
   // TabsのonValueChangeで直接activeMobilePanelを更新するため、この関数は不要
   // const handleTabSelect = (panel: PanelType) => {
   //   setActiveMobilePanel(panel);
@@ -122,7 +118,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   if (isMobileView) {
     return (
       <div className="flex flex-col h-screen bg-muted/40 overflow-hidden">
-        <TopHeader title={title} onTitleChange={handleTitleChange} />
+        <TopHeader title={title} />
         
         <Tabs 
           value={activeMobilePanel} 
@@ -175,7 +171,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   // PC表示 (既存のレイアウトをTailwindで少し調整)
   return (
     <div className="flex flex-col h-screen max-h-screen bg-muted/40 overflow-hidden">
-      <TopHeader title={title} onTitleChange={handleTitleChange} />
+      <TopHeader title={title} />
       
       {/* 3カラムFlexエリア - 画面の高さを確実に制限 */}
       <div className="flex-grow flex gap-x-2 p-2 min-h-0 max-h-full overflow-hidden">
