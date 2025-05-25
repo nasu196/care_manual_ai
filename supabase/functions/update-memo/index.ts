@@ -48,22 +48,43 @@ Deno.serve(async (req) => {
     // Authorizationヘッダーを取得してSupabaseクライアントに渡す
     const authHeader = req.headers.get('Authorization')
     console.log('[update-memo] Received Authorization Header:', authHeader);
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: authHeader ? { Authorization: authHeader } : {} },
-    })
 
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
-      return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // create-memo と同様に、anon key でクライアントを初期化
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+    // JWTトークンをデコードして直接ユーザー情報を取得 (create-memoと同様の方式)
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
+    const token = authHeader.replace('Bearer ', '');
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    let payload;
+    try {
+      payload = JSON.parse(atob(parts[1]));
+    } catch (e) {
+      console.error('Error decoding JWT payload:', e);
+      return new Response(JSON.stringify({ error: 'Failed to decode JWT' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    console.log('[update-memo] Decoded JWT Payload:', payload);
 
-    console.log('Authenticated user ID:', user.id)
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+    
+    if (!userId) {
+      console.error('No user ID found in JWT payload for update-memo');
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    console.log('[update-memo] Authenticated user ID from Clerk JWT:', userId);
 
     // リクエストボディを解析
     let body;
@@ -99,14 +120,14 @@ Deno.serve(async (req) => {
       .from('memos')
       .update(updateData)
       .eq('id', memoId)
-      .eq('created_by', user.id) // ユーザーIDでフィルタリング（アクセス制御）
+      .eq('created_by', userId) // ユーザーIDでフィルタリング（アクセス制御）
       .select() // 更新後のデータを返す
       .single(); // 更新対象が1件であることを期待
 
-    console.log(`Update attempt for ID ${memoId} by user ${user.id}:`, { updateDataSent: updateData, responseData: data, responseError: error });
+    console.log(`Update attempt for ID ${memoId} by user ${userId}:`, { updateDataSent: updateData, responseData: data, responseError: error });
 
     if (error) {
-      console.error(`Error updating memo with ID ${memoId} for user ${user.id}:`, error)
+      console.error(`Error updating memo with ID ${memoId} for user ${userId}:`, error)
       if (error.code === 'PGRST116' || (error.details && error.details.includes("0 rows"))) {
         return new Response(
           JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
@@ -126,7 +147,7 @@ Deno.serve(async (req) => {
         )
     }
 
-    console.log(`Successfully updated memo ${memoId} for user ${user.id}`)
+    console.log(`Successfully updated memo ${memoId} for user ${userId}`)
 
     return new Response(
       JSON.stringify(data),
