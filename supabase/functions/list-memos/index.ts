@@ -37,35 +37,53 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
+    // Authorizationヘッダーを取得
     const authHeader = req.headers.get('Authorization')
     console.log('Auth header before getUser:', authHeader);
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: authHeader ? { Authorization: authHeader } : {},
-      },
-    })
-
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated. UserError:', JSON.stringify(userError))
-      console.error('User object from getUser:', JSON.stringify(user))
+    if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: 'Authentication required', details: userError?.message || 'No user object' }),
+        JSON.stringify({ error: 'No Authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log('Authenticated user ID:', user.id)
+    // JWTトークンをデコードして直接ユーザー情報を取得
+    const token = authHeader.replace('Bearer ', '')
+    const parts = token.split('.')
+    
+    if (parts.length !== 3) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JWT format' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // JWTペイロードをデコード
+    const payload = JSON.parse(atob(parts[1]))
+    console.log('JWT Payload:', JSON.stringify(payload))
+
+    // ClerkのJWTから直接ユーザーIDを取得（subフィールドを使用）
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
+    
+    if (!userId) {
+      console.error('No user ID found in JWT payload')
+      return new Response(
+        JSON.stringify({ error: 'User ID not found in token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID from Clerk JWT:', userId)
+
+    // Supabaseクライアントを作成（サービスロールキーを使用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
     // ユーザーIDでフィルタリングしてmemosテーブルからデータを取得
     const { data, error } = await supabase
       .from('memos')
       .select('*')
-      .eq('created_by', user.id) // ユーザーIDでフィルタリング
+      .eq('created_by', userId) // ClerkのユーザーIDでフィルタリング
       .order('created_at', { ascending: false }) // 作成日時の降順で取得 (新しいものが先頭)
 
     if (error) {
@@ -76,7 +94,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    console.log(`Found ${data?.length || 0} memos for user ${user.id}`)
+    console.log(`Found ${data?.length || 0} memos for user ${userId}`)
 
     return new Response(
       JSON.stringify(data),

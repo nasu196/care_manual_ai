@@ -11,9 +11,6 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Supabaseクライアントを初期化
-    // 環境変数からSupabaseのURLとanonキーを取得
-    // 重要: これらの環境変数はSupabaseのプロジェクト設定で事前に設定しておく必要があります
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
 
@@ -25,79 +22,88 @@ serve(async (req: Request) => {
       )
     }
 
-    const authHeader = req.headers.get('Authorization') // Authorizationヘッダーを取得
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: authHeader ? { Authorization: authHeader } : {}, // Authorizationヘッダーがあればセット、なければ空のオブジェクト
-      },
-    })
-
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    // Authorizationヘッダーを取得
+    const authHeader = req.headers.get('Authorization')
     
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
+    if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
+        JSON.stringify({ error: 'No Authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log('Authenticated user ID:', user.id)
+    // JWTトークンをデコードして直接ユーザー情報を取得
+    const token = authHeader.replace('Bearer ', '')
+    const parts = token.split('.')
+    
+    if (parts.length !== 3) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JWT format' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-    // リクエストボディからデータを取得
-    const { 
-      title, 
-      content, 
-      tags, 
-      is_important,
-      is_ai_generated,       // ★ 追加
-      ai_generation_sources  // ★ 追加
-    } = await req.json()
+    // JWTペイロードをデコード
+    const payload = JSON.parse(atob(parts[1]))
+    console.log('JWT Payload:', JSON.stringify(payload))
 
-    // 簡単なバリデーション
+    // ClerkのJWTから直接ユーザーIDを取得
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
+    
+    if (!userId) {
+      console.error('No user ID found in JWT payload')
+      return new Response(
+        JSON.stringify({ error: 'User ID not found in token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID from Clerk JWT:', userId)
+
+    // リクエストボディを取得
+    const { title, content, sources } = await req.json()
+
     if (!title || !content) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: title and content' }),
+        JSON.stringify({ error: 'Title and content are required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // memosテーブルにデータを挿入（created_byは認証されたユーザーIDを自動設定）
+    // Supabaseクライアントを作成
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+    // メモを作成（created_byにClerkのユーザーIDを設定）
     const { data, error } = await supabase
       .from('memos')
-      .insert([
-        {
-          title: title,
-          content: content,
-          created_by: user.id, // 認証されたユーザーIDを自動設定
-          tags: tags,             // オプショナル
-          is_important: is_important === undefined ? false : is_important, // デフォルトはfalse
-          is_ai_generated: is_ai_generated === undefined ? false : is_ai_generated, // ★ 追加 (デフォルトfalse)
-          ai_generation_sources: ai_generation_sources, // ★ 追加 (null許容ならそのままでOK)
-        },
-      ])
-      .select() // 挿入されたデータを返す
+      .insert({
+        title,
+        content,
+        sources: sources || [],
+        created_by: userId // ClerkのユーザーIDを設定
+      })
+      .select()
+      .single()
 
     if (error) {
-      console.error('Error inserting memo:', error)
-      // エラーレスポンスにもCORSヘッダーを含めることが推奨される
-      return new Response(JSON.stringify({ error: error.message || 'Failed to insert memo' }), {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      console.error('Error creating memo:', error)
+      return new Response(
+        JSON.stringify({ error: error.message }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
-    console.log('Memo created successfully for user:', user.id, data)
-    return new Response(JSON.stringify({ memo: data ? data[0] : null }), {
-      status: 201, // Created
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  } catch (err: any) { // catchブロックのエラー型をanyに一旦変更 (Deno Deployの挙動に合わせる場合がある)
-    console.error('Unhandled error:', err)
-    return new Response(JSON.stringify({ error: err.message || 'Internal Server Error' }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    console.log('Memo created successfully:', data.id)
+
+    return new Response(
+      JSON.stringify(data),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 201 }
+    )
+  } catch (e) {
+    console.error('An unexpected error occurred:', e)
+    return new Response(
+      JSON.stringify({ error: 'Internal Server Error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
   }
 })
