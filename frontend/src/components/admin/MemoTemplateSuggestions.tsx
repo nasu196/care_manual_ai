@@ -18,6 +18,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { invokeFunction } from '@/lib/supabaseFunctionUtils';
+import { useAuth } from '@clerk/nextjs';
 
 // AIが生成するメモのソース情報の型 (エクスポートする)
 export interface AIGeneratedMemoSource {
@@ -65,7 +67,8 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const removeGeneratingMemo = useMemoStore((state) => state.removeGeneratingMemo);
   const setIsAnyModalOpen = useMemoStore((state) => state.setIsAnyModalOpen);
 
-  const supabaseClient = useSupabaseClient();
+  const { supabaseClient, isSupabaseReady } = useSupabaseClient();
+  const { userId: clerkUserId, isSignedIn: isClerkSignedIn } = useAuth();
 
   useEffect(() => {
     try {
@@ -240,29 +243,20 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   };
 
   // モーダルで「作成」が押されたときのハンドラ
-  const handleConfirmGenerateMemo = async () => {
+  const handleConfirmGenerateMemo = useCallback(async (currentClerkUserId: string | null | undefined) => {
     if (!selectedIdeaForModal) return;
-
-    // デバッグログ追加
-    console.log(`[handleConfirmGenerateMemo Start] Attempting to get user and session before processing idea: ${selectedIdeaForModal.title}`);
-    try {
-      const { data: { user: userInHandle }, error: userErrorInHandle } = await supabaseClient.auth.getUser();
-      if (userErrorInHandle) {
-        console.error(`[handleConfirmGenerateMemo] Error getting user:`, userErrorInHandle);
-      } else {
-        console.log(`[handleConfirmGenerateMemo] Current user:`, userInHandle);
-      }
-
-      const { data: { session: sessionInHandle }, error: sessionErrorInHandle } = await supabaseClient.auth.getSession();
-      if (sessionErrorInHandle) {
-        console.error(`[handleConfirmGenerateMemo] Error getting session:`, sessionErrorInHandle);
-      } else {
-        console.log(`[handleConfirmGenerateMemo] Current session:`, sessionInHandle);
-      }
-    } catch (e) {
-      console.error(`[handleConfirmGenerateMemo] Exception getting auth state:`, e);
+    if (!isSupabaseReady || !supabaseClient) {
+      console.error("Supabase client is not ready. Cannot generate memo.");
+      setGenerateMemoError("メモ機能の準備ができていません。少し待ってから再試行してください。");
+      setIsGenerateMemoModalOpen(true); // モーダルを閉じずにエラー表示
+      return;
     }
-    // ここまでデバッグログ
+    if (!currentClerkUserId) {
+      console.error("Clerk user ID is not available. Cannot generate memo.");
+      setGenerateMemoError("ユーザー認証情報が取得できませんでした。再ログインしてみてください。");
+      setIsGenerateMemoModalOpen(true);
+      return;
+    }
 
     setIsGenerateMemoModalOpen(false);
     setIsAnyModalOpen(false);
@@ -272,11 +266,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
     addGeneratingMemo({ id: tempMemoId, title: memoTitle, status: 'prompt_creating' });
     
-    // 個別のアイデア処理のためのコントローラを分離
     const currentIdeaForProcessing = selectedIdeaForModal;
-    setSelectedIdeaForModal(null); // すぐにクリアして他のアイデアの処理を可能にする
+    setSelectedIdeaForModal(null);
     
-    console.log("Generating memo for:", memoTitle);
+    console.log("Generating memo for:", memoTitle, "by user:", currentClerkUserId);
 
     try {
       console.log(`[${tempMemoId}] Calling PromptCraftLLM for: ${memoTitle}`);
@@ -319,99 +312,42 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       const { generated_memo, sources } = await memoResponse.json();
       console.log(`[${tempMemoId}] MemoWriterLLM successful.`);
       
-      updateGeneratingMemoStatus(tempMemoId, 'saving'); // ステータスを「保存中」に更新
+      updateGeneratingMemoStatus(tempMemoId, 'saving'); 
       
-      // generated_memo が文字列であるかの確認と基本的なエラーハンドリング (htmlContentの削除に伴い修正)
       try {
         if (typeof generated_memo !== 'string') {
           console.warn(`[${tempMemoId}] generated_memo was not a string. Received:`, generated_memo);
           updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: AIからのメモ内容が予期しない形式です。");
           setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-          return; // 処理中断
+          return;
         }
       } catch (e) { 
         console.error(`[${tempMemoId}] Error during generated_memo validation:`, e);
         updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: メモ内容の検証中に問題が発生しました。");
         setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-        return; // 処理中断
+        return;
       }
 
       // === Edge Function 'create-memo' を呼び出して保存 ===
       try {
-        console.log(`[${tempMemoId}] Getting user info for create-memo Edge Function.`);
+        console.log(`[${tempMemoId}] Invoking create-memo Edge Function. Using Clerk User ID: ${currentClerkUserId}`);
         
-        // 最初にセッションをリフレッシュ（Vercel環境での認証状態を確実にする）
-        const { error: refreshError } = await supabaseClient.auth.refreshSession();
-        if (refreshError) {
-          console.warn(`[${tempMemoId}] Failed to refresh session:`, refreshError);
-        }
-        
-        // ユーザー情報を取得（リトライロジック付き）
-        let retryCount = 0;
-        let userId: string | undefined;
-        
-        while (retryCount < 3 && !userId) {
-          const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-          
-          if (userError) {
-            console.error(`[${tempMemoId}] Attempt ${retryCount + 1}: Error getting user:`, userError);
-            retryCount++;
-            
-            if (retryCount < 3) {
-              // 短い待機時間を入れてリトライ
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              // 再度セッションをリフレッシュ
-              await supabaseClient.auth.refreshSession();
-            }
-          } else {
-            userId = user?.id;
-            if (userId) {
-              console.log(`[${tempMemoId}] Successfully got user ID: ${userId} on attempt ${retryCount + 1}`);
-            }
-          }
-        }
-
-        // 開発用にユーザーIDが取れない場合はダミーIDを使用 (本番では削除または適切な処理)
-        if (!userId && process.env.NODE_ENV === 'development') {
-          console.warn(`[${tempMemoId}] User ID not found after retries, using dummy_user_id for development.`);
-          userId = 'dummy_user_id_dev'; 
-        } else if (!userId) {
-          // Vercel環境でのSSR/CSR認証同期問題の回避策
-          console.warn(`[${tempMemoId}] User ID not found after ${retryCount} attempts. Using anonymous user as fallback.`);
-          
-          // 最終的なセッション状態をログ出力
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          console.warn(`[${tempMemoId}] Session state (for debugging):`, { 
-            hasSession: !!session,
-            sessionUser: session?.user?.id,
-            accessToken: !!session?.access_token,
-            environment: process.env.NODE_ENV
-          });
-          
-          // 認証が取れない場合でも処理を継続（anonymous userとして）
-          userId = 'anonymous';
-          console.log(`[${tempMemoId}] Proceeding with anonymous user ID`);
-        }
-
-        console.log(`[${tempMemoId}] Invoking create-memo Edge Function with userId: ${userId}`);
-        const { data: createdMemoData, error: invokeError } = await supabaseClient.functions.invoke('create-memo', {
-            body: {
-                title: memoTitle,
-                content: generated_memo, // Markdownのまま
-                created_by: userId,     
-                is_ai_generated: true,
-                ai_generation_sources: sources,
-                // tags: [], // 必要であれば追加
-                // is_important: false, // 必要であれば追加
-            },
-        });
+        const { data: createdMemoData, error: invokeError } = await invokeFunction(
+          'create-memo',
+          { // bodyの内容
+            title: memoTitle,
+            content: generated_memo, 
+            is_ai_generated: true,
+            ai_generation_sources: sources,
+          },
+          currentClerkUserId // ClerkのユーザーIDを渡す
+        );
 
         if (invokeError) {
             console.error(`[${tempMemoId}] Error invoking create-memo Edge Function:`, invokeError);
             let displayErrorMessage = `メモの保存に失敗しました: ${invokeError.message}`;
-            // invokeError の詳細を見て、より分かりやすいメッセージを検討 (例: context.error)
             if (typeof invokeError.context === 'object' && invokeError.context !== null && 'error' in invokeError.context && typeof invokeError.context.error === 'string') {
-                displayErrorMessage = invokeError.context.error; // Edge Function内で返したエラーメッセージ
+                displayErrorMessage = invokeError.context.error;
             } else if (invokeError.message.includes('Function returned an error')) {
                  displayErrorMessage = 'メモ保存機能の呼び出しでサーバーエラーが発生しました。';
             }
@@ -428,7 +364,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }
 
     } catch (e: unknown) {
-        console.error(`[${tempMemoId}] Unexpected error during create-memo invocation or session handling:`, e);
+        console.error(`[${tempMemoId}] Unexpected error during create-memo invocation:`, e);
         let errMsg = 'メモ保存処理中に予期せぬエラーが発生しました。';
         if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
             errMsg = (e as { message: string }).message;
@@ -450,7 +386,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         removeGeneratingMemo(tempMemoId);
       }, 5000);
     }
-  };
+  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, clerkUserId, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, setIsAnyModalOpen, setGenerateMemoError]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -597,7 +533,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                 >
                   キャンセル
                 </Button>
-                <Button onClick={handleConfirmGenerateMemo}>
+                <Button onClick={() => handleConfirmGenerateMemo(clerkUserId)}>
                   作成する
                 </Button>
               </div>
