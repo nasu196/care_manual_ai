@@ -23,6 +23,9 @@ Deno.serve(async (req) => {
   }
 
   try {
+    console.log('Request received:', req.method, req.url);
+    console.log('Request headers:', JSON.stringify(Object.fromEntries(req.headers.entries())));
+
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
 
@@ -36,6 +39,8 @@ Deno.serve(async (req) => {
 
     // Authorizationヘッダーを取得してSupabaseクライアントに渡す
     const authHeader = req.headers.get('Authorization')
+    console.log('Auth header before getUser:', authHeader);
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: authHeader ? { Authorization: authHeader } : {},
@@ -46,9 +51,10 @@ Deno.serve(async (req) => {
     const { data: { user }, error: userError } = await supabase.auth.getUser()
     
     if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
+      console.error('Error getting user or user not authenticated. UserError:', JSON.stringify(userError))
+      console.error('User object from getUser:', JSON.stringify(user))
       return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
+        JSON.stringify({ error: 'Authentication required', details: userError?.message || 'No user object' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
