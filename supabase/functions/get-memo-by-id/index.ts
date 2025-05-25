@@ -31,7 +31,26 @@ Deno.serve(async (req) => {
       )
     }
 
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
+    const authHeader = req.headers.get('Authorization')
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {},
+      },
+    })
+
+    // JWTトークンからユーザー情報を取得
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Error getting user or user not authenticated:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID:', user.id)
 
     // URLからメモのIDを取得
     // 例: /functions/v1/get-memo-by-id/your-memo-id
@@ -46,20 +65,21 @@ Deno.serve(async (req) => {
       )
     }
 
-    // memosテーブルから指定されたIDのデータを取得
+    // memosテーブルから指定されたIDのデータを取得（ユーザーIDでフィルタリング）
     const { data, error } = await supabase
       .from('memos')
       .select('*')
       .eq('id', memoId) // 'id' カラムが memoId と一致するものを検索
+      .eq('created_by', user.id) // ユーザーIDでフィルタリング（アクセス制御）
       .single() // 結果が1件であることを期待 (複数あればエラー、なければnull)
 
     if (error) {
-      console.error(`Error fetching memo with ID ${memoId}:`, error)
+      console.error(`Error fetching memo with ID ${memoId} for user ${user.id}:`, error)
       // findUnique or .single() でデータが見つからない場合も error オブジェクトは null ではないが、
       // data が null になるので、それで判定する
       if (error.code === 'PGRST116') { // PostgRESTのエラーコードで "Query returned no rows" を示す (要確認)
         return new Response(
-          JSON.stringify({ error: `Memo with ID ${memoId} not found` }),
+          JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
@@ -71,13 +91,15 @@ Deno.serve(async (req) => {
     
     if (!data) { // .single() でデータが見つからなかった場合
         return new Response(
-            JSON.stringify({ error: `Memo with ID ${memoId} not found` }),
+            JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
             { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
-  }
+    }
 
-  return new Response(
-    JSON.stringify(data),
+    console.log(`Found memo ${memoId} for user ${user.id}`)
+
+    return new Response(
+      JSON.stringify(data),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (e) {
@@ -85,7 +107,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ error: 'Internal Server Error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
+    )
   }
 })
 

@@ -26,10 +26,10 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // リクエストメソッドがPOSTであるか確認 (PUTからPOSTに変更)
+    // リクエストメソッドがPOSTであるか確認
     if (req.method !== 'POST') {
       return new Response(
-        JSON.stringify({ error: 'Method Not Allowed. Please use POST.' }), // エラーメッセージも調整
+        JSON.stringify({ error: 'Method Not Allowed. Please use POST.' }),
         { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -45,117 +45,70 @@ Deno.serve(async (req) => {
       )
     }
     
-    // create-memo と同様に Authorization ヘッダーからユーザー情報を取得することを想定
-    // もし不要であれば、この部分は削除またはコメントアウトし、supabaseクライアント初期化もシンプルにする
+    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
     const authHeader = req.headers.get('Authorization')
-    let createdBy = 'anonymous' // デフォルトは匿名
-    if (authHeader) {
-        // ここでJWTトークンをデコードしてユーザーIDなどを取得する処理を本来は入れる
-        // 今回は簡略化のため、Authorizationヘッダーがあれば 'authenticated_user' とする
-        // 実際の運用では、SupabaseのAuth機能と連携してユーザーを特定する
-        try {
-            // 例: const { data: { user } } = await supabase.auth.getUser(authHeader.replace('Bearer ', ''))
-            // if (user) createdBy = user.id;
-            // 簡単な例として、ヘッダーがあれば固定の文字列を設定
-             if (authHeader.startsWith('Bearer ')) { // 簡単なチェック
-                createdBy = 'authenticated_user_placeholder'; // 本来はトークンから取得
-             }
-        } catch (e) {
-            console.warn("Failed to parse Authorization header or get user:", e);
-            // トークンが無効でも処理を続ける場合もあるが、ここではエラーとせず匿名ユーザー扱いにする
-        }
-    }
-
-
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: authHeader ? { Authorization: authHeader } : {} },
     })
 
-    // URLからメモのIDを取得する代わりに、リクエストボディから取得する
-    // const url = new URL(req.url)
-    // const pathParts = url.pathname.split('/')
-    // const memoIdFromPath = pathParts[pathParts.length - 1] // 変数名変更
+    // JWTトークンからユーザー情報を取得
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Error getting user or user not authenticated:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-    // リクエストボディを先にパース
+    console.log('Authenticated user ID:', user.id)
+
+    // リクエストボディを解析
     let body;
     try {
-      const buffer = await req.arrayBuffer();
-      
-      // ★★★ デバッグログ追加: 受信したバイト列を16進数で表示 ★★★
-      let hexString = "";
-      const tempByteArrayView = new Uint8Array(buffer); // bufferをUint8Arrayとして見る
-      for (let i = 0; i < Math.min(tempByteArrayView.byteLength, 100); i++) { // 長すぎる場合があるので先頭100バイト程度に制限
-        hexString += tempByteArrayView[i].toString(16).padStart(2, '0') + " ";
-      }
-      console.log("Received raw bytes (hex, first 100 bytes):", hexString.toUpperCase().trim());
-      // ★★★ ここまで ★★★
-
-      const decoder = new TextDecoder('utf-8', { fatal: true });
-      let rawBody = "";
-      try {
-        rawBody = decoder.decode(buffer);   
-      } catch (decodeError) {
-        console.error("UTF-8 decoding failed:", decodeError);
-        return new Response(
-          JSON.stringify({ error: 'Failed to decode request body as UTF-8' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      console.log("Decoded rawBody:", rawBody);
-      body = JSON.parse(rawBody);
+      body = await req.json();
     } catch (e) {
       return new Response(
-        JSON.stringify({ error: 'Invalid JSON in request body or failed to read body' }), // エラーメッセージ調整
+        JSON.stringify({ error: 'Invalid JSON in request body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
     
-    const memoId = body.id; // ボディからIDを取得
+    const memoId = body.id;
     const titleToUpdate = body.title;
     const contentToUpdate = body.content;
-    const isImportantToUpdate = body.is_important; // is_important を追加
-
+    const isImportantToUpdate = body.is_important;
 
     if (!memoId) {
       return new Response(
-        JSON.stringify({ error: 'Memo ID is required in the request body' }), // エラーメッセージ変更
+        JSON.stringify({ error: 'Memo ID is required in the request body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // リクエストボディから更新データを取得
-    let updateData: { title?: string; content?: string; is_important?: boolean } = {}; // is_important の型を追加
-    // try { // このtry-catchは上でボディ全体をパースしているので不要かも
-      // const body = await req.json(); // 上でパース済みの body を使用
+    // 更新データを準備
+    let updateData: { title?: string; content?: string; is_important?: boolean } = {};
+    if (titleToUpdate !== undefined) updateData.title = titleToUpdate;
+    if (contentToUpdate !== undefined) updateData.content = contentToUpdate;
+    if (isImportantToUpdate !== undefined) updateData.is_important = isImportantToUpdate;
 
-      // 更新可能なフィールドを指定 (想定外のフィールドは無視)
-      if (titleToUpdate !== undefined) updateData.title = titleToUpdate;
-      if (contentToUpdate !== undefined) updateData.content = contentToUpdate;
-      if (isImportantToUpdate !== undefined) updateData.is_important = isImportantToUpdate; // is_important の更新処理を追加
-    // } catch (e) {
-    //   return new Response(
-    //     JSON.stringify({ error: 'Invalid JSON in request body' }),
-    //     { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    //   )
-    // }
-
-    // データベースのメモを更新
-    // .eq('created_by', createdBy) のような条件を追加すれば、作成者のみが更新できるように制限できる
-    // 今回は created_by のチェックは省略（誰でも更新可能）
+    // データベースのメモを更新（ユーザーIDでフィルタリング）
     const { data, error } = await supabase
       .from('memos')
       .update(updateData)
       .eq('id', memoId)
+      .eq('created_by', user.id) // ユーザーIDでフィルタリング（アクセス制御）
       .select() // 更新後のデータを返す
       .single(); // 更新対象が1件であることを期待
 
-    console.log(`Update attempt for ID ${memoId}:`, { updateDataSent: updateData, responseData: data, responseError: error });
+    console.log(`Update attempt for ID ${memoId} by user ${user.id}:`, { updateDataSent: updateData, responseData: data, responseError: error });
 
     if (error) {
-      console.error(`Error updating memo with ID ${memoId}:`, error)
-      if (error.code === 'PGRST116' || (error.details && error.details.includes("0 rows"))) { // "Query returned no rows" or similar
+      console.error(`Error updating memo with ID ${memoId} for user ${user.id}:`, error)
+      if (error.code === 'PGRST116' || (error.details && error.details.includes("0 rows"))) {
         return new Response(
-          JSON.stringify({ error: `Memo with ID ${memoId} not found or no changes made` }),
+          JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
           { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
@@ -165,15 +118,17 @@ Deno.serve(async (req) => {
       )
     }
     
-    if (!data) { // .single() でデータが見つからなかった場合 (通常はerrorで補足されるはずだが念のため)
+    if (!data) {
         return new Response(
-            JSON.stringify({ error: `Memo with ID ${memoId} not found after update attempt` }),
+            JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
             { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
-  }
+    }
 
-  return new Response(
-    JSON.stringify(data),
+    console.log(`Successfully updated memo ${memoId} for user ${user.id}`)
+
+    return new Response(
+      JSON.stringify(data),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (e) {
@@ -181,7 +136,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ error: 'Internal Server Error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
+    )
   }
 })
 
@@ -193,6 +148,6 @@ Deno.serve(async (req) => {
   curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/update-memo' \
     --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
     --header 'Content-Type: application/json' \
-    --data '{"name":"Functions"}'
+    --data '{"id":"memo-id","title":"Updated Title","content":"Updated Content"}'
 
 */

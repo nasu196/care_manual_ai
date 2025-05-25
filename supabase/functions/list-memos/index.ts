@@ -34,13 +34,32 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Supabaseクライアントの初期化 (Authorizationヘッダーはここでは不要なのでシンプルに)
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
+    const authHeader = req.headers.get('Authorization')
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {},
+      },
+    })
 
-    // memosテーブルから全てのデータを取得
+    // JWTトークンからユーザー情報を取得
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Error getting user or user not authenticated:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID:', user.id)
+
+    // ユーザーIDでフィルタリングしてmemosテーブルからデータを取得
     const { data, error } = await supabase
       .from('memos')
       .select('*')
+      .eq('created_by', user.id) // ユーザーIDでフィルタリング
       .order('created_at', { ascending: false }) // 作成日時の降順で取得 (新しいものが先頭)
 
     if (error) {
@@ -49,10 +68,12 @@ Deno.serve(async (req) => {
         JSON.stringify({ error: error.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
-  }
+    }
 
-  return new Response(
-    JSON.stringify(data),
+    console.log(`Found ${data?.length || 0} memos for user ${user.id}`)
+
+    return new Response(
+      JSON.stringify(data),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (e) {
@@ -60,7 +81,7 @@ Deno.serve(async (req) => {
     return new Response(
       JSON.stringify({ error: 'Internal Server Error' }),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-  )
+    )
   }
 })
 

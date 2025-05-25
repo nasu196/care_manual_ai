@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { useSupabaseClient } from '@/hooks/useSupabaseClient';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +46,7 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
+  const supabaseClient = useSupabaseClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -106,8 +107,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const fetchUploadedFiles = async () => {
     setLoadingFiles(true);
     try {
-      const { data, error } = await supabase
-        .from('manuals')
+      const { data, error } = await supabaseClient.from('manuals')
         .select('file_name, original_file_name')
         .order('file_name', { ascending: true });
 
@@ -212,7 +212,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
     try {
       const bucketName = 'manuals';
-      const { error: uploadError } = await supabase.storage
+      const { error: uploadError } = await supabaseClient.storage
         .from(bucketName)
         .upload(`${encodedFileName}`, file, {
           cacheControl: '3600',
@@ -383,7 +383,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     setMessageWithAutoHide({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
       // Step 1: Delete from Storage (エンコードされたファイル名を使用)
-      const { error: storageError } = await supabase.storage.from('manuals').remove([storageFileName]);
+      const { error: storageError } = await supabaseClient.storage.from('manuals').remove([storageFileName]);
 
       if (storageError) {
         console.error('Storage delete error:', storageError);
@@ -394,8 +394,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       console.log(`File「${storageFileName}」deleted from storage.`);
 
       // Step 2: Delete from manuals table (エンコードされたファイル名で検索)
-      const { error: tableError } = await supabase
-        .from('manuals')
+      const { error: tableError } = await supabaseClient.from('manuals')
         .delete()
         .eq('file_name', storageFileName);
 
@@ -469,8 +468,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     
     try {
       // Storageファイル名は変更せず、manualsテーブルのoriginal_file_nameのみ更新
-      const { error: updateError } = await supabase
-        .from('manuals')
+      const { error: updateError } = await supabaseClient.from('manuals')
         .update({ original_file_name: trimmedNewName })
         .eq('file_name', storageFileName);
         
@@ -514,8 +512,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       const storageFileName = targetFile.id; // エンコードされたファイル名
 
       // manualsテーブルからmanual_idを取得
-      const { data: manualData, error: manualError } = await supabase
-        .from('manuals')
+      const { data: manualData, error: manualError } = await supabaseClient.from('manuals')
         .select('id')
         .eq('file_name', storageFileName)
         .single();
@@ -527,8 +524,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
 
       // manual_chunksからテキストデータを取得
-      const { data: chunksData, error: chunksError } = await supabase
-        .from('manual_chunks')
+      const { data: chunksData, error: chunksError } = await supabaseClient.from('manual_chunks')
         .select('chunk_text, chunk_order')
         .eq('manual_id', manualData.id)
         .order('chunk_order', { ascending: true });

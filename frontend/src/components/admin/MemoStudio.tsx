@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { ArrowLeft, PlusCircle, Flag, Trash2, AlertTriangle, XCircle, Save, Loader2 } from 'lucide-react';
 import { useMemoStore } from '@/store/memoStore';
 import MemoTemplateSuggestions from '@/components/admin/MemoTemplateSuggestions';
-import { supabase } from '@/lib/supabaseClient';
+import { useSupabaseClient } from '@/hooks/useSupabaseClient';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { marked } from 'marked';
@@ -35,6 +35,7 @@ interface MemoStudioProps {
 }
 
 const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
+  const supabaseClient = useSupabaseClient();
   // ★ 編集権限を取得
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
   
@@ -100,7 +101,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setError(null);
     console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos...`); // ★ 呼び出し開始ログ
     try {
-      const { data, error: functionError } = await supabase.functions.invoke('list-memos');
+      const { data, error: functionError } = await supabaseClient.functions.invoke('list-memos');
       
       console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError }); // ★ 生レスポンスログ
 
@@ -168,7 +169,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setIsCreatingMemo(true);
     setCreateMemoError(null);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await supabaseClient.auth.getUser();
       let userId = user?.id;
 
       // 開発用にユーザーIDが取れない場合はダミーIDを使用 (本番では削除または適切な処理)
@@ -179,7 +180,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         throw new Error('ユーザーが認証されていません。ログインしてください。');
       }
 
-      const { error: createError } = await supabase.functions.invoke('create-memo', {
+      const { error: createError } = await supabaseClient.functions.invoke('create-memo', {
         body: { 
           title: newMemoTitle, 
           content: newMemoContent, // HTMLコンテンツを送信
@@ -223,7 +224,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
     try {
       // supabase.functions.invoke()を使用して他の関数と同じパターンにする
-      const { data, error: functionError } = await supabase.functions.invoke('delete-memo', {
+      const { data, error: functionError } = await supabaseClient.functions.invoke('delete-memo', {
         method: 'DELETE',
         body: { id: memoId } // ボディにIDを含める
       });
@@ -322,7 +323,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setUpdateMemoError(null);
 
     try {
-      const { data: updatedMemo, error: functionError } = await supabase.functions.invoke('update-memo', {
+      const { data: updatedMemo, error: functionError } = await supabaseClient.functions.invoke('update-memo', {
         body: {
           id: selectedMemoId,
           title: editingTitle,
@@ -381,7 +382,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     );
 
     try {
-      const { error: functionError } = await supabase.functions.invoke('update-memo', {
+      const { error: functionError } = await supabaseClient.functions.invoke('update-memo', {
         body: {
           id: memoId,
           is_important: newIsImportant,

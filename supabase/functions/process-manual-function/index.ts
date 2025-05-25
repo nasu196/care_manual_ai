@@ -506,6 +506,7 @@ async function processAndStoreDocuments(
     processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, any> }>, tmpFilePath: string } | null, 
     sourceFileName: string, 
     originalFileName: string | null,
+    userId: string, // ユーザーID追加
     supabaseClient: SupabaseClient,
     embeddingsClient: GoogleGenerativeAIEmbeddings,
     generativeAiClient: GoogleGenerativeAI // ★ 引数追加
@@ -542,8 +543,8 @@ async function processAndStoreDocuments(
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: queryBuilder.select('id') returned null/undefined.`);
         throw new Error("Failed to initialize select builder: queryBuilder.select('id') is null/undefined");
     }
-    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Initializing filterBuilder = selectBuilder.eq('file_name', sourceFileName)...`);
-    const filterBuilder = selectBuilder.eq('file_name', sourceFileName);
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Initializing filterBuilder = selectBuilder.eq('file_name', sourceFileName).eq('user_id', userId)...`);
+    const filterBuilder = selectBuilder.eq('file_name', sourceFileName).eq('user_id', userId);
     if (!filterBuilder) {
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: selectBuilder.eq('file_name', ...) returned null/undefined.`);
         throw new Error("Failed to initialize filter builder: selectBuilder.eq() is null/undefined");
@@ -616,6 +617,7 @@ async function processAndStoreDocuments(
         file_name: sourceFileName,
         original_file_name: originalFileName || sourceFileName, 
         storage_path: `${BUCKET_NAME}/${sourceFileName}`,
+        user_id: userId, // ユーザーIDを追加
         metadata: { 
           totalPages: totalPages,
           sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown'
@@ -800,6 +802,30 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         console.warn("GenerativeAI client is not initialized due to missing GEMINI_API_KEY. Summary generation will be skipped.");
     }
 
+    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
+    const authHeader = req.headers.get('Authorization')
+    if (authHeader) {
+      // Supabaseクライアントを認証ヘッダー付きで再初期化
+      supabase = createClient(supabaseUrl!, supabaseAnonKey!, {
+        global: {
+          headers: { Authorization: authHeader },
+        },
+      });
+    }
+
+    // JWTトークンからユーザー情報を取得
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Error getting user or user not authenticated:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID:', user.id)
+
     console.log(`\nリクエストボディの解析を開始: ${new Date().toISOString()}`);
     const body = await req.json();
     const { fileName, originalFileName } = body;
@@ -829,7 +855,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     }
     
     console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
-    const success = await processAndStoreDocuments(processedFile, receivedFileName, originalFileName, supabase, embeddings, genAI);
+    const success = await processAndStoreDocuments(processedFile, receivedFileName, originalFileName, user.id, supabase, embeddings, genAI);
 
     if (success) {
       console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);

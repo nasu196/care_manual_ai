@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
+import { useSupabaseClient } from '@/hooks/useSupabaseClient';
 import type { FunctionsError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -65,29 +65,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const removeGeneratingMemo = useMemoStore((state) => state.removeGeneratingMemo);
   const setIsAnyModalOpen = useMemoStore((state) => state.setIsAnyModalOpen);
 
-  useEffect(() => {
-    const checkAuthStatus = async () => {
-      try {
-        console.log('[AuthCheck onMount] Attempting to get user and session...');
-        const { data: { user }, error: userError } = await supabase.auth.getUser();
-        if (userError) {
-          console.error('[AuthCheck onMount] Error getting user:', userError);
-        } else {
-          console.log('[AuthCheck onMount] Current user:', user);
-        }
-
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        if (sessionError) {
-          console.error('[AuthCheck onMount] Error getting session:', sessionError);
-        } else {
-          console.log('[AuthCheck onMount] Current session:', session);
-        }
-      } catch (e) {
-        console.error('[AuthCheck onMount] Exception:', e);
-      }
-    };
-    checkAuthStatus();
-  }, []); // 空の依存配列でマウント時に一度だけ実行
+  const supabaseClient = useSupabaseClient();
 
   useEffect(() => {
     try {
@@ -146,7 +124,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     }
 
     try {
-      const { data: responseText, error: invokeError } = await supabase.functions.invoke<string>(
+      const { data: responseText, error: invokeError } = await supabaseClient.functions.invoke<string>(
         'suggest-next-actions',
         {
           method: 'POST',
@@ -251,7 +229,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSourceNames]); // 依存配列
+  }, [selectedSourceNames, supabaseClient]); // 依存配列
 
   // アイデアカードクリック時のハンドラ
   const handleSuggestionItemClick = (suggestion: Suggestion) => {
@@ -268,14 +246,14 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     // デバッグログ追加
     console.log(`[handleConfirmGenerateMemo Start] Attempting to get user and session before processing idea: ${selectedIdeaForModal.title}`);
     try {
-      const { data: { user: userInHandle }, error: userErrorInHandle } = await supabase.auth.getUser();
+      const { data: { user: userInHandle }, error: userErrorInHandle } = await supabaseClient.auth.getUser();
       if (userErrorInHandle) {
         console.error(`[handleConfirmGenerateMemo] Error getting user:`, userErrorInHandle);
       } else {
         console.log(`[handleConfirmGenerateMemo] Current user:`, userInHandle);
       }
 
-      const { data: { session: sessionInHandle }, error: sessionErrorInHandle } = await supabase.auth.getSession();
+      const { data: { session: sessionInHandle }, error: sessionErrorInHandle } = await supabaseClient.auth.getSession();
       if (sessionErrorInHandle) {
         console.error(`[handleConfirmGenerateMemo] Error getting session:`, sessionErrorInHandle);
       } else {
@@ -363,7 +341,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         console.log(`[${tempMemoId}] Getting user info for create-memo Edge Function.`);
         
         // 最初にセッションをリフレッシュ（Vercel環境での認証状態を確実にする）
-        const { error: refreshError } = await supabase.auth.refreshSession();
+        const { error: refreshError } = await supabaseClient.auth.refreshSession();
         if (refreshError) {
           console.warn(`[${tempMemoId}] Failed to refresh session:`, refreshError);
         }
@@ -373,7 +351,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         let userId: string | undefined;
         
         while (retryCount < 3 && !userId) {
-          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
           
           if (userError) {
             console.error(`[${tempMemoId}] Attempt ${retryCount + 1}: Error getting user:`, userError);
@@ -383,7 +361,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
               // 短い待機時間を入れてリトライ
               await new Promise(resolve => setTimeout(resolve, 1000));
               // 再度セッションをリフレッシュ
-              await supabase.auth.refreshSession();
+              await supabaseClient.auth.refreshSession();
             }
           } else {
             userId = user?.id;
@@ -402,7 +380,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           console.warn(`[${tempMemoId}] User ID not found after ${retryCount} attempts. Using anonymous user as fallback.`);
           
           // 最終的なセッション状態をログ出力
-          const { data: { session } } = await supabase.auth.getSession();
+          const { data: { session } } = await supabaseClient.auth.getSession();
           console.warn(`[${tempMemoId}] Session state (for debugging):`, { 
             hasSession: !!session,
             sessionUser: session?.user?.id,
@@ -416,7 +394,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }
 
         console.log(`[${tempMemoId}] Invoking create-memo Edge Function with userId: ${userId}`);
-        const { data: createdMemoData, error: invokeError } = await supabase.functions.invoke('create-memo', {
+        const { data: createdMemoData, error: invokeError } = await supabaseClient.functions.invoke('create-memo', {
             body: {
                 title: memoTitle,
                 content: generated_memo, // Markdownのまま

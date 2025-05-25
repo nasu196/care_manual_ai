@@ -32,11 +32,23 @@ serve(async (req: Request) => {
       },
     })
 
+    // JWTトークンからユーザー情報を取得
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    
+    if (userError || !user) {
+      console.error('Error getting user or user not authenticated:', userError)
+      return new Response(
+        JSON.stringify({ error: 'Authentication required' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    console.log('Authenticated user ID:', user.id)
+
     // リクエストボディからデータを取得
     const { 
       title, 
       content, 
-      created_by, 
       tags, 
       is_important,
       is_ai_generated,       // ★ 追加
@@ -51,14 +63,14 @@ serve(async (req: Request) => {
       )
     }
 
-    // memosテーブルにデータを挿入
+    // memosテーブルにデータを挿入（created_byは認証されたユーザーIDを自動設定）
     const { data, error } = await supabase
       .from('memos')
       .insert([
         {
           title: title,
           content: content,
-          created_by: created_by, // オプショナル
+          created_by: user.id, // 認証されたユーザーIDを自動設定
           tags: tags,             // オプショナル
           is_important: is_important === undefined ? false : is_important, // デフォルトはfalse
           is_ai_generated: is_ai_generated === undefined ? false : is_ai_generated, // ★ 追加 (デフォルトfalse)
@@ -76,7 +88,7 @@ serve(async (req: Request) => {
       })
     }
 
-    console.log('Memo created successfully:', data)
+    console.log('Memo created successfully for user:', user.id, data)
     return new Response(JSON.stringify({ memo: data ? data[0] : null }), {
       status: 201, // Created
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

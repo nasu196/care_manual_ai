@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Settings, Share2, UserCircle, Edit3, Eye } from 'lucide-react'; // Edit3とEyeを追加
+import { UserButton, SignInButton, useAuth } from '@clerk/nextjs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ interface TopHeaderProps {
 const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false); // ShareModal用のstate追加
+  const { isSignedIn } = useAuth();
 
   // ★ 編集権限を取得
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
@@ -106,10 +108,23 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
             </DropdownMenuContent>
           </DropdownMenu>
 
-          {/* TODO: ClerkのUserButtonに置き換える */}
-          <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
-            <UserCircle className="h-5 w-5" />
-          </div>
+          {/* Clerk認証に置き換え */}
+          {isSignedIn ? (
+            <UserButton 
+              appearance={{
+                elements: {
+                  userButtonAvatarBox: "h-8 w-8",
+                }
+              }}
+            />
+          ) : (
+            <SignInButton mode="modal">
+              <Button variant="ghost" size="sm" className="flex items-center space-x-1.5">
+                <UserCircle className="h-5 w-5" />
+                <span className="hidden sm:inline">ログイン</span>
+              </Button>
+            </SignInButton>
+          )}
         </div>
       </div>
       <FeedbackModal 
