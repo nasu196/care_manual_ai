@@ -46,7 +46,7 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
-  const supabaseClient = useSupabaseClient();
+  const { supabaseClient, isSupabaseReady } = useSupabaseClient();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -105,6 +105,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const fetchUploadedFiles = async () => {
+    if (!isSupabaseReady || !supabaseClient) { // 準備状態を確認
+      console.log("[fetchUploadedFiles] Supabase client not ready yet.");
+      setLoadingFiles(true); // クライアント準備中もローディング表示が良いか検討
+      return;
+    }
     setLoadingFiles(true);
     try {
       const { data, error } = await supabaseClient.from('manuals')
@@ -133,8 +138,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   useEffect(() => {
-    fetchUploadedFiles();
-  }, []); // 初回マウント時のみ実行
+    if (isSupabaseReady) { // isSupabaseReady が true になってから実行
+      fetchUploadedFiles();
+    }
+  }, [isSupabaseReady]); // isSupabaseReady の変更を監視
 
   // 選択状態を親コンポーネントと同期
   useEffect(() => {
@@ -162,6 +169,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const handleUpload = async (file: File) => {
+    if (!isSupabaseReady || !supabaseClient) { // 準備状態を確認
+      setMessageWithAutoHide({ type: 'error', text: 'アップロード機能の準備ができていません。少し待ってから再試行してください。' });
+      return;
+    }
     if (!file) {
       setMessageWithAutoHide({ type: 'error', text: 'アップロードするファイルを選択してください。' });
       return;
@@ -325,21 +336,13 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           removeFromUploadQueue(uploadId);
         }, 10000);
       }
-    } catch (err: unknown) {
-      console.error('Outer catch error during upload:', err);
-      let outerErrorMessage = 'アップロード処理中に予期せぬエラーが発生しました。';
-      if (err instanceof Error) {
-        outerErrorMessage = err.message;
-      }
+    } catch (e) {
+      console.error(`[${uploadId}] Error during actual file upload:`, e);
       updateUploadStatus(uploadId, {
         status: 'error',
-        error: outerErrorMessage,
-        message: `エラー: ${outerErrorMessage}`
+        error: `ファイルアップロード中に予期せぬエラー: ${e instanceof Error ? e.message : String(e)}`,
+        message: 'アップロードエラー'
       });
-      // ★ エラーの場合も10秒後にキューから削除
-      setTimeout(() => {
-        removeFromUploadQueue(uploadId);
-      }, 10000);
     }
   };
 

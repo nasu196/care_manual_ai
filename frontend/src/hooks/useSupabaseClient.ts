@@ -1,6 +1,7 @@
 import { useAuth } from '@clerk/nextjs';
-import { createBrowserClient, SupabaseClient } from '@supabase/ssr';
-import { useState, useEffect, useMemo } from 'react';
+// import { createBrowserClient, SupabaseClient } from '@supabase/ssr'; // SSR版をコメントアウト
+import { createClient, SupabaseClient } from '@supabase/supabase-js'; // 通常版をインポート
+import { useState, useEffect } from 'react';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -8,79 +9,60 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 export function useSupabaseClient() {
   const { getToken, userId, isSignedIn } = useAuth();
   // Supabaseクライアントのインスタンスを保持するstate
-  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
+  const [supabaseClient, setSupabaseClient] = useState<SupabaseClient | null>(null);
   // クライアントがClerkと同期済みかを示すフラグ
-  const [isSynced, setIsSynced] = useState(false);
-
-
-  // Supabaseクライアントインスタンスの作成 (一度だけ実行)
-  const memoizedSupabase = useMemo(() => {
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Supabase URL or Anon Key is missing');
-      // エラーをスローする代わりに null を返すか、あるいはエラーハンドリングを強化
-      return null; 
-    }
-    try {
-      return createBrowserClient(supabaseUrl, supabaseAnonKey);
-    } catch (error) {
-      console.error("Failed to create Supabase client:", error);
-      return null;
-    }
-  }, []); // 依存配列なしで初回のみ作成
-
+  const [isSupabaseReady, setIsSupabaseReady] = useState(false);
 
   useEffect(() => {
-    if (memoizedSupabase) {
-      if (isSignedIn && userId) {
-        // ユーザーがClerkで認証済みの場合
-        const setSupabaseSession = async () => {
-          try {
-            const token = await getToken({ template: 'supabase' });
-            if (token) {
-              // SupabaseクライアントにClerkのトークンでセッションを設定
-              // refresh_token はClerk側で管理されるため、ここではaccess_tokenのみ設定
-              const { error } = await memoizedSupabase.auth.setSession({
-                access_token: token,
-                refresh_token: '', // refresh_tokenはClerkが管理するので空
-              });
-              if (error) {
-                console.error('Supabase setSession error:', error);
-                setIsSynced(false);
-              } else {
-                console.log('Supabase session set with Clerk token for user:', userId);
-                setIsSynced(true);
-              }
-            } else {
-              console.warn('Clerk token not available for Supabase session.');
-              // トークンがない場合はセッションをクリアすることも検討
-              await memoizedSupabase.auth.signOut(); // Supabase側のセッションをクリア
-              setIsSynced(false);
-            }
-          } catch (e) {
-            console.error('Error setting Supabase session with Clerk token:', e);
-            setIsSynced(false);
-          }
-        };
-        setSupabaseSession();
-      } else {
-        // Clerkで未認証の場合、Supabaseのセッションもクリア
-        const clearSupabaseSession = async () => {
-          try {
-            await memoizedSupabase.auth.signOut();
-            console.log('Supabase session cleared due to Clerk sign out.');
-          } catch (e) {
-            console.error('Error clearing Supabase session:', e);
-          } finally {
-            setIsSynced(false); // 同期解除
-          }
-        };
-        clearSupabaseSession();
-      }
-      setSupabase(memoizedSupabase); // supabase stateを更新
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('[useSupabaseClient] Supabase URL or Anon Key is missing.');
+      setIsSupabaseReady(false);
+      setSupabaseClient(null);
+      return;
     }
-  }, [isSignedIn, userId, getToken, memoizedSupabase]); // Clerkの認証状態が変わったら再実行
 
-  // isSyncedがtrueになるまで、あるいはsupabaseクライアントがnullの場合はnullを返す
-  // これにより、呼び出し元はクライアントが準備できているかを確認できる
-  return { supabaseClient: supabase, isSupabaseReady: supabase && isSynced };
+    // `getToken` が利用可能になるまで待つために `getToken` も依存配列に含める
+    if (isSignedIn && typeof getToken === 'function') {
+      console.log('[useSupabaseClient] User is signed in and getToken is available. Creating Supabase client.');
+      try {
+        const client = createClient(supabaseUrl, supabaseAnonKey, {
+          global: {
+            fetch: async (url, options = {}) => {
+              // `getToken` が null や undefined でないことを確認してから呼び出す
+              if (typeof getToken !== 'function') {
+                console.error('[useSupabaseClient fetch] getToken is not a function.');
+                throw new Error('getToken is not available for Supabase request.');
+              }
+              const token = await getToken({ template: 'supabase' });
+              if (!token) {
+                console.warn('[useSupabaseClient fetch] Clerk token not available.');
+                throw new Error('Clerk token not available for Supabase request.');
+              }
+
+              const headers = new Headers(options.headers);
+              headers.set('Authorization', `Bearer ${token}`);
+
+              return fetch(url, {
+                ...options,
+                headers,
+              });
+            },
+          },
+        });
+        setSupabaseClient(client);
+        setIsSupabaseReady(true);
+        console.log('[useSupabaseClient] Supabase client created and ready.');
+      } catch (error) {
+        console.error('[useSupabaseClient] Error creating Supabase client:', error);
+        setIsSupabaseReady(false);
+        setSupabaseClient(null);
+      }
+    } else {
+      console.log('[useSupabaseClient] User not signed in or getToken is not ready. Clearing Supabase client.');
+      setSupabaseClient(null);
+      setIsSupabaseReady(false);
+    }
+  }, [isSignedIn, getToken]); // getToken の準備状態も監視
+
+  return { supabaseClient, userId, isSignedIn, isSupabaseReady };
 } 

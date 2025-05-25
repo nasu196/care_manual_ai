@@ -68,7 +68,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const setIsAnyModalOpen = useMemoStore((state) => state.setIsAnyModalOpen);
 
   const { supabaseClient, isSupabaseReady } = useSupabaseClient();
-  const { userId: clerkUserId, isSignedIn: isClerkSignedIn } = useAuth();
+  const { userId: clerkUserId, isSignedIn: isClerkSignedIn, getToken } = useAuth();
 
   useEffect(() => {
     try {
@@ -245,10 +245,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   // モーダルで「作成」が押されたときのハンドラ
   const handleConfirmGenerateMemo = useCallback(async (currentClerkUserId: string | null | undefined) => {
     if (!selectedIdeaForModal) return;
-    if (!isSupabaseReady || !supabaseClient) {
-      console.error("Supabase client is not ready. Cannot generate memo.");
-      setGenerateMemoError("メモ機能の準備ができていません。少し待ってから再試行してください。");
-      setIsGenerateMemoModalOpen(true); // モーダルを閉じずにエラー表示
+    if (!isSupabaseReady || !isClerkSignedIn || !supabaseClient) {
+      console.error("Supabase client or Clerk session is not ready. Cannot generate memo.");
+      setGenerateMemoError("メモ機能またはユーザー認証の準備ができていません。少し待ってから再試行してください。");
+      setIsGenerateMemoModalOpen(true);
       return;
     }
     if (!currentClerkUserId) {
@@ -257,18 +257,20 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       setIsGenerateMemoModalOpen(true);
       return;
     }
+    if (typeof getToken !== 'function') {
+      console.error("Clerk getToken is not available or not a function.");
+      setGenerateMemoError("認証情報を取得できませんでした。ページを再読み込みしてみてください。");
+      setIsGenerateMemoModalOpen(true);
+      return;
+    }
 
     setIsGenerateMemoModalOpen(false);
     setIsAnyModalOpen(false);
-    
     const tempMemoId = Date.now().toString();
     const memoTitle = selectedIdeaForModal.title;
-
     addGeneratingMemo({ id: tempMemoId, title: memoTitle, status: 'prompt_creating' });
-    
     const currentIdeaForProcessing = selectedIdeaForModal;
     setSelectedIdeaForModal(null);
-    
     console.log("Generating memo for:", memoTitle, "by user:", currentClerkUserId);
 
     try {
@@ -331,16 +333,17 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       // === Edge Function 'create-memo' を呼び出して保存 ===
       try {
         console.log(`[${tempMemoId}] Invoking create-memo Edge Function. Using Clerk User ID: ${currentClerkUserId}`);
+        console.log(`[${tempMemoId}] Value of currentClerkUserId JUST BEFORE invokeFunction:`, currentClerkUserId);
         
         const { data: createdMemoData, error: invokeError } = await invokeFunction(
           'create-memo',
           { // bodyの内容
             title: memoTitle,
-            content: generated_memo, 
-            is_ai_generated: true,
-            ai_generation_sources: sources,
+            content: generated_memo,
+            sources: sources,
           },
-          currentClerkUserId // ClerkのユーザーIDを渡す
+          getToken,
+          currentClerkUserId
         );
 
         if (invokeError) {
@@ -381,12 +384,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       const errorMessage = err instanceof Error ? err.message : 'メモの生成または自動保存中に不明なエラーが発生しました。';
       updateGeneratingMemoStatus(tempMemoId, 'error', errorMessage);
       
-      // エラー発生時に5秒後に自動的にメモ項目を削除
       setTimeout(() => {
         removeGeneratingMemo(tempMemoId);
       }, 5000);
     }
-  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, clerkUserId, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, setIsAnyModalOpen, setGenerateMemoError]);
+  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, isClerkSignedIn, clerkUserId, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, setIsAnyModalOpen, setGenerateMemoError]);
 
   const containerVariants = {
     hidden: { opacity: 0 },

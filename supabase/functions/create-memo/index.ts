@@ -11,6 +11,7 @@ serve(async (req: Request) => {
   }
 
   try {
+    console.log('Received request headers for create-memo:', JSON.stringify(Object.fromEntries(req.headers.entries())));
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
 
@@ -61,7 +62,20 @@ serve(async (req: Request) => {
     console.log('Authenticated user ID from Clerk JWT:', userId)
 
     // リクエストボディを取得
-    const { title, content, sources } = await req.json()
+    let rawBody;
+    try {
+      rawBody = await req.text();
+      console.log('Raw request body for create-memo:', rawBody);
+    } catch (textError) {
+      console.error('Error reading request body as text:', textError);
+      const errorMessage = textError instanceof Error ? textError.message : 'Unknown error during req.text()';
+      return new Response(
+        JSON.stringify({ error: 'Failed to read request body', details: errorMessage }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { title, content, sources } = JSON.parse(rawBody);
 
     if (!title || !content) {
       return new Response(
