@@ -75,8 +75,7 @@ serve(async (req: Request) => {
       );
     }
 
-    // const { title, content, sources } = JSON.parse(rawBody); // 元の行をコメントアウト
-    const { title, content, sources } = JSON.parse('{"title":"test title from fixed string","content":"test content from fixed string","sources":[]}'); // 固定値でテスト
+    const { title, content, sources } = JSON.parse(rawBody); // 固定値テストを元に戻す
 
     if (!title || !content) {
       return new Response(
@@ -94,7 +93,7 @@ serve(async (req: Request) => {
       .insert({
         title,
         content,
-        sources: sources || [],
+        ai_generation_sources: sources || [], // カラム名を修正
         created_by: userId // ClerkのユーザーIDを設定
       })
       .select()
