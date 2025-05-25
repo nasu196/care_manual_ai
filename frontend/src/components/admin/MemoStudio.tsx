@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { marked } from 'marked';
 import ReactMarkdown from 'react-markdown';
 import { AIGeneratedMemoSource } from '@/components/admin/MemoTemplateSuggestions';
+import rehypeRaw from 'rehype-raw'; // HTML を安全に解釈するためのプラグイン
 
 // メモの型定義 (仮。実際のEdge Functionの返り値に合わせる)
 interface Memo {
@@ -64,8 +65,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const [isUpdatingMemo, setIsUpdatingMemo] = useState<boolean>(false); // 保存中のローディング
   const [updateMemoError, setUpdateMemoError] = useState<string | null>(null); // 保存エラー
 
-  // 重要度トグル用のstate
-  // const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null); // 未使用のためコメントアウト
+  // 重要度トグル用のstate (トグル中のメモIDを保持してスピナーを表示)
+  const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null);
   const [toggleImportantError, setToggleImportantError] = useState<string | null>(null);
 
   // Zustandストアから状態とアクションを取得
@@ -210,7 +211,10 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     try {
       const { error: deleteErr } = await invokeFunction(
           'delete-memo', 
-          { method: 'POST', body: { id: memoIdToDelete } }, // Supabase FunctionはPOSTでidを受け取る想定
+          { 
+            method: 'DELETE',
+            itemId: memoIdToDelete
+          }, 
           getToken, 
           userId
       );
@@ -363,8 +367,12 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   }, [selectedMemoId, editingTitle, editingContent, getToken, userId, isSignedIn, fetchMemos, setIsUpdatingMemo, setUpdateMemoError]);
 
   const handleToggleImportant = useCallback(async (memoIdToToggle: string, newIsImportant: boolean) => {
+    // トグル処理中のメモIDを設定（UIでスピナー表示用）
+    setTogglingImportantId(memoIdToToggle);
+
     if (!isSignedIn || !userId || !getToken) {
         setToggleImportantError('User not authenticated or auth functions not ready.');
+        setTogglingImportantId(null);
         return;
     }
     // 元のメモの状態を保存 (ロールバック用)
@@ -401,6 +409,10 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         errorMessage = e.message;
       }
       setToggleImportantError(errorMessage);
+    }
+    finally {
+      // トグル処理完了
+      setTogglingImportantId(null);
     }
   }, [getToken, userId, isSignedIn, setMemos, setToggleImportantError]);
 
@@ -573,7 +585,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                     selectedMemo.is_important ? 'border-red-200 bg-red-50/30' : ''
                   }`}
                 >
-                  <ReactMarkdown>{selectedMemo.content}</ReactMarkdown>
+                  {/* HTML タグを含む Markdown を正しくレンダリングするため rehypeRaw を追加 */}
+                  <ReactMarkdown rehypePlugins={[rehypeRaw]}>{selectedMemo.content}</ReactMarkdown>
                 </div>
               </div>
             )
@@ -730,19 +743,23 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                                 <span>{memo.statusText}</span>
                               </div>
                             ) : (
-                              <p className="truncate flex-1 mr-2">
-                                {memo.content
-                                  .replace(/#+\s/g, '')          // ヘッダー記号を除去
-                                  .replace(/\*\*(.*?)\*\*/g, '$1') // ボールドの**を除去
-                                  .replace(/\*(.*?)\*/g, '$1')     // イタリックの*を除去
-                                  .replace(/`(.*?)`/g, '$1')       // インラインコードの`を除去
-                                  .replace(/\[(.*?)\]\(.*?\)/g, '$1') // リンクからテキスト部分のみ抽出
-                                  .replace(/\n/g, ' ')             // 改行をスペースに変換
-                                  .replace(/\s+/g, ' ')            // 連続するスペースを1つに
-                                  .trim()
-                                  .substring(0, 60)}
-                                {memo.content.length > 60 && '...'}
-                              </p>
+                              <div className="truncate flex-1 mr-2">
+                                {/* HTMLタグを解釈して表示するためにReactMarkdownとrehypeRawを使用 */}
+                                <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                                  {memo.content
+                                    // .replace(/#+\s/g, '')          // ヘッダー記号を除去 (Markdown前提の処理のため一旦コメントアウト)
+                                    // .replace(/\*\*(.*?)\*\*/g, '$1') // ボールドの**を除去
+                                    // .replace(/\*(.*?)\*/g, '$1')     // イタリックの*を除去
+                                    // .replace(/`(.*?)`/g, '$1')       // インラインコードの`を除去
+                                    // .replace(/\[(.*?)\]\(.*?\)/g, '$1') // リンクからテキスト部分のみ抽出
+                                    // .replace(/\n/g, ' ')             // 改行をスペースに変換
+                                    // .replace(/\s+/g, ' ')            // 連続するスペースを1つに
+                                    // .trim() // trimはReactMarkdownの外で行うか、スタイルで制御
+                                    .substring(0, 150) // 表示文字数を調整 (タグを含むので多めに)
+                                  }
+                                </ReactMarkdown>
+                                {memo.content.length > 150 && '...'}
+                              </div>
                             )}
                             <span className="flex-shrink-0">
                               {new Date(memo.updated_at).toLocaleDateString('ja-JP', {

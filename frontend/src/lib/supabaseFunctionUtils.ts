@@ -1,4 +1,4 @@
-import { createBrowserClient } from '@supabase/ssr';
+// import removed: createBrowserClient is no longer needed
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -6,7 +6,8 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 interface InvokeFunctionOptions {
   method?: 'POST' | 'GET' | 'PUT' | 'DELETE' | 'PATCH';
   headers?: Record<string, string>;
-  body?: any;
+  body?: Record<string, unknown> | undefined;
+  itemId?: string; // DELETE や特定のGETのためにIDを渡すためのオプション
 }
 
 export async function invokeFunction(
@@ -25,7 +26,7 @@ export async function invokeFunction(
     return { data: null, error: { message: 'User not authenticated properly.' } };
   }
 
-  const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey); // 呼び出しの都度クライアントを生成
+  // Edge Function呼び出し時に使用するClerkトークン
   let token: string | null = null;
 
   try {
@@ -40,24 +41,39 @@ export async function invokeFunction(
     return { data: null, error: { message: 'Authentication token is missing.' } };
   }
 
-  const headers = {
-    ...options.headers,
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-    'x-user-id': userId,
-  };
-
   try {
-    console.log(`[invokeFunction] Calling ${functionName} with token and userId: ${userId}`);
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      ...options,
-      headers,
+    console.log(`[invokeFunction] Calling ${functionName} with method ${options.method || 'POST'}, token and userId: ${userId}`);
+    console.log('[invokeFunction] Body to be sent (before stringify):', options.body);
+
+    let endpoint = `${supabaseUrl}/functions/v1/${functionName}`;
+    if (options.method === 'DELETE' && options.itemId) {
+      endpoint = `${endpoint}/${options.itemId}`;
+    }
+
+    // Edge Function エンドポイントを直接呼び出す
+    const response = await fetch(endpoint, {
+      method: options.method || 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'apikey': supabaseAnonKey,
+        ...( (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH') && options.body 
+            ? { 'Content-Type': 'application/json' } 
+            : {}),
+        'x-user-id': userId,
+        ...(options.headers || {}),
+      },
+      body: (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH') && options.body 
+            ? JSON.stringify(options.body) 
+            : undefined,
     });
 
-    if (error) {
-      console.error(`[invokeFunction] Error from ${functionName}:`, error);
-      return { data: null, error };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[invokeFunction] Error response from ${functionName}:`, errorText);
+      return { data: null, error: { message: errorText, status: response.status } };
     }
+
+    const data = await response.json();
     console.log(`[invokeFunction] Success from ${functionName}:`, data);
     return { data, error: null };
   } catch (e) {

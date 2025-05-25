@@ -47,6 +47,7 @@ Deno.serve(async (req) => {
     
     // Authorizationヘッダーを取得してSupabaseクライアントに渡す
     const authHeader = req.headers.get('Authorization')
+    console.log('[update-memo] Received Authorization Header:', authHeader);
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         global: { headers: authHeader ? { Authorization: authHeader } : {} },
     })
