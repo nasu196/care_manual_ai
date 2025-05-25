@@ -22,6 +22,14 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  // POSTメソッドのみを受け付ける
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed. Use POST.' }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   try {
     console.log('Request received:', req.method, req.url);
     console.log('Request headers:', JSON.stringify(Object.fromEntries(req.headers.entries())));

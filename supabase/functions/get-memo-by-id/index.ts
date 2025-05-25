@@ -19,6 +19,14 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
+  // POSTメソッドのみを受け付ける
+  if (req.method !== 'POST') {
+    return new Response(
+      JSON.stringify({ error: 'Method not allowed. Use POST.' }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
@@ -31,72 +39,74 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
+    // Authorizationヘッダーを取得
     const authHeader = req.headers.get('Authorization')
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: authHeader ? { Authorization: authHeader } : {},
-      },
-    })
-
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
     
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
+    if (!authHeader) {
       return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
+        JSON.stringify({ error: 'No Authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log('Authenticated user ID:', user.id)
+    // JWTトークンをデコードして直接ユーザー情報を取得
+    const token = authHeader.replace('Bearer ', '')
+    const parts = token.split('.')
+    
+    if (parts.length !== 3) {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JWT format' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-    // URLからメモのIDを取得
-    // 例: /functions/v1/get-memo-by-id/your-memo-id
-    const url = new URL(req.url)
-    const pathParts = url.pathname.split('/')
-    const memoId = pathParts[pathParts.length - 1] // パスの最後の部分をIDとして取得
+    // JWTペイロードをデコード
+    const payload = JSON.parse(atob(parts[1]))
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
+    
+    if (!userId) {
+      console.error('No user ID found in JWT payload')
+      return new Response(
+        JSON.stringify({ error: 'User ID not found in token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
-    if (!memoId) {
+    // リクエストボディからメモIDを取得
+    const { id } = await req.json()
+
+    if (!id) {
       return new Response(
         JSON.stringify({ error: 'Memo ID is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    // memosテーブルから指定されたIDのデータを取得（ユーザーIDでフィルタリング）
+    // Supabaseクライアントを作成
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+    // メモを取得（ユーザーIDでフィルタリング）
     const { data, error } = await supabase
       .from('memos')
       .select('*')
-      .eq('id', memoId) // 'id' カラムが memoId と一致するものを検索
-      .eq('created_by', user.id) // ユーザーIDでフィルタリング（アクセス制御）
-      .single() // 結果が1件であることを期待 (複数あればエラー、なければnull)
+      .eq('id', id)
+      .eq('created_by', userId) // ユーザーIDでフィルタリング
+      .single()
 
     if (error) {
-      console.error(`Error fetching memo with ID ${memoId} for user ${user.id}:`, error)
-      // findUnique or .single() でデータが見つからない場合も error オブジェクトは null ではないが、
-      // data が null になるので、それで判定する
-      if (error.code === 'PGRST116') { // PostgRESTのエラーコードで "Query returned no rows" を示す (要確認)
-        return new Response(
-          JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
-          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-      }
+      console.error('Error fetching memo:', error)
       return new Response(
         JSON.stringify({ error: error.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
-    
-    if (!data) { // .single() でデータが見つからなかった場合
-        return new Response(
-            JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
-            { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-    }
 
-    console.log(`Found memo ${memoId} for user ${user.id}`)
+    if (!data) {
+      return new Response(
+        JSON.stringify({ error: 'Memo not found' }),
+        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
 
     return new Response(
       JSON.stringify(data),
