@@ -75,7 +75,8 @@ serve(async (req: Request) => {
       );
     }
 
-    const { title, content, sources } = JSON.parse(rawBody);
+    // const { title, content, sources } = JSON.parse(rawBody); // 元の行をコメントアウト
+    const { title, content, sources } = JSON.parse('{"title":"test title from fixed string","content":"test content from fixed string","sources":[]}'); // 固定値でテスト
 
     if (!title || !content) {
       return new Response(

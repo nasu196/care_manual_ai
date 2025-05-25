@@ -65,7 +65,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const [updateMemoError, setUpdateMemoError] = useState<string | null>(null); // 保存エラー
 
   // 重要度トグル用のstate
-  const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null);
+  // const [togglingImportantId, setTogglingImportantId] = useState<string | null>(null); // 未使用のためコメントアウト
   const [toggleImportantError, setToggleImportantError] = useState<string | null>(null);
 
   // Zustandストアから状態とアクションを取得
@@ -176,6 +176,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       content: newMemoContent,
       // created_by はEdge Function側でx-user-idヘッダーから取得・設定する想定
     };
+    console.log('[handleCreateMemo] memoData to be sent:', JSON.stringify(memoData)); // ログ追加
     const { data: newMemo, error: createError } = await invokeFunction(
       'create-memo', 
       { method: 'POST', body: memoData }, 
@@ -186,6 +187,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     if (createError) {
       throw createError;
     }
+
+    console.log('[handleCreateMemo] Memo created successfully by Edge Function:', newMemo); // newMemo を使用
 
     setNewMemoTitle('');
     setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
