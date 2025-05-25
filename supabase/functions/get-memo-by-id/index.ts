@@ -19,10 +19,10 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders })
   }
 
-  // POSTメソッドのみを受け付ける
-  if (req.method !== 'POST') {
+  // GETメソッドのみを受け付けるように変更
+  if (req.method !== 'GET') {
     return new Response(
-      JSON.stringify({ error: 'Method not allowed. Use POST.' }),
+      JSON.stringify({ error: 'Method not allowed. Use GET.' }),
       { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
@@ -72,12 +72,14 @@ Deno.serve(async (req) => {
       )
     }
 
-    // リクエストボディからメモIDを取得
-    const { id } = await req.json()
+    // URLパスからメモIDを取得
+    const url = new URL(req.url);
+    const pathParts = url.pathname.split('/');
+    const memoId = pathParts[pathParts.length - 1];
 
-    if (!id) {
+    if (!memoId || memoId === 'get-memo-by-id') {
       return new Response(
-        JSON.stringify({ error: 'Memo ID is required' }),
+        JSON.stringify({ error: 'Memo ID is required in the URL path (e.g., /functions/v1/get-memo-by-id/{id})' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -89,8 +91,8 @@ Deno.serve(async (req) => {
     const { data, error } = await supabase
       .from('memos')
       .select('*')
-      .eq('id', id)
-      .eq('created_by', userId) // ユーザーIDでフィルタリング
+      .eq('id', memoId)
+      .eq('created_by', userId)
       .single()
 
     if (error) {
@@ -126,9 +128,8 @@ Deno.serve(async (req) => {
   1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
   2. Make an HTTP request:
 
-  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/get-memo-by-id' \
+  curl -i --location --request GET 'http://127.0.0.1:54321/functions/v1/get-memo-by-id/{your_memo_id}' \
     --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
-    --header 'Content-Type: application/json' \
-    --data '{"name":"Functions"}'
+    --header 'Content-Type: application/json'
 
 */

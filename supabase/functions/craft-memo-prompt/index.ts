@@ -78,11 +78,63 @@ MemoWriterLLMへの指示プロンプトの最後には、必ず以下の区切�
 serve(async (req: Request) => {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*', // すべてのオリジンを許可 (開発用)
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-user-id',
   };
 
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
+  }
+
+  let userId: string | null = null;
+  try {
+    const authHeader = req.headers.get('Authorization');
+    console.log('[craft-memo-prompt][Auth] Authorization Header:', authHeader);
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('[craft-memo-prompt][Auth] Missing or invalid Authorization header.');
+      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header. Clerk JWT Bearer token is required.' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.error('[craft-memo-prompt][Auth] Invalid JWT format.');
+      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const payload = JSON.parse(atob(parts[1]));
+    console.log('[craft-memo-prompt][Auth] Decoded Clerk JWT Payload:', payload);
+
+    userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+
+    if (!userId) {
+      console.error('[craft-memo-prompt][Auth] User ID (sub) not found in Clerk JWT payload.');
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    console.log(`[craft-memo-prompt][Auth] Authenticated user ID from Clerk JWT: ${userId}`);
+
+    const xUserIdHeader = req.headers.get('x-user-id');
+    if (xUserIdHeader) {
+        console.log('[craft-memo-prompt][Auth] x-user-id header:', xUserIdHeader);
+        if (userId !== xUserIdHeader) {
+            console.warn(`[craft-memo-prompt][Auth] Mismatch JWT user ID (${userId}) vs x-user-id header (${xUserIdHeader})`);
+        }
+    }
+
+  } catch (error) {
+    console.error('[craft-memo-prompt][Auth] Error processing Authorization token:', error);
+    return new Response(JSON.stringify({ error: 'Failed to process Authorization token.' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   try {

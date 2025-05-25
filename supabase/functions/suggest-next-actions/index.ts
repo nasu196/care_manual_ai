@@ -1,5 +1,5 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { serve, ConnInfo } from 'https://deno.land/std@0.177.0/http/server.ts'
 import { corsHeaders } from '../_shared/cors.ts'
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai";
@@ -9,96 +9,147 @@ console.log('Suggest next actions function up and running!')
 
 // SupabaseクライアントとGemini APIクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
-const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"); // SERVICE_ROLE_KEY を使用
+const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
 
-let supabase: SupabaseClient;
-if (supabaseUrl && supabaseServiceKey) {
-    supabase = createClient(supabaseUrl, supabaseServiceKey, {
-        auth: {
-            // SERVICE_ROLE_KEY を使用する場合、autoRefreshToken と persistSession は false に設定することが推奨されます。
-            // 詳細: https://supabase.com/docs/reference/javascript/initializing#with-service-role-key
-            autoRefreshToken: false,
-            persistSession: false,
-            detectSessionInUrl: false
-        }
-    });
+// Supabase クライアントと Gemini クライアントの初期化は serve 関数の外部で行い、エラーは起動時にコンソールに出力
+let supabase: SupabaseClient | null = null;
+if (supabaseUrl && supabaseAnonKey) {
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  } catch (e) {
+    console.error("Supabaseクライアント初期化中にエラー発生:", e);
+    // supabase は null のままになる
+  }
 } else {
-    console.error("エラー: SUPABASE_URL または SUPABASE_SERVICE_ROLE_KEY が環境変数に設定されていません。");
+  console.error("初期化エラー: SUPABASE_URL または SUPABASE_ANON_KEY が未設定です。起動に失敗する可能性があります。");
 }
 
-let genAI: GoogleGenerativeAI;
+let genAI: GoogleGenerativeAI | null = null;
 if (geminiApiKey) {
+  try {
     genAI = new GoogleGenerativeAI(geminiApiKey);
+  } catch (e) {
+    console.error("Gemini APIクライアント初期化中にエラー発生:", e);
+    // genAI は null のままになる
+  }
 } else {
-    console.error("エラー: GEMINI_API_KEY が環境変数に設定されていません。");
+  console.error("初期化エラー: GEMINI_API_KEY が未設定です。起動に失敗する可能性があります。");
 }
 
 interface Suggestion {
     title: string;
     description: string;
+    source_files?: string[]; // APIのレスポンス形式に合わせる
 }
 
-serve(async (req: Request) => {
+serve(async (req: Request, connInfo: ConnInfo): Promise<Response> => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
 
     if (!supabase || !genAI) {
-        return new Response(JSON.stringify({ error: "サーバー初期化エラー。環境変数を確認してください。" }), {
+        console.error("サーバー致命的エラー: Supabase または Gemini クライアントが初期化されていません。起動時のログを確認してください。");
+        return new Response(JSON.stringify({ error: "サーバー内部エラー。構成に問題があります。" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
         });
     }
 
+    let userId: string | null = null;
     try {
-        // リクエストボディから selectedFileNames を取得
+        const authHeader = req.headers.get('Authorization');
+        console.log('[suggest-next-actions][Auth] Authorization Header:', authHeader);
+
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            console.error('[suggest-next-actions][Auth] Missing or invalid Authorization header.');
+            return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header. Clerk JWT Bearer token is required.' }), {
+                status: 401,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
+
+        const token = authHeader.replace('Bearer ', '');
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+            console.error('[suggest-next-actions][Auth] Invalid JWT format.');
+            return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+                status: 401,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
+        const payload = JSON.parse(atob(parts[1]));
+        console.log('[suggest-next-actions][Auth] Decoded Clerk JWT Payload:', payload);
+
+        userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+
+        if (!userId) {
+            console.error('[suggest-next-actions][Auth] User ID (sub) not found in Clerk JWT payload.');
+            return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
+                status: 401,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            });
+        }
+        console.log(`[suggest-next-actions][Auth] Authenticated user ID from Clerk JWT: ${userId}`);
+        
+        const xUserIdHeader = req.headers.get('x-user-id');
+        if (xUserIdHeader) {
+            console.log('[suggest-next-actions][Auth] x-user-id header:', xUserIdHeader);
+            if (userId !== xUserIdHeader) {
+                console.warn(`[suggest-next-actions][Auth] Mismatch JWT user ID (${userId}) vs x-user-id header (${xUserIdHeader})`);
+            }
+        }
+
+    } catch (error) {
+        console.error('[suggest-next-actions][Auth] Error processing Authorization token:', error);
+        return new Response(JSON.stringify({ error: 'Failed to process Authorization token.' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+    }
+
+    try {
         const body = await req.json();
         const selectedFileNames = body?.selectedFileNames as string[] | undefined;
-
         console.log("Received selectedFileNames:", selectedFileNames);
 
-        // selectedFileNames が指定されていない、または空の場合は、AI処理を行わず空の提案を返す
         if (!selectedFileNames || selectedFileNames.length === 0) {
-            console.log("No specific files selected, or selectedFileNames is empty. Returning empty suggestions.");
-            // フロントエンドは ```json ... ``` マーカーで囲まれたテキストを期待するので、それに合わせる
+            console.log("No specific files selected. Returning empty suggestions.");
             return new Response("```json\n[]\n```", {
-                headers: { ...corsHeaders, 'Content-Type': 'text/plain' }, // text/plainで返す
+                headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
                 status: 200,
             });
         }
 
-        console.log("Fetching summaries for selected files from 'manuals' table...");
+        console.log("Fetching summaries for selected files from 'manuals' table for user:", userId);
         let query = supabase
             .from('manuals')
             .select('file_name, original_file_name, summary')
+            .eq('created_by', userId)
             .not('summary', 'is', null)
             .filter('summary', 'not.eq', '');
         
-        // selectedFileNames があれば、original_file_name でフィルタリング（日本語ファイル名対応）
         query = query.in('original_file_name', selectedFileNames);
         
         const { data: summariesData, error: fetchError } = await query;
 
         if (fetchError) {
-            console.error("Error fetching summaries:", fetchError);
+            console.error("Error fetching summaries for user " + userId + ":", fetchError);
             throw new Error(`Failed to fetch summaries: ${fetchError.message}`);
         }
 
         if (!summariesData || summariesData.length === 0) {
-            console.log("No summaries found in the database.");
+            console.log("No summaries found for user " + userId + " with selected files.");
             return new Response(JSON.stringify({ suggestions: [], message: "提案の元となるサマリーがありません。" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-                status: 200, // エラーではなく、提案がない状態として200を返す
+                status: 200,
             });
         }
 
-        console.log(`Found ${summariesData.length} summaries.`);
+        console.log(`Found ${summariesData.length} summaries for user ${userId}.`);
 
-        // formattedSummaries の生成方法を修正 (リンターエラー対策)
         let summaryStrings: string[] = [];
         for (const item of summariesData) {
-            // 変更: original_file_name を使用し、AIが認識しやすい形式でサマリーに含める
             const displayName = item.original_file_name || item.file_name;
             summaryStrings.push(`ドキュメント名: ${displayName}\n内容サマリー:\n${item.summary}`);
         }
@@ -140,36 +191,29 @@ ${formattedSummaries}
 \`\`\`
 `;
 
-        console.log("Prompt for Gemini API:\n ", prompt);
+        console.log("Prompt for Gemini API (user: " + userId + "):\n ", prompt);
 
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash",
-            // 安全設定は必要に応じて調整
+            model: "gemini-1.5-flash-preview-0514",
             safetySettings: [
                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
             ],
-            generationConfig: {
-                // JSONモードが利用可能であれば、それを指定することで、より確実にJSON形式の出力を得られる
-                // responseMimeType: "application/json", // Gemini 1.5 Pro/Flashの最新版でサポートされているか確認が必要
-            }
         });
 
         console.log("Calling Gemini API...");
         const result = await model.generateContent(prompt);
         const responseText = result.response.text();
 
-        console.log("Raw response from Gemini API:\n ", responseText); // 生のレスポンスをログに出力
-
-        // Geminiからのレスポンスをそのままテキストとして返す
+        console.log("Raw response from Gemini API (user: " + userId + "):\n ", responseText);
         return new Response(responseText, {
-            headers: { ...corsHeaders, 'Content-Type': 'text/plain' }, // Content-Type を text/plain に変更
+            headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
             status: 200,
         });
     } catch (error: any) {
-        console.error("Error in suggest-next-actions function:", error);
+        console.error(`Error in suggest-next-actions function for user ${userId || 'unknown'}:`, error);
         return new Response(JSON.stringify({ error: error.message || "不明なサーバーエラーが発生しました。" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,

@@ -507,18 +507,18 @@ async function processAndStoreDocuments(
     processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, any> }>, tmpFilePath: string } | null, 
     sourceFileName: string, 
     originalFileName: string | null,
-    userId: string, // ユーザーID追加
+    userId: string,
     supabaseClient: SupabaseClient,
     embeddingsClient: GoogleGenerativeAIEmbeddings,
-    generativeAiClient: GoogleGenerativeAI // ★ 引数追加
-) {
+    generativeAiClient: GoogleGenerativeAI
+): Promise<{ manualId: string; summary: string | null; chunksCount: number } | null> {
   console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Start`); // ★ タイムスタンプ追加
   if (!supabaseClient) throw new Error("Supabase client not initialized");
   if (!embeddingsClient) throw new Error("Embeddings client not initialized");
   
   if (!processedFile || !processedFile.docs || processedFile.docs.length === 0) {
-    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] No parsed documents, skipping.`); // ★ タイムスタンプ追加
-    return false;
+    console.warn(`[ProcessStore] ドキュメントが空または処理されていません: ${sourceFileName}`);
+    return null; // ★ 失敗時はnullを返す
   }
   const parsedDocs = processedFile.docs;
   console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Processing file: ${sourceFileName}, original: ${originalFileName || 'N/A'}, Parsed doc count: ${parsedDocs.length}`); // ★ タイムスタンプ追加
@@ -685,7 +685,7 @@ async function processAndStoreDocuments(
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Total chunks created: ${chunks.length}`); // ★ タイムスタンプ追加
     if (chunks.length === 0) {
         console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] No chunks generated, finishing process.`); // ★ タイムスタンプ追加
-        return true;
+        return null;
     }
 
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Embedding chunks...`); // ★ タイムスタンプ追加
@@ -753,197 +753,246 @@ async function processAndStoreDocuments(
     }
     
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully completed.`); // ★ タイムスタンプ追加
-    return true;
+    return { manualId, summary: summaryText, chunksCount: chunksToInsert.length }; // ★ 成功時の返り値
   } catch (error) {
     console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ タイムスタンプ追加
     if (error instanceof Error) {
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error details:`, error.stack || error.message); // ★ タイムスタンプ追加
     }
-    return false;
+    return null; // ★ エラー時はnullを返す
   }
 }
 
 // Deno ネイティブ HTTP サーバーハンドラ
 async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { // _connInfo は現時点では未使用
-  const requestPathname = new URL(req.url).pathname; // Pathnameを先に取得
-  console.log(`Request received: Method=${req.method}, URL=${req.url}, Pathname=${requestPathname}`);
-
-  // OPTIONSリクエストの処理 (CORSプリフライト)
+  console.log('process-manual-function called');
   if (req.method === 'OPTIONS') {
+    console.log('OPTIONS request received, sending CORS headers');
     return new Response('ok', { headers: corsHeaders });
   }
+  console.log('Request Headers:', Object.fromEntries(req.headers.entries()));
 
-  let tmpFilePathToDelete: string | null = null;
-  let fileNameForRollback: string | null = null;
+  let userId: string | null = null;
+  const authHeader = req.headers.get('Authorization');
+  console.log('[Auth] Authorization Header (Clerk JWT expected):', authHeader);
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    console.error('[Auth] Missing or invalid Authorization header.');
+    return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header. Clerk JWT Bearer token is required.' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   try {
-    // 認証とユーザーID取得
-    const authHeader = req.headers.get('Authorization');
-    const customUserIdHeader = req.headers.get('x-user-id');
-    let userId: string | undefined;
-
-    if (customUserIdHeader) {
-      userId = customUserIdHeader;
-      console.log(`[Auth] ユーザーIDを x-user-id ヘッダーから取得: ${userId}`);
-    } else if (authHeader) {
-      console.log(`[Auth] Authorization ヘッダーを処理中...`);
-      const token = authHeader.replace('Bearer ', '');
-      const parts = token.split('.');
-      if (parts.length === 3) {
-        const payload = JSON.parse(atob(parts[1]));
-        userId = payload.sub || payload.user_id;
-        console.log(`[Auth] JWTからユーザーIDを取得: ${userId}`);
-      } else {
-        console.warn('[Auth] JWTの形式が無効です。');
-      }
+    const token = authHeader.replace('Bearer ', '');
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.error('[Auth] Invalid JWT format.');
+      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
+    const payload = JSON.parse(atob(parts[1]));
+    console.log('[Auth] Decoded Clerk JWT Payload:', payload);
+
+    userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
 
     if (!userId) {
-      console.error('[Auth] ユーザーIDが取得できませんでした。');
-      return new Response(JSON.stringify({ error: "認証されていません。ユーザーIDが見つかりません。" }), {
+      console.error('[Auth] User ID (sub) not found in Clerk JWT payload.');
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-    console.log(`[Auth] 認証されたユーザーID: ${userId}`);
+    console.log(`[Auth] Authenticated user ID from Clerk JWT: ${userId}`);
 
-    if (!supabase) {
-      console.error("Supabase clientが初期化されていません。");
-      return new Response(JSON.stringify({ error: "サーバー設定エラー: Supabase client未初期化" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    if (!embeddings) {
-        throw new Error("Embeddings client is not initialized due to missing GEMINI_API_KEY.");
-    }
-    if (!genAI) { 
-        console.warn("GenerativeAI client is not initialized due to missing GEMINI_API_KEY. Summary generation will be skipped.");
-    }
-
-    console.log(`\nリクエストボディの解析を開始: ${new Date().toISOString()}`);
-    const body = await req.json();
-    const { fileName, originalFileName } = body;
-    fileNameForRollback = fileName;
-
-    if (!fileName || typeof fileName !== 'string') {
-      console.error("fileName (string) is required in the request body.");
-      return new Response(JSON.stringify({ error: 'fileName (string) is required in the request body' }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    console.log(`処理対象ファイル: ${fileName} (元ファイル名: ${originalFileName || '未指定'})`);
-
-    const processedFile = await downloadAndProcessFile(fileName, supabase);
-    
-    if (processedFile && processedFile.tmpFilePath) { 
-      tmpFilePathToDelete = processedFile.tmpFilePath;
-    }
-
-    if (!processedFile) {
-        console.error(`File processing failed or unsupported file type for: ${fileName}`);
-        return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
-            status: 500, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-    }
-    
-    console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${fileName} ---`);
-    const success = await processAndStoreDocuments(processedFile, fileName, originalFileName, userId, supabase, embeddings, genAI);
-
-    if (success) {
-      console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${fileName} ---`);
-      console.log(`[Handler] Preparing successful response for ${fileName}. Body:`, { message: `Successfully processed ${fileName}` });
-      return new Response(JSON.stringify({ message: `Successfully processed ${fileName}` }), { 
-        status: 200, 
-        headers: { ...corsHeaders, "Content-Type": "application/json" } 
-      });
-    } else {
-      console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${fileName} ---`);
-      throw new Error(`Failed to process ${fileName} during storage/embedding steps. Triggering rollback if applicable.`);
-    }
-  } catch (error: any) { 
-    console.error(`Error in function handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
-    
-    if (error instanceof Error) {
-        console.error(`Error Name: ${error.name}`);
-        console.error(`Error Message: ${error.message}`);
-        console.error(`Error Stack: ${error.stack}`);
-    } else {
-        console.error(`Unknown error type: ${typeof error}`, error);
-    }
-    
-    if (fileNameForRollback && supabase) {
-      console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${fileNameForRollback} の削除を試みます。`);
-      try {
-        const { error: deleteError } = await supabase.storage
-          .from(BUCKET_NAME)
-          .remove([fileNameForRollback]); 
-        if (deleteError) {
-          if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
-            console.log(`Storageにファイル ${fileNameForRollback} が見つからなかったため、削除はスキップされました。`);
-          } else {
-            console.error(`Storageからのファイル ${fileNameForRollback} の削除に失敗しました。`, deleteError);
-          }
-        } else {
-          console.log(`Storageからファイル ${fileNameForRollback} を削除しました。`);
+    const xUserId = req.headers.get('x-user-id');
+    if (xUserId) {
+        console.log('[Auth] Received x-user-id Header (for debugging/logging only):', xUserId);
+        if (userId !== xUserId) {
+            console.warn(`[Auth] Mismatch between Clerk JWT user ID (${userId}) and x-user-id header (${xUserId}). Using JWT user ID.`);
         }
-      } catch (storageDeleteError) {
-        console.error(`Storageからのファイル ${fileNameForRollback} の削除中に予期せぬエラー。`, storageDeleteError);
-      }
     }
 
-    const message = error instanceof Error ? error.message : "An unknown error occurred during file processing.";
-    const detail = error instanceof Error ? error.stack || error.toString() : String(error); 
-    
-    console.log(`[Handler] Preparing error response for ${fileNameForRollback || 'Unknown file'}. Error: ${message}, Detail: ${detail}`);
-    return new Response(JSON.stringify({ 
-        error: message, 
-        detail: detail,
-        timestamp: new Date().toISOString(), 
-        file: fileNameForRollback || 'Unknown' 
-    }), { 
-      status: 500, 
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+  } catch (error) {
+    console.error('[Auth] Error processing Authorization token:', error);
+    return new Response(JSON.stringify({ error: 'Failed to process Authorization token.' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } finally {
-    if (tmpFilePathToDelete) {
-        try {
-            await fs.unlink(tmpFilePathToDelete);
-            console.log(`一時ファイル ${tmpFilePathToDelete} を削除しました。`);
-        } catch (unlinkError) {
-            console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました:`, unlinkError);
-        }
-    }
-    console.log(`[Handler] Finally block completed for ${fileNameForRollback || 'request associated with this handler invocation'}`);
   }
-  // フォールバックレスポンス (通常はここまで到達しないはず)
-  console.error("[Handler] Execution reached end of function without returning a response. This should not happen.");
-  return new Response(JSON.stringify({ error: "Internal Server Error: Unhandled execution path." }), {
-    status: 500,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+
+  const supabaseClient = createClient(supabaseUrl!, supabaseAnonKey!);
+
+  if (req.method === 'POST') {
+    const contentType = req.headers.get("content-type");
+    if (!contentType || !contentType.includes("multipart/form-data")) {
+      return new Response(
+        JSON.stringify({ error: "Content-Type must be multipart/form-data" }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    let fileNameForRollback: string | null = null; // エラー時のファイル名特定用
+    let tmpFilePathToDelete: string | null = null; // 一時ファイル削除用
+
+    try {
+      const formData = await req.formData();
+      const file = formData.get("file") as File | null;
+      const originalFileNameFormData = formData.get("originalFileName") as string | null; // 修正: 変数名変更
+
+      if (!file) {
+        return new Response(
+          JSON.stringify({ error: "File is required" }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      // processAndStoreDocuments に渡すための実際のファイル名を設定
+      const sourceFileName = file.name;
+      fileNameForRollback = sourceFileName; // エラーロールバック用に保持
+      const effectiveOriginalFileName = originalFileNameFormData || sourceFileName;
+
+
+      console.log(`[File] Received file: ${sourceFileName}, size: ${file.size}, type: ${file.type}`);
+      if (effectiveOriginalFileName) {
+        console.log(`[File] Original file name: ${effectiveOriginalFileName}`);
+      }
+
+      if (!geminiApiKey) {
+        console.error("GEMINI_API_KEY is not set for process-manual-function internal use.");
+        return new Response(JSON.stringify({ error: "GEMINI_API_KEY is not configured on the server." }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const genAI = new GoogleGenerativeAI(geminiApiKey);
+      const embeddingsClient = new GoogleGenerativeAIEmbeddings({ apiKey: geminiApiKey });
+      
+      const processedFile = await downloadAndProcessFile(sourceFileName, supabaseClient);
+      
+      if (processedFile && processedFile.tmpFilePath) { 
+        tmpFilePathToDelete = processedFile.tmpFilePath;
+      }
+
+      if (!processedFile) {
+          console.error(`File processing failed or unsupported file type for: ${sourceFileName}`);
+          // ここでロールバック処理を呼び出すか検討
+          return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
+              status: 500, 
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+      }
+      
+      console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${sourceFileName} ---`);
+      // processAndStoreDocuments の返り値の型を正しく扱う
+      const storeResult = await processAndStoreDocuments(
+        processedFile,
+        sourceFileName,
+        effectiveOriginalFileName,
+        userId!, 
+        supabaseClient,
+        embeddingsClient,
+        genAI
+      );
+
+      if (storeResult && storeResult.manualId) { // storeResult が null でないこと、かつ manualId を持つことを確認
+        console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${sourceFileName} ---`);
+        return new Response(JSON.stringify({ 
+          message: `Successfully processed ${sourceFileName}`,
+          manual_id: storeResult.manualId,
+          summary: storeResult.summary,
+          chunks_count: storeResult.chunksCount
+        }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      } else {
+        console.error('Failed to process and store document, storeResult was:', storeResult);
+        throw new Error(`Failed to process ${sourceFileName} during storage/embedding steps. Result from processAndStoreDocuments was not as expected.`);
+      }
+
+    } catch (error: any) {
+      console.error(`Error in POST handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
+      
+      if (error instanceof Error) {
+          console.error(`Error Name: ${error.name}`);
+          console.error(`Error Message: ${error.message}`);
+          console.error(`Error Stack: ${error.stack}`);
+      } else {
+          console.error(`Unknown error type: ${typeof error}`, error);
+      }
+      
+      // ファイルロールバック処理 (元のコードから持ってくる)
+      if (fileNameForRollback && supabaseClient) {
+        console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${fileNameForRollback} の削除を試みます。`);
+        try {
+          const { error: deleteError } = await supabaseClient.storage // 修正: supabase -> supabaseClient
+            .from('manuals') // BUCKET_NAME は 'manuals' と仮定。実際のバケット名に置き換える
+            .remove([fileNameForRollback]); 
+          if (deleteError) {
+            if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
+              console.log(`Storageにファイル ${fileNameForRollback} が見つからなかったため、削除はスキップされました。`);
+            } else {
+              console.error(`Storageからのファイル ${fileNameForRollback} の削除に失敗しました。`, deleteError);
+            }
+          } else {
+            console.log(`Storageからファイル ${fileNameForRollback} を削除しました。`);
+          }
+        } catch (storageDeleteError) {
+          console.error(`Storageからのファイル ${fileNameForRollback} の削除中に予期せぬエラー。`, storageDeleteError);
+        }
+      }
+
+      const message = error instanceof Error ? error.message : "An unknown error occurred during file processing.";
+      const detail = error instanceof Error ? error.stack || error.toString() : String(error); 
+      
+      return new Response(JSON.stringify({ 
+          error: message, 
+          detail: detail,
+          timestamp: new Date().toISOString(), 
+          file: fileNameForRollback || 'Unknown' 
+      }), { 
+        status: 500, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } finally {
+      if (tmpFilePathToDelete) {
+          try {
+              await fs.unlink(tmpFilePathToDelete);
+              console.log(`一時ファイル ${tmpFilePathToDelete} を削除しました。`);
+          } catch (unlinkError) {
+              console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました:`, unlinkError);
+          }
+      }
+      console.log(`[Handler] Finally block completed for ${fileNameForRollback || 'request associated with this handler invocation'}`);
+    }
+  } else {
+    return new Response(
+      JSON.stringify({ error: `Method ${req.method} not allowed. Use POST for file uploads.` }),
+      { status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
 }
 
-console.log("[Global] Setting up server with handler (Version: AddResponseLogging)..."); // ★ 追加
 serve(handler);
-console.log("[Global] Server setup complete. Waiting for requests (Version: AddResponseLogging)."); // ★ 追加
 
 console.log("Process manual function (Deno native HTTP) server running!");
 
 /* To invoke locally:
 
-  1. Make sure your .env file has SUPABASE_URL, SUPABASE_ANON_KEY, and GEMINI_API_KEY.
-  2. Run this Deno script:
-     deno run --allow-net --allow-env --allow-read=/tmp,./.env --allow-write=/tmp supabase/functions/process-manual-function/index.ts
-     (For Deno Deploy, these permissions are typically handled by the platform)
-  3. Make an HTTP request:
+    1. Make sure your .env file has SUPABASE_URL, SUPABASE_ANON_KEY, and GEMINI_API_KEY.
+    2. Run this Deno script:
+       deno run --allow-net --allow-env --allow-read=/tmp,./.env --allow-write=/tmp supabase/functions/process-manual-function/index.ts
+       (For Deno Deploy, these permissions are typically handled by the platform)
+    3. Make an HTTP request:
 
-  curl -i --location --request POST 'http://localhost:8000/process-manual-function' \\\
-    --header 'Content-Type: application/json\' \\\
-    --data \'{"fileName":"your-file-in-storage.pdf"}\'
+    curl -i --location --request POST 'http://localhost:8000/process-manual-function' \\\
+      --header 'Content-Type: application/json\' \\\
+      --data \'{"fileName":"your-file-in-storage.pdf"}\'
 
-  Or using PowerShell:
-  Invoke-WebRequest -Uri 'http://localhost:8000/process-manual-function' -Method POST -ContentType 'application/json\' -Body \'{"fileName":"your-file-in-storage.pdf"}\'
-*/
+    Or using PowerShell:
+    Invoke-WebRequest -Uri 'http://localhost:8000/process-manual-function' -Method POST -ContentType 'application/json\' -Body \'{"fileName":"your-file-in-storage.pdf"}\'
+  */
