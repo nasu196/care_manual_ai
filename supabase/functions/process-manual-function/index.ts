@@ -20,6 +20,7 @@ import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import "npm:dotenv/config";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai"; // ★ 追加
+import { corsHeaders } from '../_shared/cors.ts'; // ★ CORSヘッダーをインポート
 
 // ★ テキストサニタイズ関数を追加
 function sanitizeText(text: string): string {
@@ -767,33 +768,51 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
   const requestPathname = new URL(req.url).pathname; // Pathnameを先に取得
   console.log(`Request received: Method=${req.method}, URL=${req.url}, Pathname=${requestPathname}`);
 
-  // CORSヘッダーをすべてのレスポンスに追加
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*', // すべてのオリジンを許可 (開発用)
-    'Access-Control-Allow-Methods': 'POST, OPTIONS', // 許可するメソッド
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization', // 許可するヘッダー
-  };
-
-  // OPTIONSリクエスト (プリフライトリクエスト) の処理
+  // OPTIONSリクエストの処理 (CORSプリフライト)
   if (req.method === 'OPTIONS') {
-    console.log("Responding to OPTIONS request.");
-    return new Response(null, { status: 204, headers: corsHeaders });
-  }
-  
-  if (req.method !== "POST") { // POSTメソッドのみ許可
-    console.log(`Invalid request method: ${req.method}. Expected POST. Responding 405.`);
-    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" }
-    });
+    return new Response('ok', { headers: corsHeaders });
   }
 
   let tmpFilePathToDelete: string | null = null;
-  let receivedFileName: string | null = null; // エラー時のロールバック用にファイル名を保持
+  let fileNameForRollback: string | null = null;
 
   try {
+    // 認証とユーザーID取得
+    const authHeader = req.headers.get('Authorization');
+    const customUserIdHeader = req.headers.get('x-user-id');
+    let userId: string | undefined;
+
+    if (customUserIdHeader) {
+      userId = customUserIdHeader;
+      console.log(`[Auth] ユーザーIDを x-user-id ヘッダーから取得: ${userId}`);
+    } else if (authHeader) {
+      console.log(`[Auth] Authorization ヘッダーを処理中...`);
+      const token = authHeader.replace('Bearer ', '');
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        userId = payload.sub || payload.user_id;
+        console.log(`[Auth] JWTからユーザーIDを取得: ${userId}`);
+      } else {
+        console.warn('[Auth] JWTの形式が無効です。');
+      }
+    }
+
+    if (!userId) {
+      console.error('[Auth] ユーザーIDが取得できませんでした。');
+      return new Response(JSON.stringify({ error: "認証されていません。ユーザーIDが見つかりません。" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    console.log(`[Auth] 認証されたユーザーID: ${userId}`);
+
     if (!supabase) {
-        throw new Error("Supabase client is not initialized due to missing environment variables.");
+      console.error("Supabase clientが初期化されていません。");
+      return new Response(JSON.stringify({ error: "サーバー設定エラー: Supabase client未初期化" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
     if (!embeddings) {
         throw new Error("Embeddings client is not initialized due to missing GEMINI_API_KEY.");
@@ -802,137 +821,110 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         console.warn("GenerativeAI client is not initialized due to missing GEMINI_API_KEY. Summary generation will be skipped.");
     }
 
-    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
-    const authHeader = req.headers.get('Authorization')
-    if (authHeader) {
-      // Supabaseクライアントを認証ヘッダー付きで再初期化
-      supabase = createClient(supabaseUrl!, supabaseAnonKey!, {
-        global: {
-          headers: { Authorization: authHeader },
-        },
-      });
-    }
-
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
-      return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log('Authenticated user ID:', user.id)
-
     console.log(`\nリクエストボディの解析を開始: ${new Date().toISOString()}`);
     const body = await req.json();
     const { fileName, originalFileName } = body;
-    receivedFileName = fileName; // ★ fileName を receivedFileName に保存
+    fileNameForRollback = fileName;
 
-    if (!receivedFileName || typeof receivedFileName !== 'string') {
+    if (!fileName || typeof fileName !== 'string') {
       console.error("fileName (string) is required in the request body.");
       return new Response(JSON.stringify({ error: 'fileName (string) is required in the request body' }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    console.log(`処理対象ファイル: ${receivedFileName} (元ファイル名: ${originalFileName || '未指定'})`);
+    console.log(`処理対象ファイル: ${fileName} (元ファイル名: ${originalFileName || '未指定'})`);
 
-    const processedFile = await downloadAndProcessFile(receivedFileName, supabase);
+    const processedFile = await downloadAndProcessFile(fileName, supabase);
     
-    if (processedFile && processedFile.tmpFilePath) { // ★ tmpFilePathToDelete を設定
-        tmpFilePathToDelete = processedFile.tmpFilePath;
+    if (processedFile && processedFile.tmpFilePath) { 
+      tmpFilePathToDelete = processedFile.tmpFilePath;
     }
 
     if (!processedFile) {
-        console.error(`File processing failed or unsupported file type for: ${receivedFileName}`);
+        console.error(`File processing failed or unsupported file type for: ${fileName}`);
         return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
             status: 500, 
             headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
     }
     
-    console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${receivedFileName} ---`);
-    const success = await processAndStoreDocuments(processedFile, receivedFileName, originalFileName, user.id, supabase, embeddings, genAI);
+    console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${fileName} ---`);
+    const success = await processAndStoreDocuments(processedFile, fileName, originalFileName, userId, supabase, embeddings, genAI);
 
     if (success) {
-      console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${receivedFileName} ---`);
-      console.log(`[Handler] Preparing successful response for ${receivedFileName}. Body:`, { message: `Successfully processed ${receivedFileName}` }); // ★ 追加
-      return new Response(JSON.stringify({ message: `Successfully processed ${receivedFileName}` }), { 
+      console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${fileName} ---`);
+      console.log(`[Handler] Preparing successful response for ${fileName}. Body:`, { message: `Successfully processed ${fileName}` });
+      return new Response(JSON.stringify({ message: `Successfully processed ${fileName}` }), { 
         status: 200, 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
       });
     } else {
-      console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${receivedFileName} ---`);
-      throw new Error(`Failed to process ${receivedFileName} during storage/embedding steps. Triggering rollback if applicable.`);
+      console.error(`\n--- 全体処理失敗 (チャンク化またはDB保存でエラー): ${fileName} ---`);
+      throw new Error(`Failed to process ${fileName} during storage/embedding steps. Triggering rollback if applicable.`);
     }
-  } catch (error: any) { // ★ unknown から any へ変更
-    console.error(`Error in function handler for file: ${receivedFileName || 'Unknown file'}:`, error);
+  } catch (error: any) { 
+    console.error(`Error in function handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
     
-    // エラーの詳細情報をログに出力 ★
     if (error instanceof Error) {
-        console.error("Error name:", error.name);
-        console.error("Error message:", error.message);
-        console.error("Error stack:", error.stack);
+        console.error(`Error Name: ${error.name}`);
+        console.error(`Error Message: ${error.message}`);
+        console.error(`Error Stack: ${error.stack}`);
     } else {
-        console.error("Non-Error object thrown:", JSON.stringify(error, null, 2));
+        console.error(`Unknown error type: ${typeof error}`, error);
     }
     
-    // ロールバック処理: Storageからファイルを削除 (エラー発生時)
-    if (receivedFileName && supabase) {
-      console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${receivedFileName} の削除を試みます。`);
+    if (fileNameForRollback && supabase) {
+      console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${fileNameForRollback} の削除を試みます。`);
       try {
         const { error: deleteError } = await supabase.storage
           .from(BUCKET_NAME)
-          .remove([receivedFileName]); 
+          .remove([fileNameForRollback]); 
         if (deleteError) {
           if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
-            console.log(`Storageにファイル ${receivedFileName} が見つからなかったため、削除はスキップされました。`);
+            console.log(`Storageにファイル ${fileNameForRollback} が見つからなかったため、削除はスキップされました。`);
           } else {
-            console.error(`Storageからのファイル ${receivedFileName} の削除に失敗しました。`, deleteError);
+            console.error(`Storageからのファイル ${fileNameForRollback} の削除に失敗しました。`, deleteError);
           }
         } else {
-          console.log(`Storageからファイル ${receivedFileName} を削除しました。`);
+          console.log(`Storageからファイル ${fileNameForRollback} を削除しました。`);
         }
       } catch (storageDeleteError) {
-        console.error(`Storageからのファイル ${receivedFileName} の削除中に予期せぬエラー。`, storageDeleteError);
+        console.error(`Storageからのファイル ${fileNameForRollback} の削除中に予期せぬエラー。`, storageDeleteError);
       }
     }
 
-    const message = error instanceof Error ? error.message : "Internal server error during file processing.";
-    const detail = error instanceof Error ? error.stack || error.toString() : String(error); // ★ より詳細な情報を追加
+    const message = error instanceof Error ? error.message : "An unknown error occurred during file processing.";
+    const detail = error instanceof Error ? error.stack || error.toString() : String(error); 
     
-    console.log(`[Handler] Preparing error response for ${receivedFileName || 'Unknown file'}. Error: ${message}, Detail: ${detail}`); // ★ 追加
+    console.log(`[Handler] Preparing error response for ${fileNameForRollback || 'Unknown file'}. Error: ${message}, Detail: ${detail}`);
     return new Response(JSON.stringify({ 
         error: message, 
         detail: detail,
-        timestamp: new Date().toISOString(), // ★ タイムスタンプ追加
-        file: receivedFileName || 'Unknown' // ★ ファイル名追加
+        timestamp: new Date().toISOString(), 
+        file: fileNameForRollback || 'Unknown' 
     }), { 
       status: 500, 
-      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } finally {
     if (tmpFilePathToDelete) {
         try {
-            console.log(`\nFinallyブロック: 一時ファイル ${tmpFilePathToDelete} のクリーンアップを試みます...`);
             await fs.unlink(tmpFilePathToDelete);
-            console.log(`一時ファイルをクリーンアップしました: ${tmpFilePathToDelete}`);
-        } catch (e: any) { // ★ unknown から any へ変更
-            if (e && e.code !== 'ENOENT') { // ★ eがnullでないことを確認
-                 console.warn(`Finallyブロック: 一時ファイルの削除中にエラーが発生しました (無視): ${tmpFilePathToDelete}`, e);
-            } else {
-                 console.log(`Finallyブロック: 一時ファイルは既に存在しませんでした (無視): ${tmpFilePathToDelete}`);
-            }
+            console.log(`一時ファイル ${tmpFilePathToDelete} を削除しました。`);
+        } catch (unlinkError) {
+            console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました:`, unlinkError);
         }
     }
-    console.log(`[Handler] Finally block completed for ${receivedFileName || 'request associated with this handler invocation'}`); // ★ 変更: より詳細なメッセージ
+    console.log(`[Handler] Finally block completed for ${fileNameForRollback || 'request associated with this handler invocation'}`);
   }
+  // フォールバックレスポンス (通常はここまで到達しないはず)
+  console.error("[Handler] Execution reached end of function without returning a response. This should not happen.");
+  return new Response(JSON.stringify({ error: "Internal Server Error: Unhandled execution path." }), {
+    status: 500,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
-
-// serve(handler); // ポート指定を削除。Deno Deployでは自動的に割り当てられる。ローカルテスト時はデフォルト(8000)
 
 console.log("[Global] Setting up server with handler (Version: AddResponseLogging)..."); // ★ 追加
 serve(handler);

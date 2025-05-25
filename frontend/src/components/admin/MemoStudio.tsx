@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input';
 import { ArrowLeft, PlusCircle, Flag, Trash2, AlertTriangle, XCircle, Save, Loader2 } from 'lucide-react';
 import { useMemoStore } from '@/store/memoStore';
 import MemoTemplateSuggestions from '@/components/admin/MemoTemplateSuggestions';
-import { useSupabaseClient } from '@/hooks/useSupabaseClient';
+import { useAuth } from '@clerk/nextjs';
+import { invokeFunction } from '@/lib/supabaseFunctionUtils';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { marked } from 'marked';
@@ -35,9 +36,7 @@ interface MemoStudioProps {
 }
 
 const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
-  const supabaseClient = useSupabaseClient();
-  // ★ 編集権限を取得
-  const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
+  const { getToken, userId, isSignedIn } = useAuth();
   
   const [memos, setMemos] = useState<Memo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -79,6 +78,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   // ★ useRef を使って前回の memoListLastUpdated の値を保持
   const prevMemoListLastUpdatedRef = useRef<number | null>(null);
 
+  console.log(`[MemoStudio] Rendering. isSignedIn: ${isSignedIn}, userId: ${userId}`);
+
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
       setNewMemoTitle(newMemoRequest.title);
@@ -97,39 +98,37 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   }, [newMemoRequest, clearNewMemoRequest, isEditingNewMemo, selectedMemoId]); // 依存配列にストアの値を追加
 
   const fetchMemos = useCallback(async () => {
+    console.log(`[MemoStudio fetchMemos] Attempting. isSignedIn: ${isSignedIn}, userId: ${userId}`);
+    if (!isSignedIn || !userId || !getToken) {
+      console.log('[fetchMemos] Not signed in or getToken/userId not available yet.');
+      setIsLoading(false); // or true, depending on desired UX before auth ready
+      return;
+    }
     setIsLoading(true);
     setError(null);
-    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos...`); // ★ 呼び出し開始ログ
-    try {
-      const { data, error: functionError } = await supabaseClient.functions.invoke('list-memos');
-      
-      console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError }); // ★ 生レスポンスログ
+    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos using invokeFunction...`);
 
-      if (functionError) {
-        console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function:`, functionError);
-        throw functionError;
+    const { data, error: functionError } = await invokeFunction('list-memos', {}, getToken, userId);
+
+    console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError });
+
+    if (functionError) {
+      console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function:`, functionError);
+      setError(functionError as Error);
+    } else if (Array.isArray(data)) {
+      console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
+      // ★ 取得したデータの内容を詳細にログ出力 (最初の数件など)
+      if (data.length > 0) {
+        console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
       }
-
-      if (Array.isArray(data)) {
-        console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
-        // ★ 取得したデータの内容を詳細にログ出力 (最初の数件など)
-        if (data.length > 0) {
-          console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
-        }
-        setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
-      } else {
-        console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
-        setMemos([]); 
-      }
-
-    } catch (e) {
-      console.error(`[${new Date().toISOString()}] [fetchMemos] Failed to fetch memos:`, e);
-      setError(e instanceof Error ? e : new Error('An unknown error occurred'));
-    } finally {
-      setIsLoading(false);
-      console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`); // ★ 完了ログ
+      setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
+    } else {
+      console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
+      setMemos([]); 
     }
-  }, []);
+    setIsLoading(false);
+    console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`);
+  }, [getToken, userId, isSignedIn, setIsLoading, setError, setMemos]);
 
   // 1. 初回マウント時と、手動での新規メモ編集モード終了時にメモを取得
   useEffect(() => {
@@ -152,7 +151,11 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     prevMemoListLastUpdatedRef.current = memoListLastUpdated;
   }, [fetchMemos, memoListLastUpdated]); // 依存配列を memoListLastUpdated のみに（fetchMemosも含む）
 
-  const handleCreateMemo = async () => {
+  const handleCreateMemo = useCallback(async () => {
+    if (!isSignedIn || !userId || !getToken) {
+      setCreateMemoError('User not authenticated or auth functions not ready.');
+      return;
+    }
     // contentの空チェックはTiptapのisEmptyを使う方がより正確だが、一旦titleのみで簡易チェック
     if (!newMemoTitle.trim()) { // || editor.isEmpty のようなチェックをTiptapから取得できると良い
       setCreateMemoError('タイトルは必須です。');
@@ -168,75 +171,58 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
     setIsCreatingMemo(true);
     setCreateMemoError(null);
-    try {
-      const { data: { user } } = await supabaseClient.auth.getUser();
-      let userId = user?.id;
+    const memoData = {
+      title: newMemoTitle,
+      content: newMemoContent,
+      // created_by はEdge Function側でx-user-idヘッダーから取得・設定する想定
+    };
+    const { data: newMemo, error: createError } = await invokeFunction(
+      'create-memo', 
+      { method: 'POST', body: memoData }, 
+      getToken, 
+      userId
+    );
 
-      // 開発用にユーザーIDが取れない場合はダミーIDを使用 (本番では削除または適切な処理)
-      if (!userId && process.env.NODE_ENV === 'development') {
-        console.warn("User ID not found, using dummy_user_id for development.");
-        userId = 'dummy_user_id_dev'; 
-      } else if (!userId) {
-        throw new Error('ユーザーが認証されていません。ログインしてください。');
-      }
-
-      const { error: createError } = await supabaseClient.functions.invoke('create-memo', {
-        body: { 
-          title: newMemoTitle, 
-          content: newMemoContent, // HTMLコンテンツを送信
-          created_by: userId, // 取得したユーザーIDを使用
-          // tags: [], // 必要であれば追加
-          // is_important: false, // 必要であれば追加
-        },
-      });
-
-      if (createError) {
-        throw createError;
-      }
-
-      setNewMemoTitle('');
-      setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
-      setIsEditingNewMemo(false); // 作成後は編集モードを解除
-      setMemoViewExpanded(false); // ★ メモ作成完了時も表示状態を終了
-      await fetchMemos(); // ★★★ 新規メモ作成成功後にリストを再取得 ★★★
-    } catch (e) {
-      console.error('Failed to create memo:', e);
-      if (e instanceof Error) {
-        setCreateMemoError(e.message);
-      } else if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') {
-        setCreateMemoError(e.message); // Supabaseからのエラーオブジェクトなどを想定
-      } else {
-        setCreateMemoError('メモの作成中に予期せぬエラーが発生しました。');
-      }
-    } finally {
-      setIsCreatingMemo(false);
-    }
-  };
-
-  const handleDeleteMemo = async (memoId: string) => {
-    if (!window.confirm('このメモを本当に削除しますか？')) {
-      return;
+    if (createError) {
+      throw createError;
     }
 
-    setDeletingMemoId(memoId);
+    setNewMemoTitle('');
+    setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
+    setIsEditingNewMemo(false); // 作成後は編集モードを解除
+    setMemoViewExpanded(false); // ★ メモ作成完了時も表示状態を終了
+    await fetchMemos(); // ★★★ 新規メモ作成成功後にリストを再取得 ★★★
+  }, [newMemoTitle, newMemoContent, getToken, userId, isSignedIn, fetchMemos, setIsCreatingMemo, setCreateMemoError, setNewMemoTitle, setNewMemoContent, setIsEditingNewMemo, setMemoViewExpanded]);
+
+  const handleDeleteMemo = useCallback(async (memoIdToDelete: string) => {
+    if (!isSignedIn || !userId || !getToken) {
+        setDeleteError('User not authenticated or auth functions not ready.');
+        return;
+    }
+    if (!window.confirm('このメモを本当に削除しますか？')) return;
+    setDeletingMemoId(memoIdToDelete);
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      // supabase.functions.invoke()を使用して他の関数と同じパターンにする
-      const { data, error: functionError } = await supabaseClient.functions.invoke('delete-memo', {
-        method: 'DELETE',
-        body: { id: memoId } // ボディにIDを含める
-      });
+      const { error: deleteErr } = await invokeFunction(
+          'delete-memo', 
+          { method: 'POST', body: { id: memoIdToDelete } }, // Supabase FunctionはPOSTでidを受け取る想定
+          getToken, 
+          userId
+      );
 
-      if (functionError) {
-        throw functionError;
+      if (deleteErr) {
+        throw deleteErr;
       }
 
       // 削除成功時にローカル状態を更新
-      setMemos((prevMemos) => prevMemos.filter((memo) => memo.id !== memoId));
+      setMemos((prevMemos) => prevMemos.filter((memo) => memo.id !== memoIdToDelete));
+      if (selectedMemoId === memoIdToDelete) {
+          setSelectedMemoId(null);
+      }
 
-      console.log('Memo deleted successfully:', data);
+      console.log('Memo deleted successfully:', memoIdToDelete);
 
     } catch (e) {
       console.error('Failed to delete memo (コンソールエラー):', e);
@@ -256,7 +242,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       setIsDeleting(false);
       setDeletingMemoId(null);
     }
-  };
+  }, [getToken, userId, isSignedIn, selectedMemoId, setSelectedMemoId, setMemos, setDeleteError]);
 
   const handleCancelNewMemo = () => {
     setNewMemoTitle('');
@@ -310,8 +296,11 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     // 編集キャンセル後も閲覧モードなので、setMemoViewExpanded(true)のまま
   };
 
-  const handleUpdateMemo = async () => {
-    if (!selectedMemoId || !selectedMemo) return;
+  const handleUpdateMemo = useCallback(async () => {
+    if (!isSignedIn || !userId || !getToken || !selectedMemoId) {
+        setUpdateMemoError('User not authenticated, auth functions not ready, or no memo selected.');
+        return;
+    }
     // 簡単なバリデーション
     const plainEditingTextContent = editingContent.replace(/<[^>]+>/g, '').trim();
     if (!editingTitle.trim() || !plainEditingTextContent) {
@@ -323,23 +312,26 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setUpdateMemoError(null);
 
     try {
-      const { data: updatedMemo, error: functionError } = await supabaseClient.functions.invoke('update-memo', {
-        body: {
-          id: selectedMemoId,
-          title: editingTitle,
-          content: editingContent,
-          // updated_by: userId, // もしEdge Function側で更新者を記録する場合
-        }
-      });
+      const memoData = {
+        id: selectedMemoId,
+        title: editingTitle,
+        content: editingContent,
+      };
+      const { data: updatedMemoData, error: updateError } = await invokeFunction(
+        'update-memo',
+        { method: 'POST', body: memoData },
+        getToken,
+        userId
+      );
 
-      if (functionError) {
-        throw functionError; 
+      if (updateError) {
+        throw updateError; 
       }
 
-      if (updatedMemo && typeof updatedMemo === 'object' && 'id' in updatedMemo && updatedMemo.id === selectedMemoId) {
+      if (updatedMemoData && typeof updatedMemoData === 'object' && 'id' in updatedMemoData && updatedMemoData.id === selectedMemoId) {
         // Edge Functionが更新後の完全なメモオブジェクトを返した場合 (idが一致することも確認)
         setMemos(prevMemos => prevMemos.map(m => 
-          m.id === selectedMemoId ? { ...(updatedMemo as Memo), isGenerating: false } : m
+          m.id === selectedMemoId ? { ...(updatedMemoData as Memo), isGenerating: false } : m
         ));
       } else {
         // Edge Functionが期待した形式のオブジェクトを返さなかったか、idが一致しない場合
@@ -365,33 +357,33 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     } finally {
       setIsUpdatingMemo(false);
     }
-  };
+  }, [selectedMemoId, editingTitle, editingContent, getToken, userId, isSignedIn, fetchMemos, setIsUpdatingMemo, setUpdateMemoError]);
 
-  const handleToggleImportant = async (memoId: string, newIsImportant: boolean) => {
-    setTogglingImportantId(memoId);
-    setToggleImportantError(null);
-
+  const handleToggleImportant = useCallback(async (memoIdToToggle: string, newIsImportant: boolean) => {
+    if (!isSignedIn || !userId || !getToken) {
+        setToggleImportantError('User not authenticated or auth functions not ready.');
+        return;
+    }
     // 元のメモの状態を保存 (ロールバック用)
     const originalMemos = [...memos];
 
     // 1. UIを楽観的に更新
     setMemos(prevMemos => 
       prevMemos.map(m => 
-        m.id === memoId ? { ...m, is_important: newIsImportant } : m
+        m.id === memoIdToToggle ? { ...m, is_important: newIsImportant } : m
       )
     );
 
     try {
-      const { error: functionError } = await supabaseClient.functions.invoke('update-memo', {
-        body: {
-          id: memoId,
-          is_important: newIsImportant,
-          // title や content は変更しないので含めない
-        }
-      });
+      const { error: toggleError } = await invokeFunction(
+        'update-memo', 
+        { method: 'POST', body: { id: memoIdToToggle, is_important: newIsImportant } },
+        getToken,
+        userId
+      );
 
-      if (functionError) {
-        throw functionError;
+      if (toggleError) {
+        throw toggleError;
       }
       // 成功時は特に何もしない (UIは既に更新済み)
 
@@ -406,10 +398,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         errorMessage = e.message;
       }
       setToggleImportantError(errorMessage);
-    } finally {
-      setTogglingImportantId(null);
     }
-  };
+  }, [getToken, userId, isSignedIn, setMemos, setToggleImportantError]);
 
   // ★★★ 表示用メモリストの作成 ★★★
   const displayMemos = React.useMemo(() => {
@@ -454,7 +444,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     <div className="flex flex-col h-full">
       <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center flex-shrink-0">
         <h2 className="text-lg font-semibold">メモ管理</h2>
-        {hasEditPermission && !isEditingNewMemo && !selectedMemo && (
+        {isSignedIn && !isEditingNewMemo && !selectedMemo && (
           <Button variant="outline" size="sm" onClick={() => {
             setIsEditingNewMemo(true);
             setMemoViewExpanded(true); 
@@ -529,7 +519,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     一覧に戻る
                   </Button>
-                  {hasEditPermission && (
+                  {isSignedIn && (
                     <div className="flex items-center space-x-2">
                       <Button
                         variant="ghost"
@@ -616,7 +606,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             </div>
           ) : (
             <div className="space-y-6">
-              {hasEditPermission && (
+              {isSignedIn && (
                 <div>
                   <MemoTemplateSuggestions 
                     selectedSourceNames={selectedSourceNames} 
@@ -671,7 +661,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                             </div>
                             {!memo.isGenerating && (
                               <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                                {hasEditPermission && (
+                                {isSignedIn && (
                                   <>
                                     <Button
                                       variant="ghost"
