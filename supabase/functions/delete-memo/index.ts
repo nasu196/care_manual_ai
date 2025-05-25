@@ -40,24 +40,45 @@ Deno.serve(async (req) => {
       )
     }
     
-    // Authorizationヘッダーを取得してSupabaseクライアントに渡す
     const authHeader = req.headers.get('Authorization')
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: authHeader ? { Authorization: authHeader } : {} },
-    })
+    console.log('[delete-memo] Received Authorization Header:', authHeader); // ★ ログ追加
 
-    // JWTトークンからユーザー情報を取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    
-    if (userError || !user) {
-      console.error('Error getting user or user not authenticated:', userError)
-      return new Response(
-        JSON.stringify({ error: 'Authentication required' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    // anon key でクライアントを初期化
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+    // JWTトークンをデコードして直接ユーザー情報を取得
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
     }
+    const token = authHeader.replace('Bearer ', '');
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    let payload;
+    try {
+      payload = JSON.parse(atob(parts[1]));
+    } catch (e) {
+      console.error('Error decoding JWT payload:', e);
+      return new Response(JSON.stringify({ error: 'Failed to decode JWT' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    console.log('[delete-memo] Decoded JWT Payload:', payload);
 
-    console.log('Authenticated user ID:', user.id)
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+    
+    if (!userId) {
+      console.error('No user ID found in JWT payload for delete-memo');
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
+        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+    console.log('[delete-memo] Authenticated user ID from Clerk JWT:', userId);
 
     // URLからメモのIDを取得（従来の方法）
     const url = new URL(req.url)
@@ -84,18 +105,18 @@ Deno.serve(async (req) => {
       )
     }
     
-    console.log(`Attempting to delete memo with ID: ${memoId} for user: ${user.id}`)
+    console.log(`Attempting to delete memo with ID: ${memoId} for user: ${userId}`)
 
     // データベースからメモを削除（ユーザーIDでフィルタリング）
     const { data, error } = await supabase
       .from('memos')
       .delete()
       .eq('id', memoId)
-      .eq('created_by', user.id) // ユーザーIDでフィルタリング（アクセス制御）
+      .eq('created_by', userId) // ★ user.id から userId に変更
       .select() // 削除されたデータを取得
       
     if (error) {
-      console.error(`Error deleting memo with ID ${memoId} for user ${user.id}:`, error)
+      console.error(`Error deleting memo with ID ${memoId} for user ${userId}:`, error)
       // エラーの種類によってより詳細なハンドリング
       if (error.code === 'PGRST204' || (error.details && error.details.includes("0 rows"))) {
          return new Response(
@@ -111,14 +132,14 @@ Deno.serve(async (req) => {
 
     // 削除成功の検証 - data配列が空でないことを確認
     if (!data || data.length === 0) {
-      console.warn(`No memo found with ID ${memoId} for user ${user.id} for deletion`)
+      console.warn(`No memo found with ID ${memoId} for user ${userId} for deletion`)
       return new Response(
         JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`Successfully deleted memo with ID ${memoId} for user ${user.id}:`, data[0]);
+    console.log(`Successfully deleted memo with ID ${memoId} for user ${userId}:`, data[0]);
 
     return new Response(
       JSON.stringify({ message: 'Memo deleted successfully', deleted_memo: data[0] }), 
