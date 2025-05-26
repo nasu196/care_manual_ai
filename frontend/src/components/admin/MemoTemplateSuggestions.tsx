@@ -332,7 +332,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       console.log(`[${tempMemoId}] Calling MemoWriterLLM for: ${memoTitle}`);
       const memoResponse = await fetch('/api/generate-memo', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${tokenForCreateMemo}`,
+        },
         body: JSON.stringify({
           crafted_prompt: generatedPrompt,
           source_filenames: selectedIdeaForModal.source_files || [],

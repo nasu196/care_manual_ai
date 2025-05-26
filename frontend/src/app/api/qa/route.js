@@ -82,6 +82,26 @@ export async function POST(request) {
   try {
     initializeClientsAndChains();
 
+    // リクエストヘッダーからAuthorizationを取得
+    const authHeader = request.headers.get('Authorization');
+    console.log(`[API /api/qa] Authorization header:`, authHeader ? 'Present' : 'Missing');
+
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証情報が必要です。' }, { status: 401 });
+    }
+
+    // 認証情報付きのSupabaseクライアントを作成
+    const authenticatedSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    });
+
     const { query: userQuery, source_filenames: sourceFilenames, verbosity: userVerbosity } = await request.json();
 
     if (!userQuery || typeof userQuery !== 'string' || userQuery.trim() === '') {
@@ -97,7 +117,7 @@ export async function POST(request) {
     // --- ファイル名解決 ---
     let encodedSourceFilenamesForRpc = null;
     if (validSourceFilenames && validSourceFilenames.length > 0) {
-      const { data: manualData, error: manualError } = await supabase
+      const { data: manualData, error: manualError } = await authenticatedSupabase
         .from('manuals')
         .select('file_name, original_file_name')
         .in('original_file_name', validSourceFilenames);
@@ -164,7 +184,7 @@ export async function POST(request) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') continue;
       console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
       const embedding = await embeddings.embedQuery(searchQuery);
-      const { data: chunks, error: matchError } = await supabase.rpc('match_manual_chunks', {
+      const { data: chunks, error: matchError } = await authenticatedSupabase.rpc('match_manual_chunks', {
         query_embedding: embedding,
         match_threshold: matchThreshold,
         match_count: matchCount,

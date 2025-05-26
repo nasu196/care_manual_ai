@@ -87,6 +87,26 @@ export async function POST(request) {
   try {
     initializeClientsAndChains();
 
+    // リクエストヘッダーからAuthorizationを取得
+    const authHeader = request.headers.get('Authorization');
+    console.log(`[API /api/generate-memo] Authorization header:`, authHeader ? 'Present' : 'Missing');
+
+    if (!authHeader) {
+      return NextResponse.json({ error: '認証情報が必要です。' }, { status: 401 });
+    }
+
+    // 認証情報付きのSupabaseクライアントを作成
+    const authenticatedSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    });
+
     const { crafted_prompt: craftedPrompt, source_filenames: sourceFilenames, verbosity } = await request.json();
 
     if (!craftedPrompt || typeof craftedPrompt !== 'string' || craftedPrompt.trim() === '') {
@@ -101,10 +121,12 @@ export async function POST(request) {
     // 日本語ファイル名対応: original_file_nameから対応するfile_nameを取得
     console.log(`[API /api/generate-memo] Looking up encoded filenames for:`, sourceFilenames);
     
-    const { data: manualData, error: manualError } = await supabase
+    const { data: manualData, error: manualError } = await authenticatedSupabase
       .from('manuals')
       .select('file_name, original_file_name')
       .in('original_file_name', sourceFilenames);
+
+    console.log(`[API /api/generate-memo] Supabase query result:`, { data: manualData, error: manualError });
 
     if (manualError) {
       console.error(`[API /api/generate-memo] Error fetching manual data:`, manualError);
@@ -133,7 +155,7 @@ export async function POST(request) {
     const queryEmbedding = await embeddings.embedQuery(genericSearchQuery);
 
     for (const filename of encodedSourceFilenames) { // ★ エンコードされたファイル名を使用
-        const { data: rpcData, error: rpcError } = await supabase.rpc('match_manual_chunks', {
+        const { data: rpcData, error: rpcError } = await authenticatedSupabase.rpc('match_manual_chunks', {
             query_embedding: queryEmbedding,
             match_threshold: matchThreshold,
             match_count: matchCount, 

@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { marked } from 'marked';
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,13 +18,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useMemoStore } from '@/store/memoStore';
 import { ChatEmptyState } from '@/components/features/ChatEmptyState';
+import { useAuth } from '@clerk/nextjs';
 
 interface Message {
   id: string;
   text: string;
-  sender: 'user' | 'ai';
+  isUser: boolean;
   sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number; original_file_name?: string }>;
   isStreaming?: boolean;
+  timestamp?: Date;
 }
 
 export type AiVerbosity = 'concise' | 'default' | 'detailed';
@@ -34,15 +37,19 @@ interface ChatInterfaceMainProps {
 
 export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterfaceMainProps) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [inputValue, setInputValue] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default');
+  const { getToken } = useAuth();
   const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
 
   // 追加: ユーザーが一番下を見ているかどうかのstate
   const [isAtBottom, setIsAtBottom] = useState(true);
+
+  // sourcesSeparatorを定義
+  const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
 
   // localStorageからaiVerbosity設定を読み込む
   useEffect(() => {
@@ -59,37 +66,42 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     const userMessage: Message = {
       id: Date.now().toString(),
       text: inputValue,
-      sender: 'user',
+      isUser: true,
+      timestamp: new Date(),
     };
-    const tempAiMessageId = Date.now().toString() + '-ai-streaming';
-    const initialAiMessage: Message = {
-      id: tempAiMessageId,
-      text: '',
-      sender: 'ai',
-      isStreaming: true,
-      sources: [],
-    };
-    setMessages((prevMessages) => [...prevMessages, userMessage, initialAiMessage]);
+
+    setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInputValue('');
     setIsLoading(true);
 
-    console.log('[ChatInterfaceMain] Current AI verbosity setting:', aiVerbosity);
-    console.log('[ChatInterfaceMain] Selected source files:', selectedSourceNames);
-
-    const apiRequestBody = { 
-      query: userMessage.text,
-      verbosity: aiVerbosity,
-      source_filenames: selectedSourceNames
+    const tempAiMessageId = (Date.now() + 1).toString();
+    const tempAiMessage: Message = {
+      id: tempAiMessageId,
+      text: '',
+      isUser: false,
+      timestamp: new Date(),
+      isStreaming: true,
     };
-    console.log('[ChatInterfaceMain] API request body:', apiRequestBody);
+    setMessages((prevMessages) => [...prevMessages, tempAiMessage]);
 
-    const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
+    const apiRequestBody = {
+      query: inputValue,
+      source_filenames: selectedSourceNames,
+      verbosity: aiVerbosity,
+    };
 
     try {
+      // Clerkトークンを取得
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error('認証情報の取得に失敗しました。');
+      }
+
       const response = await fetch('/api/qa', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(apiRequestBody),
       });
@@ -226,10 +238,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         return;
     }
     const title = `AIの回答 (${new Date().toLocaleString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })})`;
-    const content = message.text;
-    setNewMemoRequest({ title, content });
+    // MarkdownをHTMLに変換
+    const htmlContent = marked.parse(message.text) as string;
+    setNewMemoRequest({ title, content: htmlContent });
     setMemoViewExpanded(true);
-    console.log('New memo request set to store:', { title, content });
+    console.log('New memo request set to store:', { title, content: htmlContent });
   };
 
   const handleVerbosityChange = (value: string) => {
@@ -293,19 +306,19 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`mb-3 ${msg.sender === 'user' ? 'flex justify-end' : ''}`}
+                  className={`mb-3 ${msg.isUser ? 'flex justify-end' : ''}`}
                 >
-                  <div className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}>
                     <div
                       className={`p-3 rounded-lg break-words ${
-                        msg.sender === 'user'
+                        msg.isUser
                           ? 'bg-primary text-primary-foreground w-auto max-w-4xl lg:max-w-5xl'
                           : msg.text === '' && msg.isStreaming
                           ? 'bg-muted text-muted-foreground animate-pulse max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
                           : 'bg-muted text-muted-foreground max-w-[calc(100vw-4.5rem)] sm:max-w-[98%] relative'
                       }`}
                     >
-                      {msg.sender === 'user' ? (
+                      {msg.isUser ? (
                         <p className="whitespace-pre-wrap">{msg.text}</p>
                       ) : (
                         <>
@@ -331,7 +344,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
                   </div>
                   
                   {/* メモを作成ボタン - AIメッセージの下に表示 */}
-                  {msg.sender === 'ai' && !msg.isStreaming && msg.text && (
+                  {!msg.isUser && !msg.isStreaming && msg.text && (
                     <div className="mt-2 flex justify-start">
                       <Button
                         variant="outline"
