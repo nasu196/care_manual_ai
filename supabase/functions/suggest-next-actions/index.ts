@@ -194,7 +194,7 @@ ${formattedSummaries}
         console.log("Prompt for Gemini API (user: " + userId + "):\n ", prompt);
 
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash-preview-0514",
+            model: "gemini-2.0-flash",
             safetySettings: [
                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
