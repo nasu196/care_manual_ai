@@ -38,8 +38,28 @@ serve(async (req: Request) => {
     }
 
     const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'No Authorization header' }), { status: 401, headers: corsHeaders })
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), { status: 401, headers: corsHeaders })
+    }
+
+    // Clerk JWTからユーザーIDを取得
+    let userId: string | null = null;
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        return new Response(JSON.stringify({ error: 'Invalid JWT format' }), { status: 401, headers: corsHeaders });
+      }
+      const payload = JSON.parse(atob(parts[1]));
+      userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+      
+      if (!userId) {
+        return new Response(JSON.stringify({ error: 'User ID not found in token' }), { status: 401, headers: corsHeaders });
+      }
+      console.log(`[upload-manual-function] Authenticated user ID: ${userId}`);
+    } catch (error) {
+      console.error('[upload-manual-function] Error processing Authorization token:', error);
+      return new Response(JSON.stringify({ error: 'Failed to process Authorization token' }), { status: 401, headers: corsHeaders });
     }
 
     // multipart/form-dataでファイルを受け取る
@@ -66,22 +86,43 @@ serve(async (req: Request) => {
       },
     })
 
-    const { error } = await supabase.storage.from('manuals').upload(encodedFileName, file.stream(), {
+    // ストレージにファイルをアップロード
+    const { error: uploadError } = await supabase.storage.from('manuals').upload(encodedFileName, file.stream(), {
       upsert: true,
       contentType: file.type,
     })
 
-    if (error) {
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders })
+    if (uploadError) {
+      console.error('[upload-manual-function] Storage upload error:', uploadError);
+      return new Response(JSON.stringify({ error: uploadError.message }), { status: 500, headers: corsHeaders })
     }
 
-    // 必要ならmanualsテーブルにもレコード追加
+    // manualsテーブルにレコードを挿入
+    const { error: dbError } = await supabase
+      .from('manuals')
+      .insert({
+        file_name: encodedFileName,
+        original_file_name: originalFileName,
+        user_id: userId,
+        summary: null, // process-manual-functionで後から更新される
+        created_at: new Date().toISOString()
+      });
+
+    if (dbError) {
+      console.error('[upload-manual-function] Database insert error:', dbError);
+      // ストレージからファイルを削除（ロールバック）
+      await supabase.storage.from('manuals').remove([encodedFileName]);
+      return new Response(JSON.stringify({ error: `Database insert failed: ${dbError.message}` }), { status: 500, headers: corsHeaders })
+    }
+
+    console.log(`[upload-manual-function] Successfully uploaded and registered: ${encodedFileName}`);
 
     return new Response(JSON.stringify({ message: 'Upload successful', fileName: encodedFileName }), {
       status: 201,
       headers: corsHeaders,
     })
   } catch (e) {
+    console.error('[upload-manual-function] Unexpected error:', e);
     return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500, headers: corsHeaders })
   }
 }) 
