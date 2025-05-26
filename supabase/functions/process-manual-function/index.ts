@@ -789,6 +789,39 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     });
   }
 
+  // Clerk JWTからユーザーIDを取得
+  try {
+    const token = authHeader.replace('Bearer ', '');
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.error('[Auth] Invalid JWT format.');
+      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    const payload = JSON.parse(atob(parts[1]));
+    console.log('[Auth] Decoded Clerk JWT Payload:', payload);
+
+    userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+
+    if (!userId) {
+      console.error('[Auth] User ID not found in Clerk JWT payload.');
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    console.log(`[Auth] Authenticated user ID from Clerk JWT: ${userId}`);
+
+  } catch (error) {
+    console.error('[Auth] Error processing Authorization token:', error);
+    return new Response(JSON.stringify({ error: 'Failed to process Authorization token.' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
   // Supabaseクライアントを作成（Clerk統合を活用）
   const supabaseClient = createClient(supabaseUrl!, supabaseAnonKey!, {
     global: {
@@ -857,7 +890,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         processedFile,
         fileName,
         effectiveOriginalFileName,
-        'user-placeholder', // RLSポリシーがauth.jwt()->>'sub'から自動取得
+        userId,
         supabaseClient,
         embeddingsClient,
         genAI
