@@ -33,7 +33,8 @@ serve(async (req: Request) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
-    if (!supabaseUrl || !supabaseAnonKey) {
+    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+    if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
       return new Response(JSON.stringify({ error: 'Missing Supabase environment variables' }), { status: 500, headers: corsHeaders })
     }
 
@@ -74,20 +75,23 @@ serve(async (req: Request) => {
     // ファイル名エンコード（フロントと同じロジック）
     const encodedFileName = encodeFileName(originalFileName)
 
-    // Supabaseクライアントを作成（Clerk統合を活用）
+    // 1. Storage用クライアント（サービスロール）
+    const storageClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false }
+    });
+
+    // 2. manuals用クライアント（Clerk JWT）
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
           Authorization: authHeader,
         },
       },
-      auth: {
-        persistSession: false,
-      },
-    })
+      auth: { persistSession: false }
+    });
 
-    // ストレージにファイルをアップロード
-    const { error: uploadError } = await supabase.storage.from('manuals').upload(encodedFileName, file.stream(), {
+    // 1. Storageにファイルをアップロード（サービスロールでRLSバイパス）
+    const { error: uploadError } = await storageClient.storage.from('manuals').upload(encodedFileName, file.stream(), {
       upsert: true,
       contentType: file.type,
     })
@@ -97,7 +101,7 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: uploadError.message }), { status: 500, headers: corsHeaders })
     }
 
-    // manualsテーブルにレコードを挿入
+    // 2. manualsテーブルにレコードを挿入（Clerk JWTでユーザー分離）
     const { error: dbError } = await supabase
       .from('manuals')
       .insert({
@@ -111,7 +115,7 @@ serve(async (req: Request) => {
     if (dbError) {
       console.error('[upload-manual-function] Database insert error:', dbError);
       // ストレージからファイルを削除（ロールバック）
-      await supabase.storage.from('manuals').remove([encodedFileName]);
+      await storageClient.storage.from('manuals').remove([encodedFileName]);
       return new Response(JSON.stringify({ error: `Database insert failed: ${dbError.message}` }), { status: 500, headers: corsHeaders })
     }
 

@@ -254,6 +254,20 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         return;
       }
 
+      // ★ JWTトークンの内容をデバッグ出力
+      try {
+        const parts = token.split('.');
+        if (parts.length === 3) {
+          const payload = JSON.parse(atob(parts[1]));
+          console.log('[DEBUG] JWT Payload:', payload);
+          console.log('[DEBUG] user_metadata:', payload.user_metadata);
+          console.log('[DEBUG] user_id from user_metadata:', payload.user_metadata?.user_id);
+          console.log('[DEBUG] sub:', payload.sub);
+        }
+      } catch (debugError) {
+        console.error('[DEBUG] Failed to parse JWT for debugging:', debugError);
+      }
+
       // ★ Edge Function経由でアップロード
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       if (!supabaseUrl) {
