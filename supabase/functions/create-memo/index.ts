@@ -33,34 +33,6 @@ serve(async (req: Request) => {
       )
     }
 
-    // JWTトークンをデコードして直接ユーザー情報を取得
-    const token = authHeader.replace('Bearer ', '')
-    const parts = token.split('.')
-    
-    if (parts.length !== 3) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid JWT format' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // JWTペイロードをデコード
-    const payload = JSON.parse(atob(parts[1]))
-    console.log('JWT Payload:', JSON.stringify(payload))
-
-    // ClerkのJWTから直接ユーザーIDを取得
-    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
-    
-    if (!userId) {
-      console.error('No user ID found in JWT payload')
-      return new Response(
-        JSON.stringify({ error: 'User ID not found in token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log('Authenticated user ID from Clerk JWT:', userId)
-
     // リクエストボディを取得
     let rawBody;
     try {
@@ -75,7 +47,7 @@ serve(async (req: Request) => {
       );
     }
 
-    const { title, content, sources } = JSON.parse(rawBody); // 固定値テストを元に戻す
+    const { title, content, sources } = JSON.parse(rawBody);
 
     if (!title || !content) {
       return new Response(
@@ -84,17 +56,26 @@ serve(async (req: Request) => {
       )
     }
 
-    // Supabaseクライアントを作成
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Supabaseクライアントを作成（Clerk統合を活用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    })
 
-    // メモを作成（created_byにClerkのユーザーIDを設定）
+    // メモを作成（RLSポリシーがauth.jwt()->>'sub'でユーザーを識別）
     const { data, error } = await supabase
       .from('memos')
       .insert({
         title,
         content,
-        ai_generation_sources: sources || [], // カラム名を修正
-        created_by: userId // ClerkのユーザーIDを設定
+        ai_generation_sources: sources || [],
+        // created_byはRLSポリシーまたはデフォルト値で自動設定される
       })
       .select()
       .single()

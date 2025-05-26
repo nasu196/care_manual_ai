@@ -32,7 +32,7 @@ export interface AIGeneratedMemoSource {
 // ChatInterfaceMain.tsx から AiVerbosity 型をコピー
 export type AiVerbosity = 'concise' | 'default' | 'detailed';
 
-const LOCAL_STORAGE_KEY = 'nextActionSuggestionsCache';
+const getLocalStorageKey = (userId: string) => `nextActionSuggestionsCache_${userId}`;
 const CACHE_EXPIRATION_MS = 2 * 24 * 60 * 60 * 1000; // 2 days in milliseconds
 
 interface Suggestion {
@@ -69,8 +69,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const { userId: clerkUserId, isSignedIn: isClerkSignedIn, getToken } = useAuth();
 
   useEffect(() => {
+    if (!clerkUserId) return; // ユーザーIDがない場合は何もしない
+    
     try {
-      const cachedItemText = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const localStorageKey = getLocalStorageKey(clerkUserId);
+      const cachedItemText = localStorage.getItem(localStorageKey);
       if (cachedItemText) {
         const cachedItem = JSON.parse(cachedItemText);
         if (
@@ -95,18 +98,20 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
             console.log("Loaded suggestions from valid cache.");
           } else {
             console.warn("Cached suggestions array has invalid structure. Clearing cache.");
-            localStorage.removeItem(LOCAL_STORAGE_KEY);
+            localStorage.removeItem(localStorageKey);
           }
         } else {
           console.warn("Cached suggestions are expired, not in the new format, or invalid. Clearing cache.");
-          localStorage.removeItem(LOCAL_STORAGE_KEY);
+          localStorage.removeItem(localStorageKey);
         }
       }
     } catch (e) {
       console.error("Failed to load or parse suggestions from localStorage", e);
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
+      if (clerkUserId) {
+        localStorage.removeItem(getLocalStorageKey(clerkUserId));
+      }
     }
-  }, []);
+  }, [clerkUserId]);
 
   const fetchSuggestions = useCallback(async () => {
     setIsLoading(true);
@@ -222,12 +227,15 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       setSuggestions(fetchedSuggestions);
 
       try {
-        const itemToCache = {
-          suggestions: fetchedSuggestions,
-          timestamp: Date.now()
-        };
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(itemToCache));
-        console.log("Saved suggestions to cache with timestamp.");
+        if (clerkUserId) {
+          const itemToCache = {
+            suggestions: fetchedSuggestions,
+            timestamp: Date.now()
+          };
+          const localStorageKey = getLocalStorageKey(clerkUserId);
+          localStorage.setItem(localStorageKey, JSON.stringify(itemToCache));
+          console.log("Saved suggestions to cache with timestamp.");
+        }
       } catch (e) {
         console.error("Failed to save suggestions to localStorage", e);
       }
@@ -251,7 +259,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSourceNames, getToken]);
+  }, [selectedSourceNames, getToken, clerkUserId]);
 
   // アイデアカードクリック時のハンドラ
   const handleSuggestionItemClick = (suggestion: Suggestion) => {
