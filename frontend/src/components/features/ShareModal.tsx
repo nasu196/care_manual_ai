@@ -73,8 +73,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
       
       // 共有URLを生成
       const currentUrl = new URL(window.location.origin);
-      currentUrl.pathname = '/shared';
-      currentUrl.searchParams.set('id', shareId);
+      currentUrl.pathname = '/';
+      currentUrl.searchParams.set('shareId', shareId);
       
       setShareUrl(currentUrl.toString());
       setIsCopied(false);
