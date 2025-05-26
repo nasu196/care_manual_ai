@@ -78,7 +78,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   // ★ useRef を使って前回の memoListLastUpdated の値を保持
   const prevMemoListLastUpdatedRef = useRef<number | null>(null);
 
-  console.log(`[MemoStudio] Rendering. isSignedIn: ${isSignedIn}, userId: ${userId}`);
+
 
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
@@ -92,15 +92,12 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   }, [newMemoRequest, clearNewMemoRequest, isEditingNewMemo, selectedMemoId]); // 依存配列にストアの値を追加
 
   const fetchMemos = useCallback(async () => {
-    console.log(`[MemoStudio fetchMemos] Attempting. isSignedIn: ${isSignedIn}, userId: ${userId}`);
     if (!isSignedIn || !userId || !getToken) {
-      console.log('[fetchMemos] Not signed in or getToken/userId not available yet.');
       setIsLoading(false); // or true, depending on desired UX before auth ready
       return;
     }
     setIsLoading(true);
     setError(null);
-    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos...`);
 
     try {
       const token = await getToken({ template: 'supabase' });
@@ -122,8 +119,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         },
       });
 
-      console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, response);
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
         console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function (${response.status}):`, errorData);
@@ -133,10 +128,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       const data = await response.json();
 
       if (Array.isArray(data)) {
-        console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
-        if (data.length > 0) {
-          console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
-        }
         setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
       } else {
         console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
@@ -147,7 +138,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       setError(e as Error);
     } finally {
       setIsLoading(false);
-      console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`);
     }
   }, [getToken, userId, isSignedIn, setIsLoading, setError, setMemos]);
 
@@ -156,7 +146,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     // isEditingNewMemo が false になったとき (新規作成完了 or キャンセル時)
     // または、selectedMemoId が null になったとき (詳細表示からリストに戻った時) にメモを再取得
     if (!isEditingNewMemo && !selectedMemoId) {
-      console.log('[Effect 1] Fetching memos: not editing new memo, no selected memo.');
       fetchMemos();
     }
   }, [fetchMemos, isEditingNewMemo, selectedMemoId]); // isLoading を依存配列から削除
@@ -165,7 +154,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   useEffect(() => {
     // 前回の値がnull (初回実行時など) でない、かつ現在の値と異なる場合に実行
     if (prevMemoListLastUpdatedRef.current !== null && memoListLastUpdated !== prevMemoListLastUpdatedRef.current /* && !isEditingNewMemo && !selectedMemoId */) {
-      console.log('[Effect 2 - Using Ref] Fetching memos due to memoListLastUpdated change.');
       fetchMemos();
     }
     // 現在の値を次回の比較のために保存
@@ -196,7 +184,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       title: newMemoTitle,
       content: newMemoContent, // HTML文字列をそのまま渡す
     };
-    console.log('[handleCreateMemo] memoData to be sent (HTML):', JSON.stringify(memoData));
 
     try {
       const token = await getToken({ template: 'supabase' });
@@ -224,8 +211,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
         throw new Error(errorData.message || `Failed to create memo. Status: ${response.status}`);
       }
 
-      const newMemo = await response.json();
-      console.log('[handleCreateMemo] Memo created successfully by Edge Function:', newMemo);
+      await response.json();
 
       setNewMemoTitle('');
       setNewMemoContent('');
@@ -280,22 +266,16 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       if (selectedMemoId === memoIdToDelete) {
           setSelectedMemoId(null);
       }
-      console.log('Memo deleted successfully:', memoIdToDelete);
 
     } catch (e) {
       console.error('Failed to delete memo (コンソールエラー):', e);
       let errorMessage = 'メモの削除中に予期せぬエラーが発生しました。';
       if (e instanceof Error) {
         errorMessage = e.message;
-        console.log('エラーメッセージ (Error instance): ', errorMessage);
       } else if (typeof e === 'object' && e !== null && 'message' in e && typeof e.message === 'string') {
         errorMessage = e.message;
-        console.log('エラーメッセージ (Object with message): ', errorMessage);
-      } else {
-        console.log('エラーメッセージ (Unknown type): ', e);
       }
       setDeleteError(errorMessage);
-      console.log('setDeleteError にセットするメッセージ: ', errorMessage);
     } finally {
       setIsDeleting(false);
       setDeletingMemoId(null);
@@ -340,7 +320,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
   const handleStartEdit = () => {
     if (!selectedMemo) return;
-    console.log('[MemoStudio] handleStartEdit called. Selected memo content (HTML):', selectedMemo.content); // ログ更新
     setIsEditingSelectedMemo(true);
     setEditingTitle(selectedMemo.title);
     setEditingContent(selectedMemo.content); // HTML文字列をそのままセット
@@ -481,7 +460,6 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
       // 成功時はレスポンスボディに更新後のメモオブジェクトを期待する（または少なくとも成功ステータス）
       const updatedMemo = await response.json();
-      console.log('[handleToggleImportant] Toggle important status response:', updatedMemo);
       
       // UIは楽観的更新済みなので、ここでは特に何もしないか、
       // 返ってきたデータで再度状態を更新しても良い (updated_atなどを反映するため)

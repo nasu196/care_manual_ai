@@ -106,14 +106,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
   const fetchUploadedFiles = useCallback(async () => {
     setLoadingFiles(true);
-    console.log('[SourceManager] fetchUploadedFiles started.');
     try {
       const token = await getToken({ template: 'supabase' });
       if (!token) {
         console.error('[SourceManager] Failed to get auth token for fetching files.');
         throw new Error("Failed to get auth token for fetching files.");
       }
-      console.log('[SourceManager] Auth token obtained.');
 
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -122,10 +120,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         console.error('[SourceManager] Supabase URL or Anon Key is not configured.');
         throw new Error("Supabase URL or Anon Key is not configured.");
       }
-      console.log('[SourceManager] Supabase URL and Anon Key are configured.');
 
       const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=file_name,original_file_name&order=file_name.asc`;
-      console.log(`[SourceManager] Fetching from API: ${apiUrl}`);
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -134,7 +130,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           'Authorization': `Bearer ${token}`,
         },
       });
-      console.log(`[SourceManager] API response status: ${response.status}`);
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
@@ -143,7 +138,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
 
       const data = await response.json();
-      console.log('[SourceManager] API response data:', data);
 
 
 
@@ -153,7 +147,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         id: item.file_name 
       })) || [];
       setSourceFiles(files);
-      console.log('[SourceManager] Source files set:', files);
 
     } catch (err) {
       console.error('[SourceManager] Unexpected error fetching files:', err);
@@ -161,17 +154,13 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       setSourceFiles([]);
     } finally {
       setLoadingFiles(false);
-      console.log('[SourceManager] fetchUploadedFiles finished. setLoadingFiles(false).');
     }
   }, [getToken, setMessageWithAutoHide]);
 
   useEffect(() => {
-    console.log(`[SourceManager useEffect] Running. isSignedIn: ${isSignedIn}, getToken type: ${typeof getToken}`);
     if (isSignedIn && typeof getToken === 'function') {
-      console.log('[SourceManager useEffect] Conditions met, calling fetchUploadedFiles.');
       fetchUploadedFiles();
     } else {
-      console.log('[SourceManager useEffect] Conditions NOT met. Clearing loading state.');
       setLoadingFiles(false); // サインインしていない、またはgetToken準備中の場合はローディングを解除
       setSourceFiles([]); // ファイルリストもクリア
     }
@@ -191,7 +180,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     setMessageWithAutoHide(null);
     if (event.target.files && event.target.files.length > 0) {
       const files = Array.from(event.target.files);
-      console.log(`[handleLocalFileChange] Selected ${files.length} files for upload`);
       
       // 複数ファイルを並行してアップロード
       files.forEach(file => {
@@ -288,8 +276,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         body: formData,
       });
 
-      console.log('[handleUpload] Storage upload response status:', uploadResponse.status);
-      console.log('[handleUpload] Storage upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+
 
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
@@ -314,7 +301,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         return;
       }
 
-      console.log('[handleUpload] Storage upload successful');
+
       
       updateUploadStatus(uploadId, {
         status: 'processing',
@@ -331,9 +318,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           'Content-Type': 'application/json',
         };
         const body = JSON.stringify({ fileName: encodedFileName, originalFileName });
-        console.log("[handleUpload] Request URL:", requestUrl);
-        console.log("[handleUpload] Request Headers:", JSON.stringify(headers, null, 2));
-        console.log("[handleUpload] JSON body:", body);
 
         const response = await fetch(requestUrl, {
           method: 'POST',
@@ -341,14 +325,9 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           body: body,
         });
 
-        // レスポンスの詳細ログを追加
-        console.log(`[handleUpload] Edge Function response status: ${response.status}`);
-        console.log(`[handleUpload] Edge Function response headers:`, Object.fromEntries(response.headers.entries()));
-        
         let responseData;
         try {
           const responseText = await response.text();
-          console.log(`[handleUpload] Edge Function raw response text:`, responseText);
           
           if (responseText.trim()) {
             responseData = JSON.parse(responseText);
@@ -366,7 +345,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           throw new Error(errorMessage);
         }
 
-        console.log('[handleUpload] Edge Function call successful:', responseData);
+
         updateUploadStatus(uploadId, {
           status: 'completed',
           message: `完了`
@@ -477,7 +456,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${errorData.message || deleteResponse.statusText}` });
         return;
       }
-             console.log(`File「${storageFileName}」deleted successfully via Edge Function.`);
+
 
       // Fetch updated list and update UI
       await fetchUploadedFiles();
@@ -503,7 +482,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     }
 
     const newNamePromptResult = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
-    console.log(`[handleRenameFile] Attempting to rename. Original name: '${oldName}', New name prompt result: '${newNamePromptResult}'`);
+
 
     if (newNamePromptResult === null) {
       setMessageWithAutoHide({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
@@ -536,7 +515,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     const storageFileName = targetFile.id; // エンコードされたファイル名
 
     setMessageWithAutoHide({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
-    console.log(`[handleRenameFile] Updating original_file_name in database for file: ${storageFileName}`);
+    
     
     try {
       const token = await getToken({ template: 'supabase' });
@@ -562,7 +541,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         body: JSON.stringify({ original_file_name: trimmedNewName }),
       });
         
-      // console.log('[handleRenameFile] Database update call returned. Error:', JSON.stringify(updateError, null, 2)); // updateErrorはもうない
+
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
@@ -587,7 +566,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       }
       setMessageWithAutoHide({ type: 'error', text: renameErrorMessage });
     }
-    console.log('[handleRenameFile] End.');
+    
   };
 
   // ★ ソースデータ取得関数

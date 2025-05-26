@@ -46,7 +46,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     }
   }, [hasEditPermission, currentPanels, activeMobilePanel]);
 
-  console.log('[AppLayout] Initial state: isMobileView:', isMobileView, 'activeMobilePanel:', activeMobilePanel, 'translateX:', translateX, 'currentPanelWidth:', currentPanelWidth);
+
 
   useEffect(() => {
     const checkMobileView = () => {
@@ -59,10 +59,8 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
       const newIndex = currentPanelsList.indexOf(activeMobilePanel);
       if (mobile) {
         setTranslateX(newIndex * -currentWidth);
-        console.log('[AppLayout] checkMobileView (mobile): panelWidth:', currentWidth, 'newIndex:', newIndex, 'translateX:', newIndex * -currentWidth);
       } else {
         setTranslateX(newIndex * -currentWidth); // PC表示でもtranslateXを計算（スライドには使われないが整合性のため）
-        console.log('[AppLayout] Switched to PC view. activeMobilePanel:', activeMobilePanel, 'panelWidth:', currentWidth, 'translateX:', newIndex * -currentWidth);
       }
     };
     checkMobileView();
@@ -78,9 +76,6 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
         const newTranslateX = newIndex * -currentPanelWidth;
         if (!isAnyModalOpen) { // モーダル非表示時のみtranslateXを更新
           setTranslateX(newTranslateX);
-          console.log('[AppLayout] activeMobilePanel changed (mobile, no modal): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'newTranslateX (px):', newTranslateX);
-        } else {
-          console.log('[AppLayout] activeMobilePanel changed (mobile, modal open): skipping translateX update. Current translateX:', translateX);
         }
       }
     } else {
@@ -89,7 +84,6 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
         const currentPanelsList = Array.from(currentPanels);
         const newIndex = currentPanelsList.indexOf(activeMobilePanel);
         setTranslateX(newIndex * -currentPanelWidth); 
-        console.log('[AppLayout] activeMobilePanel changed (PC): activeMobilePanel:', activeMobilePanel, 'newIndex:', newIndex, 'panelWidth:', currentPanelWidth, 'translateX set to (px):', newIndex * -currentPanelWidth);
       }
     }
   }, [activeMobilePanel, isMobileView, currentPanelWidth, currentPanels, isAnyModalOpen]); // isAnyModalOpenを依存配列に追加
@@ -103,7 +97,6 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     onSwipedLeft: () => {
       const currentPanelsList = Array.from(currentPanels);
       const currentIndex = currentPanelsList.indexOf(activeMobilePanel);
-      console.log('[AppLayout] onSwipedLeft: currentIndex:', currentIndex); // ★ スワイプ左ログ
       if (currentIndex < currentPanelsList.length - 1) {
         setActiveMobilePanel(currentPanelsList[currentIndex + 1] as PanelType);
       }
@@ -111,7 +104,6 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     onSwipedRight: () => {
       const currentPanelsList = Array.from(currentPanels);
       const currentIndex = currentPanelsList.indexOf(activeMobilePanel);
-      console.log('[AppLayout] onSwipedRight: currentIndex:', currentIndex); // ★ スワイプ右ログ
       if (currentIndex > 0) {
         setActiveMobilePanel(currentPanelsList[currentIndex - 1] as PanelType);
       }
@@ -120,7 +112,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     preventScrollOnSwipe: true, // スワイプ中の縦スクロールを防止
   });
 
-  console.log('[AppLayout] Rendering: isMobileView:', isMobileView, 'activeMobilePanel:', activeMobilePanel, 'translateX:', translateX); // ★ レンダリング直前ログ
+
 
   if (isMobileView) {
     return (
