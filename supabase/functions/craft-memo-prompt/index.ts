@@ -16,7 +16,7 @@ function initializeModelsAndChain() {
   if (!chatModel) {
     chatModel = new ChatGoogleGenerativeAI({
       apiKey: geminiApiKey,
-      model: "gemini-1.5-flash-preview-0514", // LangChainの標準に合わせて model を使用
+      model: "gemini-2.0-flash", // LangChainの標準に合わせて model を使用
       temperature: 0.4,
     });
   }

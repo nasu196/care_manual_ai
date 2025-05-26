@@ -33,7 +33,7 @@ function initializeClientsAndChains() {
   if (!chatModel) {
     chatModel = new ChatGoogleGenerativeAI({
       apiKey: geminiApiKey,
-      model: "gemini-1.5-flash-preview-0514",
+      model: "gemini-2.0-flash",
       temperature: 0.4,
     });
   }
