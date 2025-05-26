@@ -37,16 +37,9 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'Missing Supabase environment variables' }), { status: 500, headers: corsHeaders })
     }
 
-    // Clerk JWTからユーザーIDを取得
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
       return new Response(JSON.stringify({ error: 'No Authorization header' }), { status: 401, headers: corsHeaders })
-    }
-    const token = authHeader.replace('Bearer ', '')
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
-    if (!userId) {
-      return new Response(JSON.stringify({ error: 'User ID not found in token' }), { status: 401, headers: corsHeaders })
     }
 
     // multipart/form-dataでファイルを受け取る
@@ -61,8 +54,18 @@ serve(async (req: Request) => {
     // ファイル名エンコード（フロントと同じロジック）
     const encodedFileName = encodeFileName(originalFileName)
 
-    // SupabaseクライアントでStorageにアップロード
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Supabaseクライアントを作成（Clerk統合を活用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    })
+
     const { error } = await supabase.storage.from('manuals').upload(encodedFileName, file.stream(), {
       upsert: true,
       contentType: file.type,

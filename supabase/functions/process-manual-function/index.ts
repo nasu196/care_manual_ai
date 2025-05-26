@@ -789,47 +789,17 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     });
   }
 
-  try {
-    const token = authHeader.replace('Bearer ', '');
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      console.error('[Auth] Invalid JWT format.');
-      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    const payload = JSON.parse(atob(parts[1]));
-    console.log('[Auth] Decoded Clerk JWT Payload:', payload);
-
-    userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
-
-    if (!userId) {
-      console.error('[Auth] User ID (sub) not found in Clerk JWT payload.');
-      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    console.log(`[Auth] Authenticated user ID from Clerk JWT: ${userId}`);
-
-    const xUserId = req.headers.get('x-user-id');
-    if (xUserId) {
-        console.log('[Auth] Received x-user-id Header (for debugging/logging only):', xUserId);
-        if (userId !== xUserId) {
-            console.warn(`[Auth] Mismatch between Clerk JWT user ID (${userId}) and x-user-id header (${xUserId}). Using JWT user ID.`);
-        }
-    }
-
-  } catch (error) {
-    console.error('[Auth] Error processing Authorization token:', error);
-    return new Response(JSON.stringify({ error: 'Failed to process Authorization token.' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-
-  const supabaseClient = createClient(supabaseUrl!, supabaseAnonKey!);
+  // Supabaseクライアントを作成（Clerk統合を活用）
+  const supabaseClient = createClient(supabaseUrl!, supabaseAnonKey!, {
+    global: {
+      headers: {
+        Authorization: authHeader,
+      },
+    },
+    auth: {
+      persistSession: false,
+    },
+  });
 
   if (req.method === 'POST') {
     const contentType = req.headers.get("content-type");
@@ -887,7 +857,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         processedFile,
         fileName,
         effectiveOriginalFileName,
-        userId!, 
+        'user-placeholder', // RLSポリシーがauth.jwt()->>'sub'から自動取得
         supabaseClient,
         embeddingsClient,
         genAI

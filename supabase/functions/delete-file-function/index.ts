@@ -27,39 +27,9 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const clerkToken = authHeader.replace('Bearer ', '');
 
-    // Clerk JWTを検証してuser_idを取得
-    // ClerkのJWTは自己完結型なので、直接デコードして検証する
-    const jwtParts = clerkToken.split('.');
-    if (jwtParts.length !== 3) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid JWT format' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
-    let payload;
-    try {
-      const decodedPayload = atob(jwtParts[1]);
-      payload = JSON.parse(decodedPayload);
-    } catch (error) {
-      console.error('JWT decode error:', error);
-      return new Response(
-        JSON.stringify({ error: 'Invalid JWT payload' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
-    // JWTペイロードからuser_idを取得
-    const userId = payload.sub;
-
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ error: 'User ID not found in token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
 
     // リクエストボディを解析
     const requestData: DeleteFileRequest = await req.json();
@@ -72,20 +42,28 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Supabaseクライアントを作成（サービスロール使用）
+    // Supabaseクライアントを作成（Clerk統合を活用）
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
     
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    });
 
-    console.log(`[delete-file-function] Deleting file: ${fileName} for user: ${userId}`);
+    console.log(`[delete-file-function] Deleting file: ${fileName}`);
 
-    // Step 1: manualsテーブルからレコードを削除（user_idでフィルタ）
+    // Step 1: manualsテーブルからレコードを削除（RLSポリシーがユーザー分離を処理）
     const { error: dbError } = await supabase
       .from('manuals')
       .delete()
-      .eq('file_name', fileName)
-      .eq('user_id', userId);
+      .eq('file_name', fileName);
 
     if (dbError) {
       console.error('Database delete error:', dbError);
