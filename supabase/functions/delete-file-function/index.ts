@@ -42,19 +42,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Supabaseクライアントを作成（Clerk統合を活用）
+    // Supabaseクライアントをservice_role_keyで作成
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     
-    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: authHeader,
-        },
-      },
-      auth: {
-        persistSession: false,
-      },
+    const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false },
     });
 
     console.log(`[delete-file-function] Deleting file: ${fileName}`);
