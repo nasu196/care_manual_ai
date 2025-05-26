@@ -125,7 +125,7 @@ serve(async (req: Request, connInfo: ConnInfo): Promise<Response> => {
         let query = supabase
             .from('manuals')
             .select('file_name, original_file_name, summary')
-            .eq('created_by', userId)
+            .eq('user_id', userId)
             .not('summary', 'is', null)
             .filter('summary', 'not.eq', '');
         

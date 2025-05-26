@@ -15,10 +15,10 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Toggle } from '@/components/ui/toggle';
-import { Separator } from '@/components/ui/separator'; // ツールバーの区切り線用
+import { Separator } from '@/components/ui/separator';
 
 interface RichTextEditorProps {
-  content: string;
+  content: string; // HTML文字列を期待
   onChange: (htmlContent: string) => void;
   editable?: boolean;
 }
@@ -34,13 +34,13 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
         heading: {
           levels: [1, 2, 3],
         },
-        // 他のStarterKitのオプションも必要に応じて設定可能
       }),
     ],
-    content: content,
+    content: content, // HTML文字列を直接セット
     editable: editable,
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+      const htmlContent = editor.getHTML();
+      onChange(htmlContent); // HTMLをそのまま返す
     },
     editorProps: {
       attributes: {
@@ -48,6 +48,18 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       },
     },
   });
+
+  React.useEffect(() => {
+    if (!editor || content === undefined) {
+      return;
+    }
+    // 外部から content が変更された場合、エディタのコンテンツを更新
+    // ただし、現在のエディタのHTMLと新しいHTMLが異なる場合のみ
+    // かつ、エディタがフォーカスされていない場合（ユーザー入力中を避ける）
+    if (!editor.isFocused && editor.getHTML() !== content) {
+      editor.commands.setContent(content, false); // 第2引数 false で onUpdate をトリガーしない
+    }
+  }, [content, editor]);
 
   if (!editor) {
     return null;

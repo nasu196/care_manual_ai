@@ -18,8 +18,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { invokeFunction } from '@/lib/supabaseFunctionUtils';
 import { useAuth } from '@clerk/nextjs';
+import { marked } from 'marked';
 
 // AIが生成するメモのソース情報の型 (エクスポートする)
 export interface AIGeneratedMemoSource {
@@ -110,34 +110,56 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     }
   }, []);
 
-  const fetchSuggestions = useCallback(async () => { // useCallback でラップ
+  const fetchSuggestions = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-    setGenerateMemoError(null); // エラーをクリア
-    setMessage(null); // メッセージをクリア
+    setGenerateMemoError(null); 
+    setMessage(null); 
     setHasFetchedOnce(true);
 
     if (!selectedSourceNames || selectedSourceNames.length === 0) {
       setMessage({ type: 'info', text: '提案を生成するには、まずソースを選択してください。' });
       setSuggestions([]);
       setIsLoading(false);
-      // キャッシュはクリアしない（選択なしの状態とキャッシュされた全件提案は別物として扱う）
-      // 必要であれば、ここで localStorage.removeItem(LOCAL_STORAGE_KEY) を呼ぶことも検討
+      return;
+    }
+    
+    // Clerkトークンを取得 (ここ！ getToken は useAuth から取得済みのはず)
+    let token;
+    try {
+      token = await getToken(); 
+      if (!token) {
+        throw new Error('Clerk token is not available.');
+      }
+    } catch (e) {
+      console.error("Failed to get Clerk token:", e);
+      setError('認証情報の取得に失敗しました。再ログインしてみてください。');
+      setIsLoading(false);
       return;
     }
 
     try {
-      const { data: responseText, error: invokeError } = await supabaseClient.functions.invoke<string>(
-        'suggest-next-actions',
-        {
-          method: 'POST',
-          body: { selectedFileNames: selectedSourceNames } // 選択されたファイル名を渡す
-        }
-      );
-
-      if (invokeError) {
-        throw invokeError;
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL is not configured (NEXT_PUBLIC_SUPABASE_URL).');
       }
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/suggest-next-actions`;
+
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ selectedFileNames: selectedSourceNames }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: `Failed to fetch suggestions. Edge Function status: ${response.status}` }));
+        throw new Error(errorData.error || `Failed to fetch suggestions. Edge Function status: ${response.status}`);
+      }
+
+      const responseText = await response.text(); // Edge Function が直接文字列を返すことを想定
 
       if (typeof responseText !== 'string') {
         throw new Error('AIからのレスポンスが予期しない形式です。 (Not a string)');
@@ -161,8 +183,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           // 開始マーカーはあったが終了マーカーが見つからない場合
           console.warn("JSON start marker (```json) found, but end marker (```) not found. Attempting to parse from start marker to end of string, or whole string if that fails.");
           // この場合、状況によっては ```json 以降全てをパースしようと試みるか、エラーにするか判断が必要
-          // 今回は、より安全に、全体をパースしようとするフォールバックに任せるか、明確なエラーとする
-          // 一旦、全体をパースする方に倒すが、AIの出力が安定しているならエラーの方が良いかもしれない
+          // 今回は、より安全に、全体をパースしようとするフォールバックに倒すが、AIの出力が安定しているならエラーの方が良いかもしれない
           jsonStringToParse = responseText; // フォールバック：全体をパースしようと試みる
         }
       } else {
@@ -232,7 +253,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSourceNames, supabaseClient]); // 依存配列
+  }, [selectedSourceNames, supabaseClient, getToken]); // getToken を依存配列に追加
 
   // アイデアカードクリック時のハンドラ
   const handleSuggestionItemClick = (suggestion: Suggestion) => {
@@ -311,84 +332,100 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         const errorData = await memoResponse.json().catch(() => ({error: 'メモ生成リクエストの解析に失敗'}));
         throw new Error(errorData.error || 'メモの生成に失敗しました。');
       }
-      const { generated_memo, sources } = await memoResponse.json();
+      const memoGenerationResult = await memoResponse.json();
       console.log(`[${tempMemoId}] MemoWriterLLM successful.`);
       
-      updateGeneratingMemoStatus(tempMemoId, 'saving'); 
-      
-      try {
-        if (typeof generated_memo !== 'string') {
-          console.warn(`[${tempMemoId}] generated_memo was not a string. Received:`, generated_memo);
-          updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: AIからのメモ内容が予期しない形式です。");
-          setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-          return;
+      // ☆☆☆ デバッグログ追加 ☆☆☆
+      console.log(`[${tempMemoId}] Raw memoGenerationResult from API:`, JSON.stringify(memoGenerationResult, null, 2));
+
+      if (!memoGenerationResult || !memoGenerationResult.generated_memo) {
+        // ☆☆☆ より詳細なエラーメッセージ ☆☆☆
+        let detail = "Response was null or undefined.";
+        if (memoGenerationResult) {
+          detail = "'generated_memo' property was missing, null, or empty.";
         }
-      } catch (e) { 
-        console.error(`[${tempMemoId}] Error during generated_memo validation:`, e);
-        updateGeneratingMemoStatus(tempMemoId, 'error', "エラー: メモ内容の検証中に問題が発生しました。");
-        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-        return;
+        console.error(`[${tempMemoId}] Invalid memo generation result. Detail: ${detail}. Raw response:`, memoGenerationResult);
+        throw new Error(`AIからのメモ生成結果が不正です。(詳細: ${detail})`);
       }
 
-      // === Edge Function 'create-memo' を呼び出して保存 ===
-      try {
-        console.log(`[${tempMemoId}] Invoking create-memo Edge Function. Using Clerk User ID: ${currentClerkUserId}`);
-        console.log(`[${tempMemoId}] Value of currentClerkUserId JUST BEFORE invokeFunction:`, currentClerkUserId);
-        
-        const { data: createdMemoData, error: invokeError } = await invokeFunction(
-          'create-memo',
-          { // bodyの内容
-            title: memoTitle,
-            content: generated_memo,
-            sources: sources,
-          },
-          getToken,
-          currentClerkUserId
-        );
+      // Markdown から HTML への変換
+      const htmlContent = marked.parse(memoGenerationResult.generated_memo) as string;
 
-        if (invokeError) {
-            console.error(`[${tempMemoId}] Error invoking create-memo Edge Function:`, invokeError);
-            let displayErrorMessage = `メモの保存に失敗しました: ${invokeError.message}`;
-            if (typeof invokeError.context === 'object' && invokeError.context !== null && 'error' in invokeError.context && typeof invokeError.context.error === 'string') {
-                displayErrorMessage = invokeError.context.error;
-            } else if (invokeError.message.includes('Function returned an error')) {
-                 displayErrorMessage = 'メモ保存機能の呼び出しでサーバーエラーが発生しました。';
-            }
-            updateGeneratingMemoStatus(tempMemoId, 'error', displayErrorMessage);
-            setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-        } else if (createdMemoData && createdMemoData.memo) {
-            console.log(`[${tempMemoId}] Memo saved successfully via Edge Function with ID:`, createdMemoData.memo.id);
-            removeGeneratingMemo(tempMemoId);
-            triggerMemoListRefresh();
-        } else {
-            console.warn(`[${tempMemoId}] create-memo Edge Function did not return expected data or memo object. Response:`, createdMemoData);
-            updateGeneratingMemoStatus(tempMemoId, 'error', 'メモの保存結果がサーバーから正しく返されませんでした。');
-            setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
+      updateGeneratingMemoStatus(tempMemoId, 'saving', {
+        newTitle: memoTitle,
+        newContent: htmlContent,
+        newSources: memoGenerationResult.sources,
+      });
+
+      // ▼▼▼ create-memo 呼び出し: 標準 fetch で Edge Function を直接呼び出す ▼▼▼
+      try {
+        console.log(`[${tempMemoId}] Calling create-memo Edge Function directly for: ${memoTitle}`);
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error('Supabase URL is not configured (NEXT_PUBLIC_SUPABASE_URL).');
         }
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-memo`;
+
+        const response = await fetch(edgeFunctionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            title: memoTitle,
+            content: htmlContent,
+            is_ai_generated: true,
+            ai_generation_sources: memoGenerationResult.sources,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: `Failed to save memo. Edge Function status: ${response.status}` }));
+          throw new Error(errorData.error || `Failed to save memo. Edge Function status: ${response.status}`);
+        }
+
+        const createdMemo = await response.json();
+
+        console.log(`[${tempMemoId}] create-memo Edge Function successful:`, createdMemo);
+        removeGeneratingMemo(tempMemoId);
+        triggerMemoListRefresh();
+        setMessage({ type: 'success', text: `メモ「${memoTitle}」が作成されました。` });
+        setTimeout(() => setMessage(null), 5000);
+
+      } catch (err) {
+        console.error(`[${tempMemoId}] Error calling create-memo Edge Function:`, err);
+        let createErrorMessage = 'メモの保存中にエラーが発生しました。';
+        if (err instanceof Error) {
+          createErrorMessage = err.message;
+        } else if (typeof err === 'object' && err !== null && 'message' in err && typeof (err as { message?: string }).message === 'string') {
+          createErrorMessage = (err as { message: string }).message;
+        } else if (typeof err === 'string') {
+          createErrorMessage = err;
+        }
+        updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage: createErrorMessage });
+        setGenerateMemoError(`AIはメモを生成しましたが、保存中にエラーが発生しました: ${createErrorMessage}`);
+      }
+      // ▲▲▲ ここまで create-memo 呼び出し処理 ▲▲▲
 
     } catch (e: unknown) {
-        console.error(`[${tempMemoId}] Unexpected error during create-memo invocation:`, e);
-        let errMsg = 'メモ保存処理中に予期せぬエラーが発生しました。';
-        if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
-            errMsg = (e as { message: string }).message;
-        } else if (typeof e === 'string') {
-            errMsg = e;
-        }
-        updateGeneratingMemoStatus(tempMemoId, 'error', errMsg);
-        setTimeout(() => { removeGeneratingMemo(tempMemoId); }, 5000);
-    }
-    // === ここまで Edge Function 'create-memo' を呼び出して保存 ===
-
-    } catch (err: unknown) {
-      console.error(`[${tempMemoId}] Error in memo generation/auto-save process for ${memoTitle}:`, err);
-      const errorMessage = err instanceof Error ? err.message : 'メモの生成または自動保存中に不明なエラーが発生しました。';
-      updateGeneratingMemoStatus(tempMemoId, 'error', errorMessage);
-      
-      setTimeout(() => {
-        removeGeneratingMemo(tempMemoId);
-      }, 5000);
-    }
-  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, isClerkSignedIn, clerkUserId, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, setIsAnyModalOpen, setGenerateMemoError]);
+      let errorMessage = 'AIによるメモの生成または初期保存処理中に不明なエラーが発生しました。';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
+        errorMessage = (e as { message: string }).message;
+      } else if (typeof e === 'string') {
+        errorMessage = e;
+      }
+      console.error("Error generating memo with AI:", e);
+      setGenerateMemoError(errorMessage);
+      updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage });
+      // エラー時は removeGeneratingMemo を呼ぶか、ユーザーが手動で消せるように残すか検討
+    } 
+    // finally ブロックは不要かもしれない、エラー時や成功時でUIの状態（ローディングインジケータなど）が
+    // addGeneratingMemo / updateGeneratingMemoStatus / removeGeneratingMemo で管理されるなら。
+    // もし finally で共通処理が必要ならここに記述。
+  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, isClerkSignedIn, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, selectedSourceNames, setIsAnyModalOpen]);
 
   const containerVariants = {
     hidden: { opacity: 0 },

@@ -46,7 +46,8 @@ export async function invokeFunction(
     console.log('[invokeFunction] Body to be sent (before stringify):', options.body);
 
     let endpoint = `${supabaseUrl}/functions/v1/${functionName}`;
-    if (options.method === 'DELETE' && options.itemId) {
+    // GET または DELETE メソッドで itemId が存在する場合、URLに追加
+    if ((options.method === 'GET' || options.method === 'DELETE') && options.itemId) {
       endpoint = `${endpoint}/${options.itemId}`;
     }
 
@@ -56,12 +57,14 @@ export async function invokeFunction(
       headers: {
         'Authorization': `Bearer ${token}`,
         'apikey': supabaseAnonKey,
+        // POST, PUT, PATCH のみ Content-Type を設定
         ...( (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH') && options.body 
             ? { 'Content-Type': 'application/json' } 
             : {}),
         'x-user-id': userId,
         ...(options.headers || {}),
       },
+      // POST, PUT, PATCH のみ body を設定
       body: (options.method === 'POST' || options.method === 'PUT' || options.method === 'PATCH') && options.body 
             ? JSON.stringify(options.body) 
             : undefined,

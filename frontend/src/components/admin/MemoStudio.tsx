@@ -10,7 +10,7 @@ import { useAuth } from '@clerk/nextjs';
 import { invokeFunction } from '@/lib/supabaseFunctionUtils';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { marked } from 'marked';
+// import { marked } from 'marked'; // 不要になったためコメントアウトまたは削除
 import ReactMarkdown from 'react-markdown';
 import { AIGeneratedMemoSource } from '@/components/admin/MemoTemplateSuggestions';
 import rehypeRaw from 'rehype-raw'; // HTML を安全に解釈するためのプラグイン
@@ -44,7 +44,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const [error, setError] = useState<Error | null>(null);
 
   const [newMemoTitle, setNewMemoTitle] = useState('');
-  const [newMemoContent, setNewMemoContent] = useState(''); // 初期値を空文字列（または <p></p>）に
+  const [newMemoContent, setNewMemoContent] = useState(''); // HTML文字列として初期化
   const [isCreatingMemo, setIsCreatingMemo] = useState(false);
   const [createMemoError, setCreateMemoError] = useState<string | null>(null);
 
@@ -61,7 +61,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   // ★編集機能用のstate
   const [isEditingSelectedMemo, setIsEditingSelectedMemo] = useState<boolean>(false);
   const [editingTitle, setEditingTitle] = useState<string>('');
-  const [editingContent, setEditingContent] = useState<string>('');
+  const [editingContent, setEditingContent] = useState<string>(''); // HTML文字列として初期化
   const [isUpdatingMemo, setIsUpdatingMemo] = useState<boolean>(false); // 保存中のローディング
   const [updateMemoError, setUpdateMemoError] = useState<string | null>(null); // 保存エラー
 
@@ -84,14 +84,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   useEffect(() => { // Zustandストアの newMemoRequest を監視するuseEffect
     if (newMemoRequest && !isEditingNewMemo && !selectedMemoId) {
       setNewMemoTitle(newMemoRequest.title);
-      try {
-        const htmlContent = newMemoRequest.content.includes('<') ? newMemoRequest.content : marked.parse(newMemoRequest.content) as string;
-        setNewMemoContent(htmlContent);
-      } catch (e) {
-        console.error("Markdownの解析に失敗しました:", e);
-        setNewMemoContent(newMemoRequest.content); // 解析失敗時はプレーンテキストとしてセット
-        setCreateMemoError("メモ内容のMarkdown解析に失敗しました。プレーンテキストとして読み込みます。");
-      }
+      // newMemoRequest.content がHTMLであることを前提とする
+      setNewMemoContent(newMemoRequest.content); 
       setIsEditingNewMemo(true);
       clearNewMemoRequest(); // ストアのリクエストをクリア
     }
@@ -109,7 +103,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setError(null);
     console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos using invokeFunction...`);
 
-    const { data, error: functionError } = await invokeFunction('list-memos', {}, getToken, userId);
+    const { data, error: functionError } = await invokeFunction('list-memos', { method: 'GET' }, getToken, userId);
 
     console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError });
 
@@ -174,10 +168,10 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setCreateMemoError(null);
     const memoData = {
       title: newMemoTitle,
-      content: newMemoContent,
+      content: newMemoContent, // HTML文字列をそのまま渡す
       // created_by はEdge Function側でx-user-idヘッダーから取得・設定する想定
     };
-    console.log('[handleCreateMemo] memoData to be sent:', JSON.stringify(memoData)); // ログ追加
+    console.log('[handleCreateMemo] memoData to be sent (HTML):', JSON.stringify(memoData)); // ログ更新
     const { data: newMemo, error: createError } = await invokeFunction(
       'create-memo', 
       { method: 'POST', body: memoData }, 
@@ -289,9 +283,10 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
   const handleStartEdit = () => {
     if (!selectedMemo) return;
+    console.log('[MemoStudio] handleStartEdit called. Selected memo content (HTML):', selectedMemo.content); // ログ更新
     setIsEditingSelectedMemo(true);
     setEditingTitle(selectedMemo.title);
-    setEditingContent(selectedMemo.content);
+    setEditingContent(selectedMemo.content); // HTML文字列をそのままセット
     setUpdateMemoError(null); // エラー表示をクリア
     // メモ編集も表示状態の一種なので、setMemoViewExpanded(true)は既にhandleViewMemoで設定済み
   };
@@ -322,7 +317,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       const memoData = {
         id: selectedMemoId,
         title: editingTitle,
-        content: editingContent,
+        content: editingContent, // HTML文字列をそのまま渡す
       };
       const { data: updatedMemoData, error: updateError } = await invokeFunction(
         'update-memo',
@@ -676,7 +671,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                               </h4>
                             </div>
                             {!memo.isGenerating && (
-                              <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                                 {isSignedIn && (
                                   <>
                                     <Button
@@ -743,22 +738,16 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                                 <span>{memo.statusText}</span>
                               </div>
                             ) : (
-                              <div className="truncate flex-1 mr-2">
-                                {/* HTMLタグを解釈して表示するためにReactMarkdownとrehypeRawを使用 */}
-                                <ReactMarkdown rehypePlugins={[rehypeRaw]}>
-                                  {memo.content
-                                    // .replace(/#+\s/g, '')          // ヘッダー記号を除去 (Markdown前提の処理のため一旦コメントアウト)
-                                    // .replace(/\*\*(.*?)\*\*/g, '$1') // ボールドの**を除去
-                                    // .replace(/\*(.*?)\*/g, '$1')     // イタリックの*を除去
-                                    // .replace(/`(.*?)`/g, '$1')       // インラインコードの`を除去
-                                    // .replace(/\[(.*?)\]\(.*?\)/g, '$1') // リンクからテキスト部分のみ抽出
-                                    // .replace(/\n/g, ' ')             // 改行をスペースに変換
-                                    // .replace(/\s+/g, ' ')            // 連続するスペースを1つに
-                                    // .trim() // trimはReactMarkdownの外で行うか、スタイルで制御
-                                    .substring(0, 150) // 表示文字数を調整 (タグを含むので多めに)
-                                  }
-                                </ReactMarkdown>
-                                {memo.content.length > 150 && '...'}
+                              <div className="flex-1 mr-2 overflow-hidden whitespace-nowrap text-ellipsis">
+                                {/* HTMLコンテンツからタグを除去してプレーンテキストとして表示 */}
+                                {
+                                  memo.content
+                                    .replace(/<[^>]+>/g, ' ') // HTMLタグをスペースに置換
+                                    .replace(/\s+/g, ' ')    // 連続する空白文字を1つのスペースに
+                                    .trim()                   // 前後の空白を除去
+                                    .substring(0, 80)       // 80文字に制限
+                                }
+                                {memo.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().length > 80 && '...'}
                               </div>
                             )}
                             <span className="flex-shrink-0">
