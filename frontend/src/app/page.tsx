@@ -1,6 +1,6 @@
 'use client'; // このページがクライアントコンポーネントであることを示す
 
-import { useState, useEffect, Suspense } from 'react'; // ★ useEffect をインポート
+import { useState, useEffect, Suspense, useCallback } from 'react'; // ★ useEffect をインポート
 import { useSearchParams } from 'next/navigation'; // 共有ID取得用
 import AppLayout from '@/components/layout/AppLayout';
 import ChatInterfaceMain from '@/components/ChatInterfaceMain'; // 作成したコンポーネントをインポート
@@ -49,7 +49,7 @@ function HomePageContent() {
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
 
   // 共有データを取得する関数
-  const fetchShareData = async (id: string) => {
+  const fetchShareData = useCallback(async (id: string) => {
     setIsLoadingShare(true);
     setShareError(null);
     
@@ -81,7 +81,7 @@ function HomePageContent() {
     } finally {
       setIsLoadingShare(false);
     }
-  };
+  }, [setEditPermission]);
 
   // クライアントサイドの判定
   useEffect(() => {
@@ -111,7 +111,7 @@ function HomePageContent() {
         }
       }
     }
-  }, [shareId, setEditPermission, isClient]);
+  }, [shareId, setEditPermission, isClient, fetchShareData]);
 
   // ★ selectedSourceNamesが変更されたらlocalStorageに保存する（共有モードでは保存しない）
   useEffect(() => {

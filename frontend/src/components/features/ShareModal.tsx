@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -27,13 +27,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
   
   const { getToken, userId } = useAuth();
 
-  useEffect(() => {
-    if (isOpen && userId) {
-      generateShareUrl();
-    }
-  }, [isOpen, userId]);
-
-  const generateShareUrl = async () => {
+  const generateShareUrl = useCallback(async () => {
     setIsGenerating(true);
     setError(null);
     
@@ -86,7 +80,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [getToken]);
+
+  useEffect(() => {
+    if (isOpen && userId) {
+      generateShareUrl();
+    }
+  }, [isOpen, userId, generateShareUrl]);
 
   const handleCopy = async () => {
     try {

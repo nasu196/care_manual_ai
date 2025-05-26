@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 
 // 介護現場での実用的な入力例
 const inputExamples = [
@@ -35,10 +36,12 @@ export const ChatEmptyState: React.FC = () => {
       {/* マスコット画像 */}
       <div className="mb-6">
         {imageLoaded ? (
-          <img 
+          <Image 
             src="/care-mascot.png" 
             alt="ケアマニュアルAIマスコット" 
-            className="w-48 h-48 object-contain opacity-80"
+            width={192}
+            height={192}
+            className="object-contain opacity-80"
             onError={handleImageError}
           />
         ) : (

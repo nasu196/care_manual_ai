@@ -172,7 +172,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     } finally {
       setLoadingFiles(false);
     }
-  }, [getToken, setMessageWithAutoHide]);
+  }, [getToken, setMessageWithAutoHide, shareId]);
 
   useEffect(() => {
     if (isSignedIn && typeof getToken === 'function') {
