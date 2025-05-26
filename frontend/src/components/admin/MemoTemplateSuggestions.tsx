@@ -146,7 +146,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/suggest-next-actions`;
 
       const response = await fetch(edgeFunctionUrl, {
-        method: 'POST',
+          method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
@@ -294,6 +294,19 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     setSelectedIdeaForModal(null);
     console.log("Generating memo for:", memoTitle, "by user:", currentClerkUserId);
 
+    let tokenForCreateMemo; 
+    try {
+      tokenForCreateMemo = await getToken({ template: 'supabase' }); 
+      if (!tokenForCreateMemo) {
+        throw new Error('Clerk token for create-memo is not available.');
+      }
+    } catch (e) {
+      console.error("Failed to get Clerk token for create-memo:", e);
+      setGenerateMemoError('メモ作成のための認証情報の取得に失敗しました。再ログインしてみてください。');
+      updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage: '認証トークン取得失敗' });
+      return;
+    }
+
     try {
       console.log(`[${tempMemoId}] Calling PromptCraftLLM for: ${memoTitle}`);
       const promptResponse = await fetch('/api/craft-memo-prompt', {
@@ -370,12 +383,12 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${tokenForCreateMemo}`,
           },
           body: JSON.stringify({
-            title: memoTitle,
+                title: memoTitle,
             content: htmlContent,
-            is_ai_generated: true,
+                is_ai_generated: true,
             ai_generation_sources: memoGenerationResult.sources,
           }),
         });
@@ -388,10 +401,8 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         const createdMemo = await response.json();
 
         console.log(`[${tempMemoId}] create-memo Edge Function successful:`, createdMemo);
-        removeGeneratingMemo(tempMemoId);
-        triggerMemoListRefresh();
-        setMessage({ type: 'success', text: `メモ「${memoTitle}」が作成されました。` });
-        setTimeout(() => setMessage(null), 5000);
+            removeGeneratingMemo(tempMemoId);
+            triggerMemoListRefresh();
 
       } catch (err) {
         console.error(`[${tempMemoId}] Error calling create-memo Edge Function:`, err);
@@ -414,7 +425,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         errorMessage = e.message;
       } else if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message?: unknown }).message === 'string') {
         errorMessage = (e as { message: string }).message;
-      } else if (typeof e === 'string') {
+        } else if (typeof e === 'string') {
         errorMessage = e;
       }
       console.error("Error generating memo with AI:", e);

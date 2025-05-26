@@ -1,0 +1,84 @@
+import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { corsHeaders } from '../_shared/cors.ts'
+
+// 日本語ファイル名対応: Base64エンコーディングを使用
+function encodeFileName(name: string): string {
+  try {
+    const lastDotIndex = name.lastIndexOf('.')
+    const fileNameOnly = lastDotIndex !== -1 ? name.substring(0, lastDotIndex) : name
+    const extension = lastDotIndex !== -1 ? name.substring(lastDotIndex) : ''
+    // Deno: TextEncoderでUint8Array→base64url
+    const utf8Bytes = new TextEncoder().encode(fileNameOnly)
+    let binaryString = ''
+    for (let i = 0; i < utf8Bytes.length; i++) {
+      binaryString += String.fromCharCode(utf8Bytes[i])
+    }
+    let base64Encoded = btoa(binaryString)
+    base64Encoded = base64Encoded.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return `${base64Encoded}${extension}`
+  } catch (error) {
+    // fallback: アルファベット・数字・ハイフン以外を_に
+    const safeName = name.substring(0, name.lastIndexOf('.')).replace(/[^a-zA-Z0-9-]/g, '_')
+    const ext = name.substring(name.lastIndexOf('.'))
+    return `${safeName}${ext}`
+  }
+}
+
+serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return new Response(JSON.stringify({ error: 'Missing Supabase environment variables' }), { status: 500, headers: corsHeaders })
+    }
+
+    // Clerk JWTからユーザーIDを取得
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'No Authorization header' }), { status: 401, headers: corsHeaders })
+    }
+    const token = authHeader.replace('Bearer ', '')
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
+    if (!userId) {
+      return new Response(JSON.stringify({ error: 'User ID not found in token' }), { status: 401, headers: corsHeaders })
+    }
+
+    // multipart/form-dataでファイルを受け取る
+    const formData = await req.formData()
+    const file = formData.get('file') as File
+    const originalFileName = formData.get('originalFileName') as string
+
+    if (!file || !originalFileName) {
+      return new Response(JSON.stringify({ error: 'Missing file or originalFileName' }), { status: 400, headers: corsHeaders })
+    }
+
+    // ファイル名エンコード（フロントと同じロジック）
+    const encodedFileName = encodeFileName(originalFileName)
+
+    // SupabaseクライアントでStorageにアップロード
+    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    const { error } = await supabase.storage.from('manuals').upload(encodedFileName, file.stream(), {
+      upsert: true,
+      contentType: file.type,
+    })
+
+    if (error) {
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: corsHeaders })
+    }
+
+    // 必要ならmanualsテーブルにもレコード追加
+
+    return new Response(JSON.stringify({ message: 'Upload successful', fileName: encodedFileName }), {
+      status: 201,
+      headers: corsHeaders,
+    })
+  } catch (e) {
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500, headers: corsHeaders })
+  }
+}) 

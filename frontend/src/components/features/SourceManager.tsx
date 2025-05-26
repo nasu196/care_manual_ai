@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useSupabaseClient } from '@/hooks/useSupabaseClient';
+import { useAuth } from '@clerk/nextjs'; // ★ useAuth をインポート
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,7 @@ interface SourceManagerProps {
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
   const { supabaseClient, isSupabaseReady } = useSupabaseClient();
+  const { getToken } = useAuth(); // getToken を取得
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -222,24 +224,68 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     });
 
     try {
-      const bucketName = 'manuals';
-      const { error: uploadError } = await supabaseClient.storage
-        .from(bucketName)
-        .upload(`${encodedFileName}`, file, {
-          cacheControl: '3600',
-          upsert: true,
-        });
-      console.log('[handleUpload] Supabase upload call returned. Error:', uploadError);
-
-      if (uploadError) {
-        console.error('[handleUpload] Upload error details:', uploadError);
+      // ★ Clerkトークンを取得
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        console.error("Failed to get auth token for storage upload.");
         updateUploadStatus(uploadId, {
           status: 'error',
-          error: `アップロードに失敗しました: ${uploadError.message}`,
-          message: `エラー: ${uploadError.message}`
+          error: '認証トークンを取得できませんでした。再ログインしてみてください。',
+          message: 'エラー: 認証トークン取得失敗'
         });
         return;
       }
+
+      // ★ Edge Function経由でアップロード
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        console.error("Supabase URL is not defined.");
+        updateUploadStatus(uploadId, {
+          status: 'error',
+          error: 'Supabase URLが設定されていません。',
+          message: 'エラー: 設定不備'
+        });
+        return;
+      }
+      const uploadFunctionUrl = `${supabaseUrl}/functions/v1/upload-manual-function`;
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('originalFileName', originalFileName);
+      const uploadResponse = await fetch(uploadFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      console.log('[handleUpload] Storage upload response status:', uploadResponse.status);
+      console.log('[handleUpload] Storage upload response headers:', Object.fromEntries(uploadResponse.headers.entries()));
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        console.error('[handleUpload] Storage upload error:', errorText);
+        let errorMessage = `ストレージアップロードに失敗しました (status: ${uploadResponse.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          }
+        } catch {
+          // JSON解析に失敗した場合はそのままテキストを使用
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+        updateUploadStatus(uploadId, {
+          status: 'error',
+          error: `アップロードに失敗しました: ${errorMessage}`,
+          message: `エラー: ${errorMessage}`
+        });
+        return;
+      }
+
+      console.log('[handleUpload] Storage upload successful');
       
       updateUploadStatus(uploadId, {
         status: 'processing',
@@ -249,36 +295,27 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       await fetchUploadedFiles();
 
       try {
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        if (!supabaseUrl) {
-          throw new Error("NEXT_PUBLIC_SUPABASE_URL is not defined.");
-        }
-        const urlRegex = new RegExp('https://([^.]+)\\.supabase\\.co');
-        const match = supabaseUrl.match(urlRegex);
-        const projectRef = match ? match[1] : null;
-        if (!projectRef) {
-          throw new Error("Supabase project reference ID could not be determined from NEXT_PUBLIC_SUPABASE_URL.");
-        }
-        const finalFunctionUrl = `https://${projectRef}.supabase.co/functions/v1/process-manual-function`;
-        console.log(`[handleUpload] Calling Edge Function: ${finalFunctionUrl} for file: ${encodedFileName}`);
+        // ★ process-manual-function Edge Functionを呼び出し
+        const formData = new FormData();
+        formData.append('fileName', encodedFileName);
+        formData.append('originalFileName', originalFileName);
 
-        // ★ より詳細なエラーハンドリングを追加
-        let response;
-        try {
-          response = await fetch(finalFunctionUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              fileName: encodedFileName,
-              originalFileName: originalFileName  // 元のファイル名も送信
-            }),
-          });
-        } catch (fetchError) {
-          console.error(`[handleUpload] Network error during Edge Function call:`, fetchError);
-          throw new Error(`Edge Function呼び出し時のネットワークエラー: ${fetchError instanceof Error ? fetchError.message : '不明なエラー'}`);
-        }
+        // デバッグ情報
+        const requestUrl = `${supabaseUrl}/functions/v1/process-manual-function`;
+        const headers = {
+          'Authorization': `Bearer ${token}`,
+        };
+        console.log("[handleUpload] Request URL:", requestUrl);
+        console.log("[handleUpload] Request Headers:", JSON.stringify(headers, null, 2));
+        console.log("[handleUpload] FormData content (file names):", Array.from(formData.keys()));
 
-        // ★ レスポンスの詳細ログを追加
+        const response = await fetch(requestUrl, { // Edge Functionの直接URL
+          method: 'POST',
+          headers: headers,
+          body: formData,
+        });
+
+        // レスポンスの詳細ログを追加
         console.log(`[handleUpload] Edge Function response status: ${response.status}`);
         console.log(`[handleUpload] Edge Function response headers:`, Object.fromEntries(response.headers.entries()));
         
@@ -337,7 +374,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         }, 10000);
       }
     } catch (e) {
-      console.error(`[${uploadId}] Error during actual file upload:`, e);
+      console.error(`[${uploadId}] Error during file upload:`, e);
       updateUploadStatus(uploadId, {
         status: 'error',
         error: `ファイルアップロード中に予期せぬエラー: ${e instanceof Error ? e.message : String(e)}`,
