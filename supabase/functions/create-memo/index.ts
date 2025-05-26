@@ -33,6 +33,35 @@ serve(async (req: Request) => {
       )
     }
 
+    // JWTからユーザーIDを取得
+    let userId;
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+      const payload = JSON.parse(atob(parts[1]));
+      console.log('[create-memo][Auth] Decoded Clerk JWT Payload:', payload);
+
+      userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+
+      if (!userId) {
+        console.error('[create-memo][Auth] User ID not found in Clerk JWT payload.');
+        return new Response(
+          JSON.stringify({ error: 'User ID not found in token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`[create-memo][Auth] Authenticated user ID from Clerk JWT: ${userId}`);
+    } catch (e) {
+      console.error('[create-memo][Auth] Error decoding JWT:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // リクエストボディを取得
     let rawBody;
     try {
@@ -68,14 +97,14 @@ serve(async (req: Request) => {
       },
     })
 
-    // メモを作成（RLSポリシーがauth.jwt()->>'sub'でユーザーを識別）
+    // メモを作成（RLSポリシーがauth.jwt()->'user_metadata'->>'user_id'でユーザーを識別）
     const { data, error } = await supabase
       .from('memos')
       .insert({
         title,
         content,
         ai_generation_sources: sources || [],
-        // created_byはRLSポリシーまたはデフォルト値で自動設定される
+        user_id: userId,
       })
       .select()
       .single()
