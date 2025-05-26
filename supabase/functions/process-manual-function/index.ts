@@ -30,8 +30,10 @@ function sanitizeText(text: string): string {
   
   return text
     // NULL文字を除去
+    // deno-lint-ignore no-control-regex
     .replace(/\u0000/g, '')
     // その他の制御文字を除去（改行・タブ・スペースは保持）
+    // deno-lint-ignore no-control-regex
     .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     // 連続する空白を単一スペースに変換
     .replace(/\s+/g, ' ')
@@ -65,7 +67,7 @@ function isTextExtractionInsufficient(text: string, numPages: number): boolean {
 }
 
 // ★ PDF画像変換関数（安全なBase64変換版）
-async function convertPdfPageToImage(pdfBuffer: ArrayBuffer, pageNumber: number = 1): Promise<string | null> {
+function convertPdfPageToImage(pdfBuffer: ArrayBuffer, _pageNumber: number = 1): string | null {
   try {
     console.log(`[PDF変換] PDF を Base64 に変換開始 (サイズ: ${pdfBuffer.byteLength} bytes)`);
     
@@ -105,7 +107,7 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
     }
     
     // PDF→Base64変換
-    const base64Image = await convertPdfPageToImage(pdfBuffer);
+    const base64Image = convertPdfPageToImage(pdfBuffer);
     if (!base64Image) {
       throw new Error("PDF の画像変換に失敗しました");
     }
@@ -207,22 +209,22 @@ if (!googleVisionApiKey) {
   console.warn("警告: GOOGLE_VISION_API_KEY が環境変数に設定されていません。OCR機能は無効になります。");
 }
 
-let supabase: SupabaseClient;
+let _supabase: SupabaseClient;
 if (supabaseUrl && supabaseAnonKey) {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    _supabase = createClient(supabaseUrl, supabaseAnonKey);
 }
 
-let embeddings: GoogleGenerativeAIEmbeddings;
+let _embeddings: GoogleGenerativeAIEmbeddings;
 if (geminiApiKey) {
-    embeddings = new GoogleGenerativeAIEmbeddings({
+    _embeddings = new GoogleGenerativeAIEmbeddings({
         apiKey: geminiApiKey,
         model: "text-embedding-004",
     });
 }
 
-let genAI: GoogleGenerativeAI; // ★ 追加
+let _genAI: GoogleGenerativeAI; // ★ 追加
 if (geminiApiKey) { // ★ 追加
-    genAI = new GoogleGenerativeAI(geminiApiKey); // ★ 追加
+    _genAI = new GoogleGenerativeAI(geminiApiKey); // ★ 追加
 } // ★ 追加
 
 const BUCKET_NAME = 'manuals';
@@ -263,10 +265,11 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
     try {
       await fs.mkdir(appTmpDir, { recursive: true });
-    } catch (mkdirError: any) {
-      if (mkdirError.code !== 'ENOENT' && mkdirError.code !== 'EEXIST') {
+    } catch (mkdirError: unknown) {
+      const error = mkdirError as { code?: string };
+      if (error.code !== 'ENOENT' && error.code !== 'EEXIST') {
          console.warn(`一時サブディレクトリの作成に失敗: ${appTmpDir}`, mkdirError);
-      } else if (mkdirError.code === 'EEXIST') {
+      } else if (error.code === 'EEXIST') {
          console.log(`一時サブディレクトリは既に存在します: ${appTmpDir}`);
       }
     }
@@ -275,7 +278,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     await fs.writeFile(actualTmpFilePath, fileBuffer);
     console.log(`一時ファイルとして保存: ${actualTmpFilePath}`);
 
-    let docs: Array<{ pageContent: string; metadata: Record<string, any> }> = [];
+    let docs: Array<{ pageContent: string; metadata: Record<string, unknown> }> = [];
 
     console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Before parsing (${fileExtension}): ${actualTmpFilePath}`); // ★ 追加
     if (fileExtension === '.pdf') {
@@ -492,18 +495,21 @@ async function generateSummary(text: string, generativeAiClient: GoogleGenerativ
     
     console.log(`サマリー生成成功: ${summary.length}文字`);
     return summary.length > 0 ? summary : null;
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Gemini API を使用したサマリー生成中にエラーが発生しました:", error);
     // エラーレスポンスに詳細が含まれている場合があるため、ログに出力
-    if (error && error.response && error.response.promptFeedback) {
-        console.error("Prompt Feedback:", error.response.promptFeedback);
+    if (error && typeof error === 'object' && 'response' in error) {
+        const errorWithResponse = error as { response?: { promptFeedback?: unknown } };
+        if (errorWithResponse.response && errorWithResponse.response.promptFeedback) {
+            console.error("Prompt Feedback:", errorWithResponse.response.promptFeedback);
+        }
     }
     return null; // エラー時はnullを返す
   }
 }
 
 async function processAndStoreDocuments(
-    processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, any> }>, tmpFilePath: string } | null, 
+    processedFile: { docs: Array<{ pageContent: string; metadata: Record<string, unknown> }>, tmpFilePath: string } | null, 
     sourceFileName: string, 
     originalFileName: string | null,
     userId: string,
@@ -527,7 +533,7 @@ async function processAndStoreDocuments(
 
     // --- 既存マニュアルのチェック処理を修正 ---
     let existingManualData: { id: string } | null = null;
-    let selectQueryError: any = null;
+    let selectQueryError: unknown = null;
 
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Value of sourceFileName before DB query: '${sourceFileName}' (length: ${sourceFileName.length})`); // ★ 追加: sourceFileNameの値をログ出力
 
@@ -563,7 +569,7 @@ async function processAndStoreDocuments(
     }
     // --- 修正ここまで。以前の try-catch は上記に統合 ---
 
-    if (selectQueryError && selectQueryError.code !== 'PGRST116') { // PGRST116は「該当なし」のエラーコードなので無視
+    if (selectQueryError && (selectQueryError as { code?: string }).code !== 'PGRST116') { // PGRST116は「該当なし」のエラーコードなので無視
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error from Supabase query (checking existing manual for ${sourceFileName}):`, selectQueryError);
         throw selectQueryError;
     }
@@ -588,7 +594,7 @@ async function processAndStoreDocuments(
     if (existingManual && existingManual.id) {
       manualId = existingManual.id;
       console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Using existing manual ID: ${manualId}`); // ★ タイムスタンプ追加
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         original_file_name: originalFileName || sourceFileName,
         metadata: { 
             totalPages: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length) : 1,
@@ -613,7 +619,7 @@ async function processAndStoreDocuments(
       console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Creating new manual record...`); // ★ タイムスタンプ追加
       const totalPages = (parsedDocs[0] && parsedDocs[0].metadata) ? 
                          (parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length)) : 1;
-      const insertData: any = {
+      const insertData: Record<string, unknown> = {
         file_name: sourceFileName,
         original_file_name: originalFileName || sourceFileName, 
         storage_path: `${BUCKET_NAME}/${sourceFileName}`,
@@ -901,7 +907,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         console.error('Failed to process and store document, storeResult was:', storeResult);
         throw new Error(`Failed to process ${fileName} during storage/embedding steps. Result from processAndStoreDocuments was not as expected.`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Error in POST handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
       
       if (error instanceof Error) {
@@ -920,7 +926,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             .from('manuals') // BUCKET_NAME は 'manuals' と仮定。実際のバケット名に置き換える
             .remove([fileNameForRollback]); 
           if (deleteError) {
-            if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as any).statusCode === 404) {
+            if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as { statusCode?: number }).statusCode === 404) {
               console.log(`Storageにファイル ${fileNameForRollback} が見つからなかったため、削除はスキップされました。`);
             } else {
               console.error(`Storageからのファイル ${fileNameForRollback} の削除に失敗しました。`, deleteError);

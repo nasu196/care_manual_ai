@@ -430,7 +430,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     } finally {
       setIsUpdatingMemo(false);
     }
-  }, [selectedMemoId, editingTitle, editingContent, getToken, userId, isSignedIn, fetchMemos, setIsUpdatingMemo, setUpdateMemoError]);
+  }, [selectedMemoId, editingTitle, editingContent, getToken, userId, isSignedIn, setIsUpdatingMemo, setUpdateMemoError]);
 
   const handleToggleImportant = useCallback(async (memoIdToToggle: string, newIsImportant: boolean) => {
     // トグル処理中のメモIDを設定（UIでスピナー表示用）
@@ -513,7 +513,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       // トグル処理完了
       setTogglingImportantId(null);
     }
-  }, [getToken, userId, isSignedIn, setMemos, setToggleImportantError]);
+  }, [getToken, userId, isSignedIn, setMemos, setToggleImportantError, memos]);
 
   // ★★★ 表示用メモリストの作成 ★★★
   const displayMemos = React.useMemo(() => {

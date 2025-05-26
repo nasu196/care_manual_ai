@@ -426,7 +426,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     // finally ブロックは不要かもしれない、エラー時や成功時でUIの状態（ローディングインジケータなど）が
     // addGeneratingMemo / updateGeneratingMemoStatus / removeGeneratingMemo で管理されるなら。
     // もし finally で共通処理が必要ならここに記述。
-  }, [selectedIdeaForModal, isClerkSignedIn, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, selectedSourceNames, setIsAnyModalOpen]);
+  }, [selectedIdeaForModal, isClerkSignedIn, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, setIsAnyModalOpen, clerkUserId]);
 
   const containerVariants = {
     hidden: { opacity: 0 },

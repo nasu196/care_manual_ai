@@ -43,7 +43,7 @@ interface Suggestion {
     source_files?: string[]; // APIのレスポンス形式に合わせる
 }
 
-serve(async (req: Request, connInfo: ConnInfo): Promise<Response> => {
+serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders });
     }
@@ -148,7 +148,7 @@ serve(async (req: Request, connInfo: ConnInfo): Promise<Response> => {
 
         console.log(`Found ${summariesData.length} summaries for user ${userId}.`);
 
-        let summaryStrings: string[] = [];
+        const summaryStrings: string[] = [];
         for (const item of summariesData) {
             const displayName = item.original_file_name || item.file_name;
             summaryStrings.push(`ドキュメント名: ${displayName}\n内容サマリー:\n${item.summary}`);
@@ -212,9 +212,10 @@ ${formattedSummaries}
             headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
             status: 200,
         });
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error(`Error in suggest-next-actions function for user ${userId || 'unknown'}:`, error);
-        return new Response(JSON.stringify({ error: error.message || "不明なサーバーエラーが発生しました。" }), {
+        const errorMessage = error instanceof Error ? error.message : "不明なサーバーエラーが発生しました。";
+        return new Response(JSON.stringify({ error: errorMessage }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
         });
