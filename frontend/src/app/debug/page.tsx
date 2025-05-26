@@ -11,13 +11,19 @@ export default function DebugPage() {
   const handleDebug = async () => {
     setLoading(true);
     try {
-      const token = await getToken();
+      const token = await getToken({ template: 'supabase' });
       if (!token) {
         setDebugInfo({ error: 'No token available' });
         return;
       }
 
-      const response = await fetch('/api/supabase-proxy/debug-auth', {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        setDebugInfo({ error: 'Supabase URL not configured' });
+        return;
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/debug-auth`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,

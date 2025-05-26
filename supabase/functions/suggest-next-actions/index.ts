@@ -78,10 +78,10 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         const payload = JSON.parse(atob(parts[1]));
         console.log('[suggest-next-actions][Auth] Decoded Clerk JWT Payload:', payload);
 
-        userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+        userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
 
         if (!userId) {
-            console.error('[suggest-next-actions][Auth] User ID (sub) not found in Clerk JWT payload.');
+            console.error('[suggest-next-actions][Auth] User ID not found in Clerk JWT payload.');
             return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
                 status: 401,
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },

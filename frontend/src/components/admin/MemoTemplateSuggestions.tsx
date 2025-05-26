@@ -130,7 +130,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     // Clerkトークンを取得 (ここ！ getToken は useAuth から取得済みのはず)
     let token;
     try {
-      token = await getToken(); 
+      token = await getToken({ template: 'supabase' }); 
       if (!token) {
         throw new Error('Clerk token is not available.');
       }

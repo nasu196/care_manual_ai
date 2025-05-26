@@ -1,6 +1,6 @@
 [functions.create-memo]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/create-memo/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -11,7 +11,7 @@ entrypoint = "./functions/create-memo/index.ts"
 
 [functions.list-memos]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/list-memos/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -22,7 +22,7 @@ entrypoint = "./functions/list-memos/index.ts"
 
 [functions.get-memo-by-id]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/get-memo-by-id/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -33,7 +33,7 @@ entrypoint = "./functions/get-memo-by-id/index.ts"
 
 [functions.update-memo]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/update-memo/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -44,7 +44,7 @@ entrypoint = "./functions/update-memo/index.ts"
 
 [functions.delete-memo]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/delete-memo/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -55,7 +55,7 @@ entrypoint = "./functions/delete-memo/index.ts"
 
 [functions.process-manual-function]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/process-manual-function/deno.json"
 # Uncomment to specify a custom file path to the entrypoint.
 # Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
@@ -66,6 +66,24 @@ entrypoint = "./functions/process-manual-function/index.ts"
 
 [functions.upload-manual-function]
 enabled = true
-verify_jwt = true
+verify_jwt = false
 import_map = "./functions/upload-manual-function/deno.json"
 entrypoint = "./functions/upload-manual-function/index.ts"
+
+[functions.suggest-next-actions]
+enabled = true
+verify_jwt = false
+import_map = "./functions/suggest-next-actions/deno.json"
+entrypoint = "./functions/suggest-next-actions/index.ts"
+
+[functions.debug-auth]
+enabled = true
+verify_jwt = false
+import_map = "./functions/debug-auth/deno.json"
+entrypoint = "./functions/debug-auth/index.ts"
+
+[functions.delete-file-function]
+enabled = true
+verify_jwt = false
+import_map = "./functions/delete-file-function/deno.json"
+entrypoint = "./functions/delete-file-function/index.ts"

@@ -3,6 +3,24 @@
 
 ---
 
+## 認証方式の変更履歴
+
+### 2024年12月 - JWT Template方式への回帰
+
+**背景**: Supabase Third-Party Auth統合でClerkのJWT情報が正常に取得できない問題が発生したため、より安定した認証方式に変更しました。
+
+**変更内容**:
+1. **Edge Functions設定**: `verify_jwt = false`に変更し、手動でJWT検証を実行
+2. **Clerk JWT Template**: 既存の`supabase`テンプレートを使用してSupabase用のJWTを生成
+3. **RLS Policy**: `auth.jwt()->>'sub'`を使用したユーザー分離を継続
+
+**利点**:
+- 認証フローの制御が明確
+- デバッグが容易
+- 既存のRLSポリシーとの互換性維持
+
+---
+
 ## 技術的メモ: フロントエンドからのEdge Function呼び出し (Clerk認証連携)
 
 Clerk認証を導入したSupabase Edge Function (特に `create-memo` など) をフロントエンドから呼び出す際に、いくつかの試行錯誤がありました。
