@@ -87,8 +87,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
     try {
       // 共有ページかどうかを判定
-      const urlParams = new URLSearchParams(window.location.search);
-      const shareId = urlParams.get('shareId');
+      let shareId: string | null = null;
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        shareId = urlParams.get('shareId');
+      }
 
       let apiRequestBody;
       const headers: Record<string, string> = {

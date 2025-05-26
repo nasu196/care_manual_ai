@@ -84,7 +84,8 @@ export async function POST(request) {
 
     // リクエストボディを先に取得してshareIdをチェック
     const requestBody = await request.json();
-    const { query: userQuery, source_filenames: sourceFilenames, verbosity: userVerbosity, shareId } = requestBody;
+    const { query: userQuery, source_filenames: initialSourceFilenames, verbosity: userVerbosity, shareId } = requestBody;
+    let sourceFilenames = initialSourceFilenames;
 
     // リクエストヘッダーからAuthorizationを取得
     const authHeader = request.headers.get('Authorization');

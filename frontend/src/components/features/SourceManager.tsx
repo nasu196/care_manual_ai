@@ -47,9 +47,15 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
-  // 共有ページかどうかを判定
-  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const shareId = urlParams?.get('shareId');
+  // 共有ページかどうかを判定（クライアントサイドでのみ）
+  const [shareId, setShareId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      setShareId(urlParams.get('shareId'));
+    }
+  }, []);
   
   const { getToken, isSignedIn } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);

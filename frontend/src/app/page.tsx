@@ -1,6 +1,6 @@
 'use client'; // このページがクライアントコンポーネントであることを示す
 
-import { useState, useEffect } from 'react'; // ★ useEffect をインポート
+import { useState, useEffect, Suspense } from 'react'; // ★ useEffect をインポート
 import { useSearchParams } from 'next/navigation'; // 共有ID取得用
 import AppLayout from '@/components/layout/AppLayout';
 import ChatInterfaceMain from '@/components/ChatInterfaceMain'; // 作成したコンポーネントをインポート
@@ -35,11 +35,13 @@ interface ShareData {
   }>;
 }
 
-export default function HomePage() { // 関数名を HomePage に変更 (または ChatPage のままも可)
+// useSearchParamsを使用するコンポーネントを分離
+function HomePageContent() {
   const searchParams = useSearchParams();
   const shareId = searchParams.get('shareId');
   
   const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]); // ★ 初期値は空配列
+  const [isClient, setIsClient] = useState(false); // クライアントサイドかどうかの判定用
   const [shareData, setShareData] = useState<ShareData | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [isLoadingShare, setIsLoadingShare] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -81,37 +83,41 @@ export default function HomePage() { // 関数名を HomePage に変更 (また�
     }
   };
 
+  // クライアントサイドの判定
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   // 共有IDがある場合の処理
   useEffect(() => {
+    if (!isClient) return; // クライアントサイドでのみ実行
+    
     if (shareId) {
       fetchShareData(shareId);
     } else {
       // 通常モード: 編集権限を有効にし、localStorageから選択状態を読み込む
       setEditPermission(true);
       
-      if (typeof window !== 'undefined') {
-        const storedSelection = localStorage.getItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES);
-        if (storedSelection) {
-          try {
-            const parsedSelection = JSON.parse(storedSelection);
-            if (Array.isArray(parsedSelection) && parsedSelection.every(item => typeof item === 'string')) {
-              setSelectedSourceNames(parsedSelection);
-            }
-          } catch (error) {
-            console.error('Failed to parse selectedSourceNames from localStorage:', error);
-            localStorage.removeItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES); // 不正な値は削除
+      const storedSelection = localStorage.getItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES);
+      if (storedSelection) {
+        try {
+          const parsedSelection = JSON.parse(storedSelection);
+          if (Array.isArray(parsedSelection) && parsedSelection.every(item => typeof item === 'string')) {
+            setSelectedSourceNames(parsedSelection);
           }
+        } catch (error) {
+          console.error('Failed to parse selectedSourceNames from localStorage:', error);
+          localStorage.removeItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES); // 不正な値は削除
         }
       }
     }
-  }, [shareId, setEditPermission]);
+  }, [shareId, setEditPermission, isClient]);
 
   // ★ selectedSourceNamesが変更されたらlocalStorageに保存する（共有モードでは保存しない）
   useEffect(() => {
-    if (!shareId && typeof window !== 'undefined') {
-      localStorage.setItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES, JSON.stringify(selectedSourceNames));
-    }
-  }, [selectedSourceNames, shareId]); // selectedSourceNamesが変更されるたびに実行
+    if (!isClient || shareId) return; // クライアントサイドかつ非共有モードでのみ実行
+    localStorage.setItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES, JSON.stringify(selectedSourceNames));
+  }, [selectedSourceNames, shareId, isClient]); // selectedSourceNamesが変更されるたびに実行
 
   // ★ SourceManager側で選択状態が変更されたときに呼び出される関数
   const handleSourceSelectionChange = (newSelectedSourceNames: string[]) => {
@@ -163,5 +169,21 @@ export default function HomePage() { // 関数名を HomePage に変更 (また�
         <MemoStudio selectedSourceNames={selectedSourceNames} />
       } 
     />
+  );
+}
+
+// メインのコンポーネント（Suspenseでラップ）
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-gray-500" />
+          <p className="text-gray-600">読み込み中...</p>
+        </div>
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   );
 }

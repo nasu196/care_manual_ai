@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
-import { Settings, Share2, UserCircle, Edit3, Eye } from 'lucide-react'; // Edit3とEyeを追加
+import { Settings, Share2, UserCircle } from 'lucide-react';
 import { UserButton, SignInButton, useAuth } from '@clerk/nextjs';
 import {
   DropdownMenu,
@@ -65,19 +65,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
 
         {/* 右側: 操作ボタンとユーザーアイコン */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          {/* 編集権限切り替えボタン（将来的には削除予定 - 共有URL機能に統合） */}
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={() => setEditPermission(!hasEditPermission)}
-            className="flex items-center space-x-1.5"
-            title={hasEditPermission ? '閲覧専用モードに切り替え（テスト用）' : '編集モードに切り替え（テスト用）'}
-          >
-            {hasEditPermission ? <Eye className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}
-            <span className="hidden sm:inline">
-              {hasEditPermission ? '閲覧専用' : '編集モード'}
-            </span>
-          </Button>
+
 
           {/* 共有ボタン（編集権限がある場合のみ表示） */}
           {hasEditPermission && (

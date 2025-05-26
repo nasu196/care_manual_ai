@@ -68,9 +68,15 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
   const { userId: clerkUserId, isSignedIn: isClerkSignedIn, getToken } = useAuth();
 
-  // 共有ページかどうかを判定
-  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
-  const shareId = urlParams?.get('shareId');
+  // 共有ページかどうかを判定（クライアントサイドでのみ）
+  const [shareId, setShareId] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      setShareId(urlParams.get('shareId'));
+    }
+  }, []);
 
   useEffect(() => {
     if (!clerkUserId) return; // ユーザーIDがない場合は何もしない
@@ -305,7 +311,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } catch (e) {
       console.error("Failed to get Clerk token for create-memo:", e);
       setGenerateMemoError('メモ作成のための認証情報の取得に失敗しました。再ログインしてみてください。');
-      updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage: '認証トークン取得失敗' });
+      updateGeneratingMemoStatus(tempMemoId, 'error', '認証トークン取得失敗');
       return;
     }
 
@@ -369,11 +375,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       // Markdown から HTML への変換
       const htmlContent = marked.parse(memoGenerationResult.generated_memo) as string;
 
-      updateGeneratingMemoStatus(tempMemoId, 'saving', {
-        newTitle: memoTitle,
-        newContent: htmlContent,
-        newSources: memoGenerationResult.sources,
-      });
+      updateGeneratingMemoStatus(tempMemoId, 'saving');
 
       // ▼▼▼ create-memo 呼び出し: 標準 fetch で Edge Function を直接呼び出す ▼▼▼
       try {
@@ -419,7 +421,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         } else if (typeof err === 'string') {
           createErrorMessage = err;
         }
-        updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage: createErrorMessage });
+        updateGeneratingMemoStatus(tempMemoId, 'error', createErrorMessage);
         setGenerateMemoError(`AIはメモを生成しましたが、保存中にエラーが発生しました: ${createErrorMessage}`);
         }
       // ▲▲▲ ここまで create-memo 呼び出し処理 ▲▲▲
@@ -435,7 +437,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }
       console.error("Error generating memo with AI:", e);
       setGenerateMemoError(errorMessage);
-      updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage });
+      updateGeneratingMemoStatus(tempMemoId, 'error', errorMessage);
       // エラー時は removeGeneratingMemo を呼ぶか、ユーザーが手動で消せるように残すか検討
     }
     // finally ブロックは不要かもしれない、エラー時や成功時でUIの状態（ローディングインジケータなど）が

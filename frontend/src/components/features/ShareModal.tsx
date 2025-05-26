@@ -112,7 +112,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             共有されたユーザーは閲覧専用モードでアクセスできます。ログインは不要です。
-            現在選択されているソースとメモが共有されます。
+            <span className="font-bold text-black underline">現在選択されているソースとメモが共有されます。</span>
           </p>
 
           {error && (
