@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { useAuth } from '@clerk/nextjs'; // ★ useAuth をインポート
+import { useAuth } from '@clerk/nextjs';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +24,7 @@ import {
 interface SourceFile {
   id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
   name: string;
-  originalName: string; // ★ 元のファイル名を追加
+  originalName: string;
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
@@ -38,11 +38,11 @@ interface UploadStatus {
   error?: string;
 }
 
-// ★ propsの型定義を追加
+
 interface SourceManagerProps {
   selectedSourceNames: string[];
   onSelectionChange: (selectedNames: string[]) => void;
-  isMobileView?: boolean; // ★ isMobileView props を追加
+  isMobileView?: boolean;
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
@@ -145,12 +145,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       const data = await response.json();
       console.log('[SourceManager] API response data:', data);
 
-      // ★ 詳細ログ追加：各ファイルのfile_nameを個別に出力
-      if (Array.isArray(data)) {
-        data.forEach((item, index) => {
-          console.log(`[SourceManager] File ${index}: file_name="${item.file_name}", original_file_name="${item.original_file_name}"`);
-        });
-      }
+
 
       const files = (data as Array<{file_name: string, original_file_name: string}>)?.map((item) => ({ 
         name: item.original_file_name || item.file_name, 
@@ -246,7 +241,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     };
 
     const encodedFileName = encodeFileName(originalFileName);
-    console.log(`[SourceManager handleUpload] Original: "${originalFileName}", Encoded: "${encodedFileName}"`); // ★ ログ追加
+
 
     // アップロードキューに追加
     addToUploadQueue({
@@ -450,7 +445,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       return;
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
-    console.log(`[SourceManager handleDeleteFile] Attempting to delete. UI FileName: "${fileName}", Storage FileName (encoded): "${storageFileName}"`); // ★ ログ追加
+
     
     setMessageWithAutoHide({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
@@ -463,7 +458,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         throw new Error("Supabase URL is not configured.");
       }
 
-      console.log(`[SourceManager handleDeleteFile] Storage FileName (encoded): "${storageFileName}"`); // ★ ログ追加
+
       
             // ★ Edge Function経由でファイル削除
       const deleteFunctionUrl = `${supabaseUrl}/functions/v1/delete-file-function`;
