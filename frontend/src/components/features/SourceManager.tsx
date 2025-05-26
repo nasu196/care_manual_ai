@@ -296,23 +296,20 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
 
       try {
         // ★ process-manual-function Edge Functionを呼び出し
-        const formData = new FormData();
-        formData.append('fileName', encodedFileName);
-        formData.append('originalFileName', originalFileName);
-
-        // デバッグ情報
         const requestUrl = `${supabaseUrl}/functions/v1/process-manual-function`;
         const headers = {
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         };
+        const body = JSON.stringify({ fileName: encodedFileName, originalFileName });
         console.log("[handleUpload] Request URL:", requestUrl);
         console.log("[handleUpload] Request Headers:", JSON.stringify(headers, null, 2));
-        console.log("[handleUpload] FormData content (file names):", Array.from(formData.keys()));
+        console.log("[handleUpload] JSON body:", body);
 
-        const response = await fetch(requestUrl, { // Edge Functionの直接URL
+        const response = await fetch(requestUrl, {
           method: 'POST',
           headers: headers,
-          body: formData,
+          body: body,
         });
 
         // レスポンスの詳細ログを追加
