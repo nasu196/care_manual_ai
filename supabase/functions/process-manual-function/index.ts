@@ -827,9 +827,9 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
   if (req.method === 'POST') {
     const contentType = req.headers.get("content-type");
-    if (!contentType || !contentType.includes("multipart/form-data")) {
+    if (!contentType || !contentType.includes("application/json")) {
       return new Response(
-        JSON.stringify({ error: "Content-Type must be multipart/form-data" }),
+        JSON.stringify({ error: "Content-Type must be application/json" }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -838,24 +838,20 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     let tmpFilePathToDelete: string | null = null; // 一時ファイル削除用
 
     try {
-      const formData = await req.formData();
-      const file = formData.get("file") as File | null;
-      const originalFileNameFormData = formData.get("originalFileName") as string | null; // 修正: 変数名変更
+      const body = await req.json();
+      const fileName = body.fileName as string | null;
+      const originalFileName = body.originalFileName as string | null;
 
-      if (!file) {
+      if (!fileName) {
         return new Response(
-          JSON.stringify({ error: "File is required" }),
+          JSON.stringify({ error: "fileName is required" }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      
-      // processAndStoreDocuments に渡すための実際のファイル名を設定
-      const sourceFileName = file.name;
-      fileNameForRollback = sourceFileName; // エラーロールバック用に保持
-      const effectiveOriginalFileName = originalFileNameFormData || sourceFileName;
+      fileNameForRollback = fileName;
+      const effectiveOriginalFileName = originalFileName || fileName;
 
-
-      console.log(`[File] Received file: ${sourceFileName}, size: ${file.size}, type: ${file.type}`);
+      console.log(`[File] fileName: ${fileName}`);
       if (effectiveOriginalFileName) {
         console.log(`[File] Original file name: ${effectiveOriginalFileName}`);
       }
@@ -869,38 +865,31 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
       }
       const genAI = new GoogleGenerativeAI(geminiApiKey);
       const embeddingsClient = new GoogleGenerativeAIEmbeddings({ apiKey: geminiApiKey });
-      
-      const processedFile = await downloadAndProcessFile(sourceFileName, supabaseClient);
-      
+      const processedFile = await downloadAndProcessFile(fileName, supabaseClient);
       if (processedFile && processedFile.tmpFilePath) { 
         tmpFilePathToDelete = processedFile.tmpFilePath;
       }
-
       if (!processedFile) {
-          console.error(`File processing failed or unsupported file type for: ${sourceFileName}`);
-          // ここでロールバック処理を呼び出すか検討
-          return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
-              status: 500, 
-              headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+        console.error(`File processing failed or unsupported file type for: ${fileName}`);
+        return new Response(JSON.stringify({ error: "File processing failed or unsupported file type." }), {
+          status: 500, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-      
-      console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${sourceFileName} ---`);
-      // processAndStoreDocuments の返り値の型を正しく扱う
+      console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${fileName} ---`);
       const storeResult = await processAndStoreDocuments(
         processedFile,
-        sourceFileName,
+        fileName,
         effectiveOriginalFileName,
         userId!, 
         supabaseClient,
         embeddingsClient,
         genAI
       );
-
-      if (storeResult && storeResult.manualId) { // storeResult が null でないこと、かつ manualId を持つことを確認
-        console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${sourceFileName} ---`);
+      if (storeResult && storeResult.manualId) {
+        console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${fileName} ---`);
         return new Response(JSON.stringify({ 
-          message: `Successfully processed ${sourceFileName}`,
+          message: `Successfully processed ${fileName}`,
           manual_id: storeResult.manualId,
           summary: storeResult.summary,
           chunks_count: storeResult.chunksCount
@@ -910,9 +899,8 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         });
       } else {
         console.error('Failed to process and store document, storeResult was:', storeResult);
-        throw new Error(`Failed to process ${sourceFileName} during storage/embedding steps. Result from processAndStoreDocuments was not as expected.`);
+        throw new Error(`Failed to process ${fileName} during storage/embedding steps. Result from processAndStoreDocuments was not as expected.`);
       }
-
     } catch (error: any) {
       console.error(`Error in POST handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
       
