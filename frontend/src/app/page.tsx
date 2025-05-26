@@ -157,7 +157,6 @@ export default function HomePage() { // 関数名を HomePage に変更 (また�
       chatSlot={
         <ChatInterfaceMain 
           selectedSourceNames={selectedSourceNames} 
-          shareId={shareId || undefined} // 共有IDを渡す
         />
       } // ★ ChatInterfaceMain に選択ソースを渡す
       memoSlot={ // ★ memoSlot に MemoStudio を配置し、selectedSourceNames を渡す

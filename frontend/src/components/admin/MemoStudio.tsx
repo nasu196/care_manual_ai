@@ -74,6 +74,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   const memoListLastUpdated = useMemoStore((state) => state.memoListLastUpdated);
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
   const generatingMemos = useMemoStore((state) => state.generatingMemos);
+  const hasEditPermission = useMemoStore((state) => state.hasEditPermission); // ★ 編集権限を取得
 
   // ★ useRef を使って前回の memoListLastUpdated の値を保持
   const prevMemoListLastUpdatedRef = useRef<number | null>(null);
@@ -92,7 +93,11 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   }, [newMemoRequest, clearNewMemoRequest, isEditingNewMemo, selectedMemoId]); // 依存配列にストアの値を追加
 
   const fetchMemos = useCallback(async () => {
-    if (!isSignedIn || !userId || !getToken) {
+    // 共有ページかどうかを判定
+    const urlParams = new URLSearchParams(window.location.search);
+    const shareId = urlParams.get('shareId');
+    
+    if (!shareId && (!isSignedIn || !userId || !getToken)) {
       setIsLoading(false); // or true, depending on desired UX before auth ready
       return;
     }
@@ -100,24 +105,42 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setError(null);
 
     try {
-      const token = await getToken({ template: 'supabase' });
-      if (!token) {
-        throw new Error("Failed to get auth token for list-memos.");
-      }
-
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       if (!supabaseUrl) {
         throw new Error("Supabase URL is not defined.");
       }
-      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/list-memos`;
+
+      let response;
       
-      const response = await fetch(edgeFunctionUrl, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json', // GETでも念のため付与（なくても良い場合が多い）
-        },
-      });
+      if (shareId) {
+        // 共有ページの場合は get-share-config から取得
+        response = await fetch(`${supabaseUrl}/functions/v1/get-share-config?id=${shareId}`);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Failed to fetch share data' }));
+          throw new Error(errorData.error || 'Failed to fetch share data');
+        }
+
+        const shareData = await response.json();
+        setMemos(shareData.memos.map((m: Memo) => ({...m, isGenerating: false })));
+        return;
+      } else {
+        // 通常ページの場合は認証が必要
+        const token = await getToken({ template: 'supabase' });
+        if (!token) {
+          throw new Error("Failed to get auth token for list-memos.");
+        }
+
+        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/list-memos`;
+        
+        response = await fetch(edgeFunctionUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json', // GETでも念のため付与（なくても良い場合が多い）
+          },
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
@@ -536,7 +559,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     <div className="flex flex-col h-full">
       <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center flex-shrink-0">
         <h2 className="text-lg font-semibold">メモ管理</h2>
-        {isSignedIn && !isEditingNewMemo && !selectedMemo && (
+        {isSignedIn && hasEditPermission && !isEditingNewMemo && !selectedMemo && (
           <Button variant="outline" size="sm" onClick={() => {
             setIsEditingNewMemo(true);
             setMemoViewExpanded(true); 
@@ -611,7 +634,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     一覧に戻る
                   </Button>
-                  {isSignedIn && (
+                  {isSignedIn && hasEditPermission && (
                     <div className="flex items-center space-x-2">
                       <Button
                         variant="ghost"
@@ -699,7 +722,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             </div>
           ) : (
             <div className="space-y-6">
-              {isSignedIn && (
+              {isSignedIn && hasEditPermission && (
                 <div>
                   <MemoTemplateSuggestions 
                     selectedSourceNames={selectedSourceNames} 
@@ -754,7 +777,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                             </div>
                             {!memo.isGenerating && (
                               <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100">
-                                {isSignedIn && (
+                                {isSignedIn && hasEditPermission && (
                                   <>
                                     <Button
                                       variant="ghost"

@@ -90,7 +90,7 @@ serve(async (req: Request) => {
         user_id: userId,
         selected_source_names: selectedSourceNames,
         created_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30日後に期限切れ
+        // expires_at: 永続的に有効なのでNULLのまま
       })
 
     if (insertError) {

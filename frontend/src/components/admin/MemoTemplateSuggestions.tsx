@@ -68,6 +68,10 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
 
   const { userId: clerkUserId, isSignedIn: isClerkSignedIn, getToken } = useAuth();
 
+  // 共有ページかどうかを判定
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const shareId = urlParams?.get('shareId');
+
   useEffect(() => {
     if (!clerkUserId) return; // ユーザーIDがない場合は何もしない
     
@@ -448,6 +452,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       }
     }
   };
+
+  // 共有ページの場合は何も表示しない
+  if (shareId) {
+    return null;
+  }
 
   return (
     <div className="space-y-4">

@@ -82,27 +82,64 @@ export async function POST(request) {
   try {
     initializeClientsAndChains();
 
+    // リクエストボディを先に取得してshareIdをチェック
+    const requestBody = await request.json();
+    const { query: userQuery, source_filenames: sourceFilenames, verbosity: userVerbosity, shareId } = requestBody;
+
     // リクエストヘッダーからAuthorizationを取得
     const authHeader = request.headers.get('Authorization');
     console.log(`[API /api/qa] Authorization header:`, authHeader ? 'Present' : 'Missing');
+    console.log(`[API /api/qa] ShareId:`, shareId ? 'Present' : 'Missing');
 
-    if (!authHeader) {
-      return NextResponse.json({ error: '認証情報が必要です。' }, { status: 401 });
-    }
+    let authenticatedSupabase;
 
-    // 認証情報付きのSupabaseクライアントを作成
-    const authenticatedSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: authHeader,
+    if (shareId) {
+      // 共有ページの場合は認証不要でサービスロールキーを使用
+      console.log('[API /api/qa] Using service role key for shared access');
+      const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!supabaseServiceKey) {
+        return NextResponse.json({ error: 'サーバー設定エラー: サービスロールキーが設定されていません。' }, { status: 500 });
+      }
+      
+      authenticatedSupabase = createClient(supabaseUrl, supabaseServiceKey, {
+        auth: {
+          persistSession: false,
         },
-      },
-      auth: {
-        persistSession: false,
-      },
-    });
+      });
 
-    const { query: userQuery, source_filenames: sourceFilenames, verbosity: userVerbosity } = await request.json();
+      // 共有設定を取得して有効性を確認
+      const { data: shareConfig, error: shareError } = await authenticatedSupabase
+        .from('share_configs')
+        .select('*')
+        .eq('id', shareId)
+        .single();
+
+      if (shareError || !shareConfig) {
+        console.error('[API /api/qa] Share config not found:', shareError);
+        return NextResponse.json({ error: '共有設定が見つかりません。' }, { status: 404 });
+      }
+
+      // 共有設定のソースファイル名を使用（リクエストのsource_filenamesは無視）
+      sourceFilenames = shareConfig.selected_source_names;
+      console.log('[API /api/qa] Using source filenames from share config:', sourceFilenames);
+    } else {
+      // 通常のページの場合は認証が必要
+      if (!authHeader) {
+        return NextResponse.json({ error: '認証情報が必要です。' }, { status: 401 });
+      }
+
+      // 認証情報付きのSupabaseクライアントを作成
+      authenticatedSupabase = createClient(supabaseUrl, supabaseAnonKey, {
+        global: {
+          headers: {
+            Authorization: authHeader,
+          },
+        },
+        auth: {
+          persistSession: false,
+        },
+      });
+    }
 
     if (!userQuery || typeof userQuery !== 'string' || userQuery.trim() === '') {
       return NextResponse.json({ error: '質問内容 (query) が必要です。' }, { status: 400 });

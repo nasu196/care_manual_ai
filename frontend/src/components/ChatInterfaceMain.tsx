@@ -33,10 +33,9 @@ export type AiVerbosity = 'concise' | 'default' | 'detailed';
 
 interface ChatInterfaceMainProps {
   selectedSourceNames: string[];
-  shareId?: string; // 共有ページ用のオプショナルプロパティ
 }
 
-export default function ChatInterfaceMain({ selectedSourceNames, shareId }: ChatInterfaceMainProps) {
+export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterfaceMainProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -45,6 +44,7 @@ export default function ChatInterfaceMain({ selectedSourceNames, shareId }: Chat
   const { getToken } = useAuth();
   const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
+  const hasEditPermission = useMemoStore((state) => state.hasEditPermission); // ★ 編集権限を取得
 
   // 追加: ユーザーが一番下を見ているかどうかのstate
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -86,54 +86,44 @@ export default function ChatInterfaceMain({ selectedSourceNames, shareId }: Chat
     setMessages((prevMessages) => [...prevMessages, tempAiMessage]);
 
     try {
-      let response: Response;
+      // 共有ページかどうかを判定
+      const urlParams = new URLSearchParams(window.location.search);
+      const shareId = urlParams.get('shareId');
+
+      let apiRequestBody;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
 
       if (shareId) {
-        // 共有ページの場合は認証不要のEdge Functionを使用
-        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-        if (!supabaseUrl) {
-          throw new Error('Supabase URLが設定されていません。');
-        }
-
-        const apiRequestBody = {
-          shareId,
-          question: inputValue,
-          conversationHistory: messages.slice(-10).map(msg => ({
-            role: msg.isUser ? 'user' : 'assistant',
-            content: msg.text
-          })),
+        // 共有ページの場合は認証不要
+        apiRequestBody = {
+          query: inputValue,
+          source_filenames: selectedSourceNames,
           verbosity: aiVerbosity,
+          shareId: shareId,
         };
-
-        response = await fetch(`${supabaseUrl}/functions/v1/shared-qa`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(apiRequestBody),
-        });
       } else {
-        // 通常のページの場合は認証ありのAPIを使用
+        // 通常ページの場合は認証が必要
         const token = await getToken({ template: 'supabase' });
         if (!token) {
           throw new Error('認証情報の取得に失敗しました。');
         }
 
-        const apiRequestBody = {
+        apiRequestBody = {
           query: inputValue,
           source_filenames: selectedSourceNames,
           verbosity: aiVerbosity,
         };
 
-        response = await fetch('/api/qa', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify(apiRequestBody),
-        });
+        headers['Authorization'] = `Bearer ${token}`;
       }
+
+      const response = await fetch('/api/qa', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(apiRequestBody),
+      });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: "APIからのエラー応答が不正です。" }));
@@ -373,7 +363,7 @@ export default function ChatInterfaceMain({ selectedSourceNames, shareId }: Chat
                   </div>
                   
                   {/* メモを作成ボタン - AIメッセージの下に表示 */}
-                  {!msg.isUser && !msg.isStreaming && msg.text && (
+                  {!msg.isUser && !msg.isStreaming && msg.text && hasEditPermission && (
                     <div className="mt-2 flex justify-start">
                       <Button
                         variant="outline"

@@ -7,6 +7,15 @@ const isProtectedRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
+  // 共有ページ（shareIdパラメータがある場合）は認証をスキップ
+  const url = new URL(req.url);
+  const shareId = url.searchParams.get('shareId');
+  
+  if (shareId) {
+    // 共有ページの場合は認証をスキップ
+    return;
+  }
+  
   // 保護が必要なルートの場合、認証をチェック
   if (isProtectedRoute(req)) {
     await auth.protect();

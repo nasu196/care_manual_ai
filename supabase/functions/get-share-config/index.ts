@@ -39,14 +39,13 @@ serve(async (req: Request) => {
       .select('*')
       .eq('id', shareId)
       .eq('is_active', true)
-      .gt('expires_at', new Date().toISOString())
       .single()
 
     if (shareError || !shareConfig) {
       console.error('get-share-config: Share config error:', shareError)
       console.error('get-share-config: Share config data:', shareConfig)
       return new Response(
-        JSON.stringify({ error: 'Share configuration not found or expired' }),
+        JSON.stringify({ error: 'Share configuration not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

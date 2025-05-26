@@ -47,6 +47,10 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
+  // 共有ページかどうかを判定
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+  const shareId = urlParams?.get('shareId');
+  
   const { getToken, isSignedIn } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
@@ -106,6 +110,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const fetchUploadedFiles = useCallback(async () => {
+    // 共有ページの場合は何もしない
+    if (shareId) {
+      setLoadingFiles(false);
+      return;
+    }
+    
     setLoadingFiles(true);
     try {
       const token = await getToken({ template: 'supabase' });
@@ -666,6 +676,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       setLoadingSourceData(false);
     }
   };
+
+  // 共有ページの場合は何も表示しない
+  if (shareId) {
+    return null;
+  }
 
   return (
     <div className="flex flex-col h-full">
