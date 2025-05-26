@@ -1,10 +1,9 @@
-import React, { useState, ChangeEvent, useEffect, useRef } from 'react';
+import React, { useState, ChangeEvent, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 // import { Input } from '@/components/ui/input'; // 未使用のためコメントアウト
 import { Checkbox } from '@/components/ui/checkbox';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FileText, Loader2, PlusIcon, MoreVertical, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { useSupabaseClient } from '@/hooks/useSupabaseClient';
 import { useAuth } from '@clerk/nextjs'; // ★ useAuth をインポート
 import {
   DropdownMenu,
@@ -47,8 +46,7 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
-  const { supabaseClient, isSupabaseReady } = useSupabaseClient();
-  const { getToken } = useAuth(); // getToken を取得
+  const { getToken, isSignedIn, userId } = useAuth(); // ★ userIdも取得
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -64,7 +62,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const [loadingSourceData, setLoadingSourceData] = useState(false);
 
   // ★ メッセージ設定ヘルパー関数（自動消去機能付き）
-  const setMessageWithAutoHide = (msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 10000) => {
+  const setMessageWithAutoHide = useCallback((msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 10000) => {
     // 既存のタイマーをクリア
     if (messageTimerRef.current) {
       clearTimeout(messageTimerRef.current);
@@ -80,7 +78,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         messageTimerRef.current = null;
       }, autoHideDelay);
     }
-  };
+  }, []);
 
   // ★ コンポーネントのクリーンアップ
   useEffect(() => {
@@ -106,44 +104,83 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     setUploadQueue(prev => [...prev, uploadStatus]);
   };
 
-  const fetchUploadedFiles = async () => {
-    if (!isSupabaseReady || !supabaseClient) { // 準備状態を確認
-      console.log("[fetchUploadedFiles] Supabase client not ready yet.");
-      setLoadingFiles(true); // クライアント準備中もローディング表示が良いか検討
-      return;
-    }
+  const fetchUploadedFiles = useCallback(async () => {
     setLoadingFiles(true);
+    console.log('[SourceManager] fetchUploadedFiles started.');
     try {
-      const { data, error } = await supabaseClient.from('manuals')
-        .select('file_name, original_file_name')
-        .order('file_name', { ascending: true });
-
-      if (error) {
-        console.error('Error fetching file list from manuals table:', error);
-        setMessageWithAutoHide({ type: 'error', text: `ファイル一覧の取得に失敗しました: ${error.message}` });
-        setSourceFiles([]);
-      } else {
-        const files = data?.map(item => ({ 
-          name: item.original_file_name || item.file_name, 
-          originalName: item.original_file_name || item.file_name,
-          id: item.file_name 
-        })) || [];
-        setSourceFiles(files);
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        console.error('[SourceManager] Failed to get auth token for fetching files.');
+        throw new Error("Failed to get auth token for fetching files.");
       }
+      console.log('[SourceManager] Auth token obtained.');
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+      if (!supabaseUrl || !supabaseAnonKey) {
+        console.error('[SourceManager] Supabase URL or Anon Key is not configured.');
+        throw new Error("Supabase URL or Anon Key is not configured.");
+      }
+      console.log('[SourceManager] Supabase URL and Anon Key are configured.');
+
+      const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=file_name,original_file_name&order=file_name.asc`;
+      console.log(`[SourceManager] Fetching from API: ${apiUrl}`);
+
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      console.log(`[SourceManager] API response status: ${response.status}`);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error('[SourceManager] API response not OK:', errorData);
+        throw new Error(errorData.message || `Failed to fetch files. Status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[SourceManager] API response data:', data);
+
+      // ★ 詳細ログ追加：各ファイルのfile_nameを個別に出力
+      if (Array.isArray(data)) {
+        data.forEach((item, index) => {
+          console.log(`[SourceManager] File ${index}: file_name="${item.file_name}", original_file_name="${item.original_file_name}"`);
+        });
+      }
+
+      const files = (data as Array<{file_name: string, original_file_name: string}>)?.map((item) => ({ 
+        name: item.original_file_name || item.file_name, 
+        originalName: item.original_file_name || item.file_name,
+        id: item.file_name 
+      })) || [];
+      setSourceFiles(files);
+      console.log('[SourceManager] Source files set:', files);
+
     } catch (err) {
-      console.error('Unexpected error fetching files:', err);
+      console.error('[SourceManager] Unexpected error fetching files:', err);
       setMessageWithAutoHide({ type: 'error', text: 'ファイル一覧取得中に予期せぬエラーが発生しました。' });
       setSourceFiles([]);
     } finally {
       setLoadingFiles(false);
+      console.log('[SourceManager] fetchUploadedFiles finished. setLoadingFiles(false).');
     }
-  };
+  }, [getToken, setMessageWithAutoHide]);
 
   useEffect(() => {
-    if (isSupabaseReady) { // isSupabaseReady が true になってから実行
+    console.log(`[SourceManager useEffect] Running. isSignedIn: ${isSignedIn}, getToken type: ${typeof getToken}`);
+    if (isSignedIn && typeof getToken === 'function') {
+      console.log('[SourceManager useEffect] Conditions met, calling fetchUploadedFiles.');
       fetchUploadedFiles();
+    } else {
+      console.log('[SourceManager useEffect] Conditions NOT met. Clearing loading state.');
+      setLoadingFiles(false); // サインインしていない、またはgetToken準備中の場合はローディングを解除
+      setSourceFiles([]); // ファイルリストもクリア
     }
-  }, [isSupabaseReady]); // isSupabaseReady の変更を監視
+  }, [isSignedIn, getToken, fetchUploadedFiles]); // fetchUploadedFiles を依存配列に残したままにします（useCallbackでメモ化されたため）
 
   // 選択状態を親コンポーネントと同期
   useEffect(() => {
@@ -171,10 +208,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   };
 
   const handleUpload = async (file: File) => {
-    if (!isSupabaseReady || !supabaseClient) { // 準備状態を確認
-      setMessageWithAutoHide({ type: 'error', text: 'アップロード機能の準備ができていません。少し待ってから再試行してください。' });
-      return;
-    }
     if (!file) {
       setMessageWithAutoHide({ type: 'error', text: 'アップロードするファイルを選択してください。' });
       return;
@@ -213,6 +246,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     };
 
     const encodedFileName = encodeFileName(originalFileName);
+    console.log(`[SourceManager handleUpload] Original: "${originalFileName}", Encoded: "${encodedFileName}"`); // ★ ログ追加
 
     // アップロードキューに追加
     addToUploadQueue({
@@ -416,32 +450,91 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
       return;
     }
     const storageFileName = targetFile.id; // エンコードされたファイル名
+    console.log(`[SourceManager handleDeleteFile] Attempting to delete. UI FileName: "${fileName}", Storage FileName (encoded): "${storageFileName}"`); // ★ ログ追加
     
     setMessageWithAutoHide({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
     try {
-      // Step 1: Delete from Storage (エンコードされたファイル名を使用)
-      const { error: storageError } = await supabaseClient.storage.from('manuals').remove([storageFileName]);
-
-      if (storageError) {
-        console.error('Storage delete error:', storageError);
-        setMessageWithAutoHide({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${storageError.message}` });
-        return;
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for deleting file.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase URL or Anon Key is not configured.");
       }
 
+      // Step 1: Delete from Storage (エンコードされたファイル名を使用)
+      // storageFileNameは既にエンコード済みなので、さらにencodeURIComponentする必要はない
+      const storageApiUrl = `${supabaseUrl}/storage/v1/object/manuals/${storageFileName}`;
+      console.log('DELETEリクエストURL:', storageApiUrl); // URLを確認
+      console.log(`[SourceManager handleDeleteFile] Storage FileName (encoded): "${storageFileName}"`); // ★ ログ追加
+      console.log(`[SourceManager handleDeleteFile] Storage FileName length: ${storageFileName.length}`); // ★ 長さ確認
+      console.log(`[SourceManager handleDeleteFile] Storage FileName bytes:`, Array.from(storageFileName).map(c => c.charCodeAt(0))); // ★ バイト確認
+      
+      // ★ デバッグ用：Storage内のファイル一覧を確認
+      try {
+        const listUrl = `${supabaseUrl}/storage/v1/object/list/manuals`;
+        const listResponse = await fetch(listUrl, {
+          method: 'POST',
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ limit: 100, offset: 0 }),
+        });
+        if (listResponse.ok) {
+          const listData = await listResponse.json();
+          console.log('[SourceManager handleDeleteFile] Storage files list:', listData);
+          if (Array.isArray(listData)) {
+            listData.forEach((item, index) => {
+              console.log(`[SourceManager handleDeleteFile] Storage file ${index}: name="${item.name}"`);
+            });
+          }
+        }
+      } catch (listError) {
+        console.error('[SourceManager handleDeleteFile] Failed to list storage files:', listError);
+      }
+             
+       const storageResponse = await fetch(storageApiUrl, {
+         method: 'DELETE',
+         headers: {
+           'apikey': supabaseAnonKey,
+           'Authorization': `Bearer ${token}`,
+           'x-user-id': userId || '', // ★ RLS用のuser_id追加
+         },
+       });
+
+      if (!storageResponse.ok) {
+        const errorData = await storageResponse.json().catch(() => ({ message: storageResponse.statusText }));
+        console.error('Storage delete error:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${errorData.message || storageResponse.statusText}` });
+        return;
+      }
       console.log(`File「${storageFileName}」deleted from storage.`);
 
       // Step 2: Delete from manuals table (エンコードされたファイル名で検索)
-      const { error: tableError } = await supabaseClient.from('manuals')
-        .delete()
-        .eq('file_name', storageFileName);
+      const dbApiUrl = `${supabaseUrl}/rest/v1/manuals?file_name=eq.${storageFileName}`;
+      const dbResponse = await fetch(dbApiUrl, {
+        method: 'DELETE',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
+          // 'Prefer': 'return=representation', // 必要に応じて設定
+        },
+      });
 
-      if (tableError) {
-        console.error('Table delete error:', tableError);
-        setMessageWithAutoHide({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${tableError.message}。ストレージからは削除済みです。` });
-        await fetchUploadedFiles();
+      if (!dbResponse.ok) {
+        // status 404 (Not Found) はレコードが存在しない場合なので、エラーとしないことも検討
+        // (例: ストレージ削除後、DBレコード削除前に何らかの理由でレコードが消えていた場合など)
+        // ただし、通常は整合性が取れているはずなので、厳密にエラーとする
+        const errorData = await dbResponse.json().catch(() => ({ message: dbResponse.statusText }));
+        console.error('Table delete error:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${errorData.message || dbResponse.statusText}。ストレージからは削除済みです。` });
+        await fetchUploadedFiles(); // リストを再同期
         return;
       }
-      
       console.log(`Record for「${storageFileName}」deleted from manuals table.`);
 
       // Step 3: Fetch updated list and update UI
@@ -504,16 +597,35 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     console.log(`[handleRenameFile] Updating original_file_name in database for file: ${storageFileName}`);
     
     try {
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for renaming file.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase URL or Anon Key is not configured.");
+      }
+
       // Storageファイル名は変更せず、manualsテーブルのoriginal_file_nameのみ更新
-      const { error: updateError } = await supabaseClient.from('manuals')
-        .update({ original_file_name: trimmedNewName })
-        .eq('file_name', storageFileName);
+      const apiUrl = `${supabaseUrl}/rest/v1/manuals?file_name=eq.${storageFileName}`;
+      const response = await fetch(apiUrl, {
+        method: 'PATCH',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=minimal', // 更新後のデータを返さない場合
+        },
+        body: JSON.stringify({ original_file_name: trimmedNewName }),
+      });
         
-      console.log('[handleRenameFile] Database update call returned. Error:', JSON.stringify(updateError, null, 2));
+      // console.log('[handleRenameFile] Database update call returned. Error:', JSON.stringify(updateError, null, 2)); // updateErrorはもうない
       
-      if (updateError) {
-        console.error('[handleRenameFile] Database update error:', updateError);
-        setMessageWithAutoHide({ type: 'error', text: `ファイル名の変更に失敗しました: ${updateError.message}` });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error('[handleRenameFile] Database update error:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `ファイル名の変更に失敗しました: ${errorData.message || response.statusText}` });
       } else {
         setMessageWithAutoHide({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
         await fetchUploadedFiles();
@@ -540,37 +652,69 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const fetchSourceData = async (fileName: string) => {
     setLoadingSourceData(true);
     try {
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for fetching source data.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error("Supabase URL or Anon Key is not configured.");
+      }
+
       // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
       const targetFile = sourceFiles.find(file => file.name === fileName);
       if (!targetFile) {
         setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
+        setLoadingSourceData(false); // ★ ローディング解除
         return;
       }
       const storageFileName = targetFile.id; // エンコードされたファイル名
 
       // manualsテーブルからmanual_idを取得
-      const { data: manualData, error: manualError } = await supabaseClient.from('manuals')
-        .select('id')
-        .eq('file_name', storageFileName)
-        .single();
+      const manualApiUrl = `${supabaseUrl}/rest/v1/manuals?select=id&file_name=eq.${storageFileName}`;
+      const manualResponse = await fetch(manualApiUrl, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.pgrst.object+json', // .single() に相当
+        },
+      });
 
-      if (manualError || !manualData) {
-        console.error('Manual not found:', manualError);
-        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のデータが見つかりません。` });
+      if (!manualResponse.ok) {
+        const errorData = await manualResponse.json().catch(() => ({ message: manualResponse.statusText }));
+        console.error('Manual not found error:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のデータが見つかりません: ${errorData.message || manualResponse.statusText}` });
+        setLoadingSourceData(false); // ★ ローディング解除
+        return;
+      }
+      const manualData = await manualResponse.json();
+      if (!manualData || !manualData.id) { // manualData自体がnull/undefined、またはidがない場合
+        console.error('Manual data or ID is missing after successful fetch');
+        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のID取得に失敗しました。` });
+        setLoadingSourceData(false); // ★ ローディング解除
         return;
       }
 
       // manual_chunksからテキストデータを取得
-      const { data: chunksData, error: chunksError } = await supabaseClient.from('manual_chunks')
-        .select('chunk_text, chunk_order')
-        .eq('manual_id', manualData.id)
-        .order('chunk_order', { ascending: true });
+      const chunksApiUrl = `${supabaseUrl}/rest/v1/manual_chunks?select=chunk_text,chunk_order&manual_id=eq.${manualData.id}&order=chunk_order.asc`;
+      const chunksResponse = await fetch(chunksApiUrl, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
+        },
+      });
 
-      if (chunksError) {
-        console.error('Error fetching chunks:', chunksError);
-        setMessageWithAutoHide({ type: 'error', text: `テキストデータの取得に失敗しました: ${chunksError.message}` });
+      if (!chunksResponse.ok) {
+        const errorData = await chunksResponse.json().catch(() => ({ message: chunksResponse.statusText }));
+        console.error('Error fetching chunks:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `テキストデータの取得に失敗しました: ${errorData.message || chunksResponse.statusText}` });
+        setLoadingSourceData(false); // ★ ローディング解除
         return;
       }
+      const chunksData = await chunksResponse.json() as Array<{chunk_text: string, chunk_order: number}>; // 型アサーション
 
       // チャンクを結合してテキストデータを作成
       const combinedText = chunksData?.map(chunk => chunk.chunk_text).join('\n\n') || '';

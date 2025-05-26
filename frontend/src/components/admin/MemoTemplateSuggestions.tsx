@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import MemoTemplateSuggestionItem from './MemoTemplateSuggestionItem';
 import { Button } from '@/components/ui/button';
 import { Loader2, SlidersHorizontal } from 'lucide-react';
-import { useSupabaseClient } from '@/hooks/useSupabaseClient';
 import type { FunctionsError } from '@supabase/supabase-js';
 import Image from 'next/image';
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -67,7 +66,6 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const removeGeneratingMemo = useMemoStore((state) => state.removeGeneratingMemo);
   const setIsAnyModalOpen = useMemoStore((state) => state.setIsAnyModalOpen);
 
-  const { supabaseClient, isSupabaseReady } = useSupabaseClient();
   const { userId: clerkUserId, isSignedIn: isClerkSignedIn, getToken } = useAuth();
 
   useEffect(() => {
@@ -253,7 +251,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSourceNames, supabaseClient, getToken]); // getToken を依存配列に追加
+  }, [selectedSourceNames, getToken]);
 
   // アイデアカードクリック時のハンドラ
   const handleSuggestionItemClick = (suggestion: Suggestion) => {
@@ -264,35 +262,27 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   };
 
   // モーダルで「作成」が押されたときのハンドラ
-  const handleConfirmGenerateMemo = useCallback(async (currentClerkUserId: string | null | undefined) => {
-    if (!selectedIdeaForModal) return;
-    if (!isSupabaseReady || !isClerkSignedIn || !supabaseClient) {
-      console.error("Supabase client or Clerk session is not ready. Cannot generate memo.");
-      setGenerateMemoError("メモ機能またはユーザー認証の準備ができていません。少し待ってから再試行してください。");
-      setIsGenerateMemoModalOpen(true);
+  const handleConfirmGenerateMemo = useCallback(async () => {
+    if (!selectedIdeaForModal) {
+      setGenerateMemoError('提案が選択されていません。');
       return;
     }
-    if (!currentClerkUserId) {
-      console.error("Clerk user ID is not available. Cannot generate memo.");
-      setGenerateMemoError("ユーザー認証情報が取得できませんでした。再ログインしてみてください。");
-      setIsGenerateMemoModalOpen(true);
-      return;
-    }
-    if (typeof getToken !== 'function') {
-      console.error("Clerk getToken is not available or not a function.");
-      setGenerateMemoError("認証情報を取得できませんでした。ページを再読み込みしてみてください。");
-      setIsGenerateMemoModalOpen(true);
+    if (!isClerkSignedIn) {
+      setGenerateMemoError('Supabaseクライアントの準備ができていないか、認証されていません。');
       return;
     }
 
+    const tempMemoId = Date.now().toString();
+    addGeneratingMemo({
+      id: tempMemoId,
+      title: selectedIdeaForModal.title,
+      status: 'prompt_creating',
+    });
+
     setIsGenerateMemoModalOpen(false);
     setIsAnyModalOpen(false);
-    const tempMemoId = Date.now().toString();
     const memoTitle = selectedIdeaForModal.title;
-    addGeneratingMemo({ id: tempMemoId, title: memoTitle, status: 'prompt_creating' });
-    const currentIdeaForProcessing = selectedIdeaForModal;
-    setSelectedIdeaForModal(null);
-    console.log("Generating memo for:", memoTitle, "by user:", currentClerkUserId);
+    console.log("Generating memo for:", memoTitle, "by user:", clerkUserId);
 
     let tokenForCreateMemo; 
     try {
@@ -313,9 +303,9 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ideaTitle: currentIdeaForProcessing.title,
-          ideaDescription: currentIdeaForProcessing.description,
-          sourceFileNames: currentIdeaForProcessing.source_files || [],
+          ideaTitle: selectedIdeaForModal.title,
+          ideaDescription: selectedIdeaForModal.description,
+          sourceFileNames: selectedIdeaForModal.source_files || [],
         }),
       });
       if (!promptResponse.ok) {
@@ -337,7 +327,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           crafted_prompt: generatedPrompt,
-          source_filenames: currentIdeaForProcessing.source_files || [],
+          source_filenames: selectedIdeaForModal.source_files || [],
           verbosity: aiVerbosity,
         }),
       });
@@ -359,8 +349,8 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }
         console.error(`[${tempMemoId}] Invalid memo generation result. Detail: ${detail}. Raw response:`, memoGenerationResult);
         throw new Error(`AIからのメモ生成結果が不正です。(詳細: ${detail})`);
-      }
-
+        }
+        
       // Markdown から HTML への変換
       const htmlContent = marked.parse(memoGenerationResult.generated_memo) as string;
 
@@ -416,7 +406,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         }
         updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage: createErrorMessage });
         setGenerateMemoError(`AIはメモを生成しましたが、保存中にエラーが発生しました: ${createErrorMessage}`);
-      }
+        }
       // ▲▲▲ ここまで create-memo 呼び出し処理 ▲▲▲
 
     } catch (e: unknown) {
@@ -427,16 +417,16 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
         errorMessage = (e as { message: string }).message;
         } else if (typeof e === 'string') {
         errorMessage = e;
-      }
+        }
       console.error("Error generating memo with AI:", e);
       setGenerateMemoError(errorMessage);
       updateGeneratingMemoStatus(tempMemoId, 'error', { errorMessage });
       // エラー時は removeGeneratingMemo を呼ぶか、ユーザーが手動で消せるように残すか検討
-    } 
+    }
     // finally ブロックは不要かもしれない、エラー時や成功時でUIの状態（ローディングインジケータなど）が
     // addGeneratingMemo / updateGeneratingMemoStatus / removeGeneratingMemo で管理されるなら。
     // もし finally で共通処理が必要ならここに記述。
-  }, [selectedIdeaForModal, supabaseClient, isSupabaseReady, isClerkSignedIn, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, selectedSourceNames, setIsAnyModalOpen]);
+  }, [selectedIdeaForModal, isClerkSignedIn, getToken, aiVerbosity, addGeneratingMemo, updateGeneratingMemoStatus, removeGeneratingMemo, triggerMemoListRefresh, selectedSourceNames, setIsAnyModalOpen]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -583,7 +573,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                 >
                   キャンセル
                 </Button>
-                <Button onClick={() => handleConfirmGenerateMemo(clerkUserId)}>
+                <Button onClick={handleConfirmGenerateMemo}>
                   作成する
                 </Button>
               </div>

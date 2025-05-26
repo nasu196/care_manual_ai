@@ -7,7 +7,6 @@ import { ArrowLeft, PlusCircle, Flag, Trash2, AlertTriangle, XCircle, Save, Load
 import { useMemoStore } from '@/store/memoStore';
 import MemoTemplateSuggestions from '@/components/admin/MemoTemplateSuggestions';
 import { useAuth } from '@clerk/nextjs';
-import { invokeFunction } from '@/lib/supabaseFunctionUtils';
 import RichTextEditor from '@/components/common/RichTextEditor';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 // import { marked } from 'marked'; // 不要になったためコメントアウトまたは削除
@@ -101,28 +100,55 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     }
     setIsLoading(true);
     setError(null);
-    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos using invokeFunction...`);
+    console.log(`[${new Date().toISOString()}] [fetchMemos] Attempting to fetch memos...`);
 
-    const { data, error: functionError } = await invokeFunction('list-memos', { method: 'GET' }, getToken, userId);
-
-    console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, { data, functionError });
-
-    if (functionError) {
-      console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function:`, functionError);
-      setError(functionError as Error);
-    } else if (Array.isArray(data)) {
-      console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
-      // ★ 取得したデータの内容を詳細にログ出力 (最初の数件など)
-      if (data.length > 0) {
-        console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
+    try {
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for list-memos.");
       }
-      setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
-    } else {
-      console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
-      setMemos([]); 
+
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not defined.");
+      }
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/list-memos`;
+      
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json', // GETでも念のため付与（なくても良い場合が多い）
+        },
+      });
+
+      console.log(`[${new Date().toISOString()}] [fetchMemos] Raw response from list-memos:`, response);
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error(`[${new Date().toISOString()}] [fetchMemos] Error from list-memos function (${response.status}):`, errorData);
+        throw new Error(errorData.message || `Failed to fetch memos. Status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+
+      if (Array.isArray(data)) {
+        console.log(`[${new Date().toISOString()}] [fetchMemos] Successfully fetched ${data.length} memos. Setting memos state.`);
+        if (data.length > 0) {
+          console.log(`[${new Date().toISOString()}] [fetchMemos] First memo example:`, JSON.stringify(data[0], null, 2));
+        }
+        setMemos(data.map(m => ({...m, isGenerating: false })) as Memo[]);
+      } else {
+        console.warn(`[${new Date().toISOString()}] [fetchMemos] Unexpected data structure from list-memos. Expected array, got:`, data);
+        setMemos([]); 
+      }
+    } catch (e) {
+      console.error(`[${new Date().toISOString()}] [fetchMemos] Exception during fetch or processing:`, e);
+      setError(e as Error);
+    } finally {
+      setIsLoading(false);
+      console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`);
     }
-    setIsLoading(false);
-    console.log(`[${new Date().toISOString()}] [fetchMemos] Finished fetching memos. isLoading set to false.`);
   }, [getToken, userId, isSignedIn, setIsLoading, setError, setMemos]);
 
   // 1. 初回マウント時と、手動での新規メモ編集モード終了時にメモを取得
@@ -169,27 +195,50 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     const memoData = {
       title: newMemoTitle,
       content: newMemoContent, // HTML文字列をそのまま渡す
-      // created_by はEdge Function側でx-user-idヘッダーから取得・設定する想定
     };
-    console.log('[handleCreateMemo] memoData to be sent (HTML):', JSON.stringify(memoData)); // ログ更新
-    const { data: newMemo, error: createError } = await invokeFunction(
-      'create-memo', 
-      { method: 'POST', body: memoData }, 
-      getToken, 
-      userId
-    );
+    console.log('[handleCreateMemo] memoData to be sent (HTML):', JSON.stringify(memoData));
 
-    if (createError) {
-      throw createError;
+    try {
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for create-memo.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not defined.");
+      }
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/create-memo`;
+
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(memoData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error(`[handleCreateMemo] Error from create-memo function (${response.status}):`, errorData);
+        throw new Error(errorData.message || `Failed to create memo. Status: ${response.status}`);
+      }
+
+      const newMemo = await response.json();
+      console.log('[handleCreateMemo] Memo created successfully by Edge Function:', newMemo);
+
+      setNewMemoTitle('');
+      setNewMemoContent('');
+      setIsEditingNewMemo(false);
+      setMemoViewExpanded(false);
+      await fetchMemos(); 
+    } catch (e) {
+      console.error('[handleCreateMemo] Exception during create memo:', e);
+      setCreateMemoError((e as Error).message || 'メモの作成中に不明なエラーが発生しました。');
+      // throw e; // エラーを再スローしない場合は、UIでエラーを表示する
+    } finally {
+      setIsCreatingMemo(false);
     }
-
-    console.log('[handleCreateMemo] Memo created successfully by Edge Function:', newMemo); // newMemo を使用
-
-    setNewMemoTitle('');
-    setNewMemoContent(''); // エディタをクリア (初期状態に戻す)
-    setIsEditingNewMemo(false); // 作成後は編集モードを解除
-    setMemoViewExpanded(false); // ★ メモ作成完了時も表示状態を終了
-    await fetchMemos(); // ★★★ 新規メモ作成成功後にリストを再取得 ★★★
   }, [newMemoTitle, newMemoContent, getToken, userId, isSignedIn, fetchMemos, setIsCreatingMemo, setCreateMemoError, setNewMemoTitle, setNewMemoContent, setIsEditingNewMemo, setMemoViewExpanded]);
 
   const handleDeleteMemo = useCallback(async (memoIdToDelete: string) => {
@@ -203,26 +252,34 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setDeleteError(null);
 
     try {
-      const { error: deleteErr } = await invokeFunction(
-          'delete-memo', 
-          { 
-            method: 'DELETE',
-            itemId: memoIdToDelete
-          }, 
-          getToken, 
-          userId
-      );
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for delete-memo.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not defined.");
+      }
+      // DELETEメソッドを使い、memoIdToDeleteをパスパラメータとしてURLに含める
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/delete-memo/${encodeURIComponent(memoIdToDelete)}`; 
 
-      if (deleteErr) {
-        throw deleteErr;
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error(`[handleDeleteMemo] Error from delete-memo function (${response.status}):`, errorData);
+        throw new Error(errorData.message || `Failed to delete memo. Status: ${response.status}`);
       }
 
-      // 削除成功時にローカル状態を更新
       setMemos((prevMemos) => prevMemos.filter((memo) => memo.id !== memoIdToDelete));
       if (selectedMemoId === memoIdToDelete) {
           setSelectedMemoId(null);
       }
-
       console.log('Memo deleted successfully:', memoIdToDelete);
 
     } catch (e) {
@@ -314,38 +371,52 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     setUpdateMemoError(null);
 
     try {
-      const memoData = {
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for update-memo.");
+      }
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not defined.");
+      }
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/update-memo`;
+
+      const memoDataToUpdate = {
         id: selectedMemoId,
         title: editingTitle,
-        content: editingContent, // HTML文字列をそのまま渡す
+        content: editingContent,
       };
-      const { data: updatedMemoData, error: updateError } = await invokeFunction(
-        'update-memo',
-        { method: 'POST', body: memoData },
-        getToken,
-        userId
-      );
 
-      if (updateError) {
-        throw updateError; 
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(memoDataToUpdate),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error(`[handleUpdateMemo] Error from update-memo function (${response.status}):`, errorData);
+        throw new Error(errorData.message || `Failed to update memo. Status: ${response.status}`);
       }
 
+      // 更新成功時は、レスポンスボディに更新後の完全なメモオブジェクトを期待する
+      const updatedMemoData = await response.json();
+
       if (updatedMemoData && typeof updatedMemoData === 'object' && 'id' in updatedMemoData && updatedMemoData.id === selectedMemoId) {
-        // Edge Functionが更新後の完全なメモオブジェクトを返した場合 (idが一致することも確認)
         setMemos(prevMemos => prevMemos.map(m => 
           m.id === selectedMemoId ? { ...(updatedMemoData as Memo), isGenerating: false } : m
         ));
       } else {
-        // Edge Functionが期待した形式のオブジェクトを返さなかったか、idが一致しない場合
-        // ローカルの編集内容でフォールバック更新 (またはエラーとして扱うか、fetchMemos() を呼ぶ)
         console.warn('update-memo did not return the expected memo object or ID mismatch. Falling back to local update based on editing fields.');
         setMemos(prevMemos => prevMemos.map(m => 
-          m.id === selectedMemoId ? { ...m, title: editingTitle, content: editingContent, isGenerating: false } : m
+          m.id === selectedMemoId ? { ...m, title: editingTitle, content: editingContent, updated_at: new Date().toISOString(), isGenerating: false } : m // updated_atも更新
         ));
       }
       
       setIsEditingSelectedMemo(false);
-      // ★ メモ更新完了時は閲覧モードに戻るが、メモ表示状態は継続
 
     } catch (e) {
       console.error('Failed to update memo:', e);
@@ -381,17 +452,50 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
     );
 
     try {
-      const { error: toggleError } = await invokeFunction(
-        'update-memo', 
-        { method: 'POST', body: { id: memoIdToToggle, is_important: newIsImportant } },
-        getToken,
-        userId
-      );
-
-      if (toggleError) {
-        throw toggleError;
+      const token = await getToken({ template: 'supabase' });
+      if (!token) {
+        throw new Error("Failed to get auth token for toggling important status.");
       }
-      // 成功時は特に何もしない (UIは既に更新済み)
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not defined.");
+      }
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/update-memo`; // 同じupdate-memoを使用
+
+      const bodyData = { id: memoIdToToggle, is_important: newIsImportant };
+
+      const response = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(bodyData),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        console.error(`[handleToggleImportant] Error from update-memo function (${response.status}):`, errorData);
+        throw new Error(errorData.message || `Failed to toggle important status. Status: ${response.status}`);
+      }
+
+      // 成功時はレスポンスボディに更新後のメモオブジェクトを期待する（または少なくとも成功ステータス）
+      const updatedMemo = await response.json();
+      console.log('[handleToggleImportant] Toggle important status response:', updatedMemo);
+      
+      // UIは楽観的更新済みなので、ここでは特に何もしないか、
+      // 返ってきたデータで再度状態を更新しても良い (updated_atなどを反映するため)
+      // 今回は、updated_atが返ってくることを期待して、それで更新する
+      if (updatedMemo && typeof updatedMemo === 'object' && 'id' in updatedMemo && updatedMemo.id === memoIdToToggle) {
+        setMemos(prevMemos => 
+          prevMemos.map(m => 
+            m.id === memoIdToToggle ? { ...(updatedMemo as Memo), isGenerating: false } : m
+          )
+        );
+      } else {
+        // 期待したレスポンスでなかった場合、エラーログを出すなど
+        console.warn('[handleToggleImportant] Did not receive expected memo object after toggle.');
+      }
 
     } catch (e) {
       console.error('Failed to toggle important status:', e);
