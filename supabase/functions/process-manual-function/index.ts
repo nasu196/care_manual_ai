@@ -443,7 +443,6 @@ async function generateSummary(text: string, generativeAiClient: GoogleGenerativ
   ];
 
   // 使用するモデルを指定します。'gemini-pro' はテキスト生成に適しています。
-  // 'gemini-1.5-flash-latest' も高速で安価な選択肢です。
   const model = generativeAiClient.getGenerativeModel({ 
     model: "gemini-2.0-flash",
     safetySettings,
