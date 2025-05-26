@@ -108,8 +108,8 @@ serve(async (req: Request) => {
         file_name: encodedFileName,
         original_file_name: originalFileName,
         user_id: userId,
-        summary: null, // process-manual-functionで後から更新される
-        created_at: new Date().toISOString()
+        summary: null
+        // uploaded_at, updated_atはDBのデフォルト値に任せる
       });
 
     if (dbError) {
