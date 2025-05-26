@@ -33,9 +33,10 @@ export type AiVerbosity = 'concise' | 'default' | 'detailed';
 
 interface ChatInterfaceMainProps {
   selectedSourceNames: string[];
+  shareId?: string; // 共有ページ用のオプショナルプロパティ
 }
 
-export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterfaceMainProps) {
+export default function ChatInterfaceMain({ selectedSourceNames, shareId }: ChatInterfaceMainProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -84,27 +85,55 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     };
     setMessages((prevMessages) => [...prevMessages, tempAiMessage]);
 
-    const apiRequestBody = {
-      query: inputValue,
-      source_filenames: selectedSourceNames,
-      verbosity: aiVerbosity,
-    };
-
     try {
-      // Clerkトークンを取得
-      const token = await getToken({ template: 'supabase' });
-      if (!token) {
-        throw new Error('認証情報の取得に失敗しました。');
-      }
+      let response: Response;
 
-      const response = await fetch('/api/qa', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(apiRequestBody),
-      });
+      if (shareId) {
+        // 共有ページの場合は認証不要のEdge Functionを使用
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        if (!supabaseUrl) {
+          throw new Error('Supabase URLが設定されていません。');
+        }
+
+        const apiRequestBody = {
+          shareId,
+          question: inputValue,
+          conversationHistory: messages.slice(-10).map(msg => ({
+            role: msg.isUser ? 'user' : 'assistant',
+            content: msg.text
+          })),
+          verbosity: aiVerbosity,
+        };
+
+        response = await fetch(`${supabaseUrl}/functions/v1/shared-qa`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(apiRequestBody),
+        });
+      } else {
+        // 通常のページの場合は認証ありのAPIを使用
+        const token = await getToken({ template: 'supabase' });
+        if (!token) {
+          throw new Error('認証情報の取得に失敗しました。');
+        }
+
+        const apiRequestBody = {
+          query: inputValue,
+          source_filenames: selectedSourceNames,
+          verbosity: aiVerbosity,
+        };
+
+        response = await fetch('/api/qa', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(apiRequestBody),
+        });
+      }
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: "APIからのエラー応答が不正です。" }));
