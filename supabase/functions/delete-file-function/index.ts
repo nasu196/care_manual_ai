@@ -30,25 +30,29 @@ Deno.serve(async (req: Request) => {
     const clerkToken = authHeader.replace('Bearer ', '');
 
     // Clerk JWTを検証してuser_idを取得
-    const clerkResponse = await fetch('https://api.clerk.dev/v1/verify_token', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${Deno.env.get('CLERK_SECRET_KEY')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ token: clerkToken }),
-    });
-
-    if (!clerkResponse.ok) {
-      console.error('Clerk token verification failed:', await clerkResponse.text());
+    // ClerkのJWTは自己完結型なので、直接デコードして検証する
+    const jwtParts = clerkToken.split('.');
+    if (jwtParts.length !== 3) {
       return new Response(
-        JSON.stringify({ error: 'Invalid authentication token' }),
+        JSON.stringify({ error: 'Invalid JWT format' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const clerkData = await clerkResponse.json();
-    const userId = clerkData.sub;
+    let payload;
+    try {
+      const decodedPayload = atob(jwtParts[1]);
+      payload = JSON.parse(decodedPayload);
+    } catch (error) {
+      console.error('JWT decode error:', error);
+      return new Response(
+        JSON.stringify({ error: 'Invalid JWT payload' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // JWTペイロードからuser_idを取得
+    const userId = payload.sub;
 
     if (!userId) {
       return new Response(

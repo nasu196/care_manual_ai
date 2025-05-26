@@ -46,7 +46,7 @@ interface SourceManagerProps {
 }
 
 const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
-  const { getToken, isSignedIn, userId } = useAuth(); // ★ userIdも取得
+  const { getToken, isSignedIn } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messageTimerRef = useRef<NodeJS.Timeout | null>(null); // ★ メッセージ自動消去用タイマー
   const [sourceFiles, setSourceFiles] = useState<SourceFile[]>([]);
@@ -459,85 +459,32 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         throw new Error("Failed to get auth token for deleting file.");
       }
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error("Supabase URL or Anon Key is not configured.");
+      if (!supabaseUrl) {
+        throw new Error("Supabase URL is not configured.");
       }
 
-      // Step 1: Delete from Storage (エンコードされたファイル名を使用)
-      // storageFileNameは既にエンコード済みなので、さらにencodeURIComponentする必要はない
-      const storageApiUrl = `${supabaseUrl}/storage/v1/object/manuals/${storageFileName}`;
-      console.log('DELETEリクエストURL:', storageApiUrl); // URLを確認
       console.log(`[SourceManager handleDeleteFile] Storage FileName (encoded): "${storageFileName}"`); // ★ ログ追加
-      console.log(`[SourceManager handleDeleteFile] Storage FileName length: ${storageFileName.length}`); // ★ 長さ確認
-      console.log(`[SourceManager handleDeleteFile] Storage FileName bytes:`, Array.from(storageFileName).map(c => c.charCodeAt(0))); // ★ バイト確認
       
-      // ★ デバッグ用：Storage内のファイル一覧を確認
-      try {
-        const listUrl = `${supabaseUrl}/storage/v1/object/list/manuals`;
-        const listResponse = await fetch(listUrl, {
-          method: 'POST',
-          headers: {
-            'apikey': supabaseAnonKey,
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ limit: 100, offset: 0 }),
-        });
-        if (listResponse.ok) {
-          const listData = await listResponse.json();
-          console.log('[SourceManager handleDeleteFile] Storage files list:', listData);
-          if (Array.isArray(listData)) {
-            listData.forEach((item, index) => {
-              console.log(`[SourceManager handleDeleteFile] Storage file ${index}: name="${item.name}"`);
-            });
-          }
-        }
-      } catch (listError) {
-        console.error('[SourceManager handleDeleteFile] Failed to list storage files:', listError);
-      }
-             
-       const storageResponse = await fetch(storageApiUrl, {
-         method: 'DELETE',
-         headers: {
-           'apikey': supabaseAnonKey,
-           'Authorization': `Bearer ${token}`,
-           'x-user-id': userId || '', // ★ RLS用のuser_id追加
-         },
-       });
-
-      if (!storageResponse.ok) {
-        const errorData = await storageResponse.json().catch(() => ({ message: storageResponse.statusText }));
-        console.error('Storage delete error:', errorData);
-        setMessageWithAutoHide({ type: 'error', text: `ストレージからのファイル「${fileName}」の削除に失敗しました: ${errorData.message || storageResponse.statusText}` });
-        return;
-      }
-      console.log(`File「${storageFileName}」deleted from storage.`);
-
-      // Step 2: Delete from manuals table (エンコードされたファイル名で検索)
-      const dbApiUrl = `${supabaseUrl}/rest/v1/manuals?file_name=eq.${storageFileName}`;
-      const dbResponse = await fetch(dbApiUrl, {
-        method: 'DELETE',
+            // ★ Edge Function経由でファイル削除
+      const deleteFunctionUrl = `${supabaseUrl}/functions/v1/delete-file-function`;
+      const deleteResponse = await fetch(deleteFunctionUrl, {
+        method: 'POST',
         headers: {
-          'apikey': supabaseAnonKey,
           'Authorization': `Bearer ${token}`,
-          // 'Prefer': 'return=representation', // 必要に応じて設定
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ fileName: storageFileName }),
       });
 
-      if (!dbResponse.ok) {
-        // status 404 (Not Found) はレコードが存在しない場合なので、エラーとしないことも検討
-        // (例: ストレージ削除後、DBレコード削除前に何らかの理由でレコードが消えていた場合など)
-        // ただし、通常は整合性が取れているはずなので、厳密にエラーとする
-        const errorData = await dbResponse.json().catch(() => ({ message: dbResponse.statusText }));
-        console.error('Table delete error:', errorData);
-        setMessageWithAutoHide({ type: 'error', text: `DBからのファイル「${fileName}」のレコード削除に失敗しました: ${errorData.message || dbResponse.statusText}。ストレージからは削除済みです。` });
-        await fetchUploadedFiles(); // リストを再同期
+      if (!deleteResponse.ok) {
+        const errorData = await deleteResponse.json().catch(() => ({ message: deleteResponse.statusText }));
+        console.error('Delete function error:', errorData);
+        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」の削除に失敗しました: ${errorData.message || deleteResponse.statusText}` });
         return;
       }
-      console.log(`Record for「${storageFileName}」deleted from manuals table.`);
+             console.log(`File「${storageFileName}」deleted successfully via Edge Function.`);
 
-      // Step 3: Fetch updated list and update UI
+      // Fetch updated list and update UI
       await fetchUploadedFiles();
       onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
       setMessageWithAutoHide({ type: 'success', text: `ファイル「${fileName}」を完全に削除しました。` });
