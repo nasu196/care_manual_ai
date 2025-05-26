@@ -13,48 +13,81 @@ serve(async (req: Request) => {
   }
 
   try {
+    console.log('Received request headers for create-share-config:', JSON.stringify(Object.fromEntries(req.headers.entries())));
+    
     // リクエストボディを解析
     const { selectedSourceNames } = await req.json()
 
-    // JWTトークンを取得
+    // Authorizationヘッダーを取得
     const authHeader = req.headers.get('Authorization')
+    
     if (!authHeader) {
+      console.error('Authorization header is missing')
       return new Response(
-        JSON.stringify({ error: 'Authorization header is missing' }),
+        JSON.stringify({ error: 'No Authorization header' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
+    // JWTからユーザーIDを取得
+    let userId;
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+      const payload = JSON.parse(atob(parts[1]));
+      console.log('[create-share-config][Auth] Decoded Clerk JWT Payload:', payload);
 
-    // Supabaseクライアントを初期化（Clerk JWTを使用）
+      userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+
+      if (!userId) {
+        console.error('[create-share-config][Auth] User ID not found in Clerk JWT payload.');
+        return new Response(
+          JSON.stringify({ error: 'User ID not found in token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`[create-share-config][Auth] Authenticated user ID from Clerk JWT: ${userId}`);
+    } catch (e) {
+      console.error('[create-share-config][Auth] Error decoding JWT:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Processing request for user:', userId)
+    console.log('Selected sources:', selectedSourceNames)
+
+    // Supabaseクライアントを初期化（Clerk統合を活用）
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
     
+    console.log('Supabase URL:', supabaseUrl)
+    console.log('Supabase Anon Key available:', !!supabaseAnonKey)
+    
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
       },
     })
-
-    // JWTからユーザーIDを取得
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid authentication token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
 
     // 共有IDを生成（UUID v4）
     const shareId = crypto.randomUUID()
 
-    // 共有設定をデータベースに保存
+    // 共有設定をデータベースに保存（RLSポリシーがauth.jwt()->'user_metadata'->>'user_id'でユーザーを識別）
     const { error: insertError } = await supabase
       .from('share_configs')
       .insert({
         id: shareId,
-        user_id: user.id,
+        user_id: userId,
         selected_source_names: selectedSourceNames,
         created_at: new Date().toISOString(),
         expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30日後に期限切れ
@@ -68,6 +101,7 @@ serve(async (req: Request) => {
       )
     }
 
+    console.log('Share config created successfully:', shareId)
     return new Response(
       JSON.stringify({ shareId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
