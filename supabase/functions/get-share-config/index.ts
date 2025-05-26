@@ -17,7 +17,10 @@ serve(async (req: Request) => {
     const url = new URL(req.url)
     const shareId = url.searchParams.get('id')
 
+    console.log('get-share-config: Received request for shareId:', shareId)
+
     if (!shareId) {
+      console.error('get-share-config: Share ID is missing')
       return new Response(
         JSON.stringify({ error: 'Share ID is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -40,27 +43,33 @@ serve(async (req: Request) => {
       .single()
 
     if (shareError || !shareConfig) {
+      console.error('get-share-config: Share config error:', shareError)
+      console.error('get-share-config: Share config data:', shareConfig)
       return new Response(
         JSON.stringify({ error: 'Share configuration not found or expired' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
+    console.log('get-share-config: Found share config for user:', shareConfig.user_id)
+
     // ユーザーのメモを取得
     const { data: memos, error: memosError } = await supabase
       .from('memos')
       .select('id, title, content, is_important, created_at, updated_at')
-      .eq('created_by', shareConfig.user_id)
+      .eq('user_id', shareConfig.user_id)
       .order('is_important', { ascending: false })
       .order('updated_at', { ascending: false })
 
     if (memosError) {
-      console.error('Error fetching memos:', memosError)
+      console.error('get-share-config: Error fetching memos:', memosError)
       return new Response(
         JSON.stringify({ error: 'Failed to fetch memos' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
+
+    console.log('get-share-config: Found', memos?.length || 0, 'memos for user')
 
     // ユーザーのマニュアル情報を取得（選択されたソースのみ）
     const selectedSourceNames = shareConfig.selected_source_names as string[]
