@@ -108,7 +108,8 @@ serve(async (req: Request) => {
         file_name: encodedFileName,
         original_file_name: originalFileName,
         user_id: userId,
-        summary: null
+        summary: null,
+        storage_path: `manuals/${encodedFileName}` // NOT NULL制約対応
         // uploaded_at, updated_atはDBのデフォルト値に任せる
       });
 
