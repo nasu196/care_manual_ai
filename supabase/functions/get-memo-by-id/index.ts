@@ -11,7 +11,7 @@ import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts";
 // .env から環境変数をロード
 await load({ export: true, envPath: ".env" });
 
-console.log("Hello from Functions!")
+console.log("Get Memo By ID Function Initialized")
 
 Deno.serve(async (req) => {
   // Handle OPTIONS request for CORS preflight
@@ -39,35 +39,11 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Authorizationヘッダーを取得
     const authHeader = req.headers.get('Authorization')
     
     if (!authHeader) {
       return new Response(
         JSON.stringify({ error: 'No Authorization header' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // JWTトークンをデコードして直接ユーザー情報を取得
-    const token = authHeader.replace('Bearer ', '')
-    const parts = token.split('.')
-    
-    if (parts.length !== 3) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid JWT format' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    // JWTペイロードをデコード
-    const payload = JSON.parse(atob(parts[1]))
-    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
-    
-    if (!userId) {
-      console.error('No user ID found in JWT payload')
-      return new Response(
-        JSON.stringify({ error: 'User ID not found in token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
@@ -84,15 +60,23 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Supabaseクライアントを作成
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
+    // Supabaseクライアントを作成（Clerk統合を活用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    })
 
-    // メモを取得（ユーザーIDでフィルタリング）
+    // メモを取得（RLSポリシーがユーザー分離を処理）
     const { data, error } = await supabase
       .from('memos')
       .select('*')
       .eq('id', memoId)
-      .eq('created_by', userId)
       .single()
 
     if (error) {

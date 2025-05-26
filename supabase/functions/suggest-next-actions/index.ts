@@ -7,40 +7,27 @@ import "npm:dotenv/config"; // Deno Deployでは不要だがローカルテス�
 
 console.log('Suggest next actions function up and running!')
 
-// SupabaseクライアントとGemini APIクライアントの初期化 (環境変数から)
+// 環境変数の取得
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
 
-// Supabase クライアントと Gemini クライアントの初期化は serve 関数の外部で行い、エラーは起動時にコンソールに出力
-let supabase: SupabaseClient | null = null;
-if (supabaseUrl && supabaseAnonKey) {
-  try {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-  } catch (e) {
-    console.error("Supabaseクライアント初期化中にエラー発生:", e);
-    // supabase は null のままになる
-  }
-} else {
-  console.error("初期化エラー: SUPABASE_URL または SUPABASE_ANON_KEY が未設定です。起動に失敗する可能性があります。");
-}
-
+// Gemini クライアントの初期化
 let genAI: GoogleGenerativeAI | null = null;
 if (geminiApiKey) {
   try {
     genAI = new GoogleGenerativeAI(geminiApiKey);
   } catch (e) {
     console.error("Gemini APIクライアント初期化中にエラー発生:", e);
-    // genAI は null のままになる
   }
 } else {
-  console.error("初期化エラー: GEMINI_API_KEY が未設定です。起動に失敗する可能性があります。");
+  console.error("初期化エラー: GEMINI_API_KEY が未設定です。");
 }
 
 interface Suggestion {
     title: string;
     description: string;
-    source_files?: string[]; // APIのレスポンス形式に合わせる
+    source_files?: string[];
 }
 
 serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
@@ -48,8 +35,16 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         return new Response('ok', { headers: corsHeaders });
     }
 
-    if (!supabase || !genAI) {
-        console.error("サーバー致命的エラー: Supabase または Gemini クライアントが初期化されていません。起動時のログを確認してください。");
+    if (!supabaseUrl || !supabaseAnonKey) {
+        console.error('SUPABASE_URL or SUPABASE_ANON_KEY is not set.')
+        return new Response(JSON.stringify({ error: 'Missing Supabase environment variables' }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            status: 500,
+        });
+    }
+
+    if (!genAI) {
+        console.error("サーバー致命的エラー: Gemini クライアントが初期化されていません。");
         return new Response(JSON.stringify({ error: "サーバー内部エラー。構成に問題があります。" }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 500,
@@ -57,8 +52,10 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
     }
 
     let userId: string | null = null;
+    let authHeader: string | null = null;
+    
     try {
-        const authHeader = req.headers.get('Authorization');
+        authHeader = req.headers.get('Authorization');
         console.log('[suggest-next-actions][Auth] Authorization Header:', authHeader);
 
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -91,14 +88,6 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
             });
         }
         console.log(`[suggest-next-actions][Auth] Authenticated user ID from Clerk JWT: ${userId}`);
-        
-        const xUserIdHeader = req.headers.get('x-user-id');
-        if (xUserIdHeader) {
-            console.log('[suggest-next-actions][Auth] x-user-id header:', xUserIdHeader);
-            if (userId !== xUserIdHeader) {
-                console.warn(`[suggest-next-actions][Auth] Mismatch JWT user ID (${userId}) vs x-user-id header (${xUserIdHeader})`);
-            }
-        }
 
     } catch (error) {
         console.error('[suggest-next-actions][Auth] Error processing Authorization token:', error);
@@ -109,6 +98,18 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
     }
 
     try {
+        // Supabaseクライアントを作成（Clerk統合を活用）
+        const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+            global: {
+                headers: {
+                    Authorization: authHeader,
+                },
+            },
+            auth: {
+                persistSession: false,
+            },
+        });
+
         const body = await req.json();
         const selectedFileNames = body?.selectedFileNames as string[] | undefined;
         console.log("Received selectedFileNames:", selectedFileNames);
@@ -122,10 +123,10 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         }
 
         console.log("Fetching summaries for selected files from 'manuals' table for user:", userId);
+        // RLSポリシーがユーザー分離を処理するため、user_idでのフィルタリングは不要
         let query = supabase
             .from('manuals')
             .select('file_name, original_file_name, summary')
-            .eq('user_id', userId)
             .not('summary', 'is', null)
             .filter('summary', 'not.eq', '');
         

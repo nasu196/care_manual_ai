@@ -12,7 +12,7 @@ import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts"; // dotenvを
 // 必要に応じてパスを調整してください (例: '../.env' で functions/.env を参照)
 await load({ export: true, envPath: ".env" });
 
-console.log("Hello from delete-memo Function!")
+console.log("Delete Memo Function Initialized")
 
 Deno.serve(async (req) => {
   // Handle OPTIONS request for CORS preflight
@@ -41,49 +41,30 @@ Deno.serve(async (req) => {
     }
     
     const authHeader = req.headers.get('Authorization')
-    console.log('[delete-memo] Received Authorization Header:', authHeader); // ★ ログ追加
-
-    // anon key でクライアントを初期化
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
-
-    // JWTトークンをデコードして直接ユーザー情報を取得
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    const token = authHeader.replace('Bearer ', '');
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      return new Response(JSON.stringify({ error: 'Invalid JWT format' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    let payload;
-    try {
-      payload = JSON.parse(atob(parts[1]));
-    } catch (e) {
-      console.error('Error decoding JWT payload:', e);
-      return new Response(JSON.stringify({ error: 'Failed to decode JWT' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-    console.log('[delete-memo] Decoded JWT Payload:', payload);
-
-    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
     
-    if (!userId) {
-      console.error('No user ID found in JWT payload for delete-memo');
-      return new Response(JSON.stringify({ error: 'User ID not found in token' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'No Authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
-    console.log('[delete-memo] Authenticated user ID from Clerk JWT:', userId);
+
+    // Supabaseクライアントを作成（Clerk統合を活用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    })
 
     // URLからメモのIDを取得（従来の方法）
     const url = new URL(req.url)
     const pathParts = url.pathname.split('/')
-    const memoIdFromPath = pathParts[pathParts.length - 1] // functions/v1/delete-memo/{id} の {id} を想定
+    const memoIdFromPath = pathParts[pathParts.length - 1]
 
     // ボディからメモのIDを取得（新しい方法：supabase.functions.invoke対応）
     let memoIdFromBody = null;
@@ -105,18 +86,17 @@ Deno.serve(async (req) => {
       )
     }
     
-    console.log(`Attempting to delete memo with ID: ${memoId} for user: ${userId}`)
+    console.log(`Attempting to delete memo with ID: ${memoId}`)
 
-    // データベースからメモを削除（ユーザーIDでフィルタリング）
+    // データベースからメモを削除（RLSポリシーがユーザー分離を処理）
     const { data, error } = await supabase
       .from('memos')
       .delete()
       .eq('id', memoId)
-      .eq('created_by', userId) // ★ user.id から userId に変更
       .select() // 削除されたデータを取得
       
     if (error) {
-      console.error(`Error deleting memo with ID ${memoId} for user ${userId}:`, error)
+      console.error(`Error deleting memo with ID ${memoId}:`, error)
       // エラーの種類によってより詳細なハンドリング
       if (error.code === 'PGRST204' || (error.details && error.details.includes("0 rows"))) {
          return new Response(
@@ -132,14 +112,14 @@ Deno.serve(async (req) => {
 
     // 削除成功の検証 - data配列が空でないことを確認
     if (!data || data.length === 0) {
-      console.warn(`No memo found with ID ${memoId} for user ${userId} for deletion`)
+      console.warn(`No memo found with ID ${memoId} for deletion`)
       return new Response(
         JSON.stringify({ error: `Memo with ID ${memoId} not found or access denied` }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`Successfully deleted memo with ID ${memoId} for user ${userId}:`, data[0]);
+    console.log(`Successfully deleted memo with ID ${memoId}:`, data[0]);
 
     return new Response(
       JSON.stringify({ message: 'Memo deleted successfully', deleted_memo: data[0] }), 

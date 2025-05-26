@@ -6,15 +6,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
-import { load } from "https://deno.land/std@0.224.0/dotenv/mod.ts"; // dotenvモジュールをインポート
 
-// .env から環境変数をロード
-// .env が存在しない場合でもエラーにならないように try-catch を使うこともできます
-// もしくは、環境変数が直接設定されている場合はこの処理は不要です。
-// しかし、ローカル開発では .env を使うのが一般的です。
-await load({ export: true, envPath: ".env" }); // .env を指定
-
-console.log("Hello from Functions!")
+console.log("List Memos Function Initialized")
 
 Deno.serve(async (req) => {
   // Handle OPTIONS request for CORS preflight
@@ -45,9 +38,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Authorizationヘッダーを取得
     const authHeader = req.headers.get('Authorization')
-    console.log('Auth header before getUser:', authHeader);
 
     if (!authHeader) {
       return new Response(
@@ -56,42 +47,22 @@ Deno.serve(async (req) => {
       )
     }
 
-    // JWTトークンをデコードして直接ユーザー情報を取得
-    const token = authHeader.replace('Bearer ', '')
-    const parts = token.split('.')
-    
-    if (parts.length !== 3) {
-      return new Response(
-        JSON.stringify({ error: 'Invalid JWT format' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
+    // Supabaseクライアントを作成（Clerk統合を活用）
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+      auth: {
+        persistSession: false,
+      },
+    })
 
-    // JWTペイロードをデコード
-    const payload = JSON.parse(atob(parts[1]))
-    console.log('JWT Payload:', JSON.stringify(payload))
-
-    // ClerkのJWTから直接ユーザーIDを取得（subフィールドを使用）
-    const userId = payload.sub || payload.user_id || payload.user_metadata?.user_id
-    
-    if (!userId) {
-      console.error('No user ID found in JWT payload')
-      return new Response(
-        JSON.stringify({ error: 'User ID not found in token' }),
-        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log('Authenticated user ID from Clerk JWT:', userId)
-
-    // Supabaseクライアントを作成（サービスロールキーを使用）
-    const supabase = createClient(supabaseUrl, supabaseAnonKey)
-
-    // ユーザーIDでフィルタリングしてmemosテーブルからデータを取得
+    // memosテーブルからデータを取得（RLSポリシーがユーザー分離を処理）
     const { data, error } = await supabase
       .from('memos')
       .select('*')
-      .eq('created_by', userId) // ClerkのユーザーIDでフィルタリング
       .order('created_at', { ascending: false }) // 作成日時の降順で取得 (新しいものが先頭)
 
     if (error) {
@@ -102,7 +73,7 @@ Deno.serve(async (req) => {
       )
     }
 
-    console.log(`Found ${data?.length || 0} memos for user ${userId}`)
+    console.log(`Found ${data?.length || 0} memos`)
 
     return new Response(
       JSON.stringify(data),
