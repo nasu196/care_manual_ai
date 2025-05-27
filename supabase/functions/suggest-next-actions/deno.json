@@ -1,3 +1,8 @@
 {
-  "imports": {}
+  "imports": {
+    "@langchain/core/": "npm:/@langchain/core@^0.2.5/",
+    "@langchain/google-genai": "npm:/@langchain/google-genai@^0.0.21/",
+    "@supabase/supabase-js": "npm:/@supabase/supabase-js@^2.43.5/",
+    "langchain/": "npm:/langchain@^0.2.5/"
+  }
 } 
