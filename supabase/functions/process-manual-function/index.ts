@@ -536,6 +536,8 @@ async function processAndStoreDocuments(
     let selectQueryError: unknown = null;
 
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Value of sourceFileName before DB query: '${sourceFileName}' (length: ${sourceFileName.length})`); // ★ 追加: sourceFileNameの値をログ出力
+    const expectedStoragePath = `${BUCKET_NAME}/${sourceFileName}`; // `manuals/userId/encodedFileName`
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Expected storage_path for query: '${expectedStoragePath}'`);
 
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 1: Initializing queryBuilder = supabaseClient.from('manuals')...`);
     const queryBuilder = supabaseClient.from('manuals');
@@ -549,10 +551,10 @@ async function processAndStoreDocuments(
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: queryBuilder.select('id') returned null/undefined.`);
         throw new Error("Failed to initialize select builder: queryBuilder.select('id') is null/undefined");
     }
-    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Initializing filterBuilder = selectBuilder.eq('file_name', sourceFileName).eq('user_id', userId)...`);
-    const filterBuilder = selectBuilder.eq('file_name', sourceFileName).eq('user_id', userId);
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Initializing filterBuilder = selectBuilder.eq('storage_path', expectedStoragePath).eq('user_id', userId)...`);
+    const filterBuilder = selectBuilder.eq('storage_path', expectedStoragePath).eq('user_id', userId);
     if (!filterBuilder) {
-        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: selectBuilder.eq('file_name', ...) returned null/undefined.`);
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] CRITICAL: selectBuilder.eq('storage_path', ...) returned null/undefined.`);
         throw new Error("Failed to initialize filter builder: selectBuilder.eq() is null/undefined");
     }
 
@@ -595,7 +597,7 @@ async function processAndStoreDocuments(
       manualId = existingManual.id;
       console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Using existing manual ID: ${manualId}`); // ★ タイムスタンプ追加
       const updateData: Record<string, unknown> = {
-        original_file_name: originalFileName || sourceFileName,
+        original_file_name: originalFileName || sourceFileName.split('/').pop() || sourceFileName, // userId/encodedName から encodedName を抽出
         metadata: { 
             totalPages: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length) : 1,
             sourceType: (parsedDocs[0] && parsedDocs[0].metadata) ? parsedDocs[0].metadata.type || path.extname(sourceFileName).substring(1) || 'unknown' : 'unknown',
@@ -619,10 +621,14 @@ async function processAndStoreDocuments(
       console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Creating new manual record...`); // ★ タイムスタンプ追加
       const totalPages = (parsedDocs[0] && parsedDocs[0].metadata) ? 
                          (parsedDocs[0].metadata.totalPages || ((parsedDocs[0].metadata.type !== 'pdf') ? 1 : parsedDocs.length)) : 1;
+      
+      // sourceFileName (userId/encodedFileName) から encodedFileName のみを取り出す
+      const encodedNameOnly = sourceFileName.includes('/') ? sourceFileName.substring(sourceFileName.lastIndexOf('/') + 1) : sourceFileName;
+
       const insertData: Record<string, unknown> = {
-        file_name: sourceFileName,
-        original_file_name: originalFileName || sourceFileName, 
-        storage_path: `${BUCKET_NAME}/${sourceFileName}`,
+        file_name: encodedNameOnly, // encodedFileName のみ
+        original_file_name: originalFileName || encodedNameOnly, 
+        storage_path: `${BUCKET_NAME}/${sourceFileName}`, // manuals/userId/encodedFileName
         user_id: userId, // ユーザーIDを追加
         metadata: { 
           totalPages: totalPages,
