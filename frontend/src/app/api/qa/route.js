@@ -33,6 +33,8 @@ function initializeClientsAndChains() {
     embeddings = new GoogleGenerativeAIEmbeddings({
       apiKey: geminiApiKey,
       model: "text-embedding-004",
+      // キャッシュを無効化して、毎回新しいembeddingを生成
+      cache: false,
     });
   }
   if (!chatModelForAnalysis) {
@@ -45,7 +47,9 @@ function initializeClientsAndChains() {
 
   // --- 第1段階LLM用: 質問分析とクエリ生成 ---
   if (!queryAnalysisChain) {
-    const queryAnalysisPromptTemplateString = `\nあなたは、ユーザーからの質問の意図を完璧に読み解き、その質問に対して最も的確かつ包括的な回答を生成するために、後続のAIアシスタント（以下、AnswerGenerationAI）がどのように情報を収集し、どのように回答を組み立てるべきかの戦略を立案する、プロフェッショナルなAIコンサルタントです。\n\nあなたのタスクは、以下のユーザーの質問を分析し、AnswerGenerationAIが最高のパフォーマンスを発揮できるように、具体的かつ実行可能な指示をJSON形式で提供することです。\n\nユーザーの質問:\n「{user_query}」\nユーザーが事前に選択した参照ファイル群についての情報: {selected_source_filenames_message}\n\n以下の思考プロセスに従って、AnswerGenerationAIへの指示書を作成してください。\n\n1.  **質問の核心の特定**: ユーザーが本当に知りたいことは何か？質問の背景にある真のニーズは何か？を深く洞察してください。\n2.  **情報収集戦略の立案**:\n    *   特定した核心的ニーズに答えるために、どのような情報が必要か？\n    *   **最優先事項**: ユーザーによって事前に参照すべきファイル群が指定されている場合（ユーザーが「{selected_source_filenames_message}」でファイル名を挙げている状況）、まずはそれらのファイル群から徹底的に情報を検索し、回答の主要な根拠とすること。\n    *   その情報を効率的かつ網羅的に収集するために、どのような検索クエリが最適か？（複数の観点から、具体的なキーワードで3～7個提案。指定ファイルがある場合は、それらのファイル内容と関連性の高いクエリを優先）\n    *   検索結果から特に注目すべき情報や、深掘りすべきポイントは何か？（指定ファイルがある場合は、そのファイル内のどの部分が特に重要かを示すこと）\n    *   指定されたファイル群だけでは情報が不足する場合、またはファイル指定がない場合に限り、より広範な情報源からの検索も検討する。その際の検索戦略も併せて立案すること。\n3.  **AnswerGenerationAIへの指示事項の策定**:\n    *   AnswerGenerationAIがユーザーに回答を提示する際に、どのような点に注意すべきか？（例: 特に強調すべきポイント、避けるべき表現、補足すべき背景情報など。指定ファイルがある場合は、その内容を最大限活用するよう指示）\n    *   ユーザーが次に知りたくなるであろう関連情報や、提示することでより満足度が高まるであろう情報は何か？\n    *   **ユーザーが要求する回答の詳細度（「{verbosity_instruction}」で示される）を踏まえ、AnswerGenerationAIが生成する回答の粒度（簡潔さ、網羅性、具体例の量など）を具体的に指示すること。**\n    *   **最重要指示**: AnswerGenerationAIが最終的にユーザーへ提示する回答文には、AI自身の内部的な処理、思考の過程、あるいは他のAIシステム（あなた自身の存在を含む）や、「指示書」「分析サマリー」「内部情報」といった言葉への言及を**絶対に含めない**ように、AnswerGenerationAIへ厳重に指示してください。AnswerGenerationAIは、あたかも全ての情報を独自に理解し、ユーザーのためだけに自然な言葉で回答を生成したかのように振る舞うべきです。この指示は、生成するJSON内の「回答の基本方針」や「回答時の注意点」に明確に反映させてください。\n\n上記の思考プロセスに基づき、以下のJSON形式で、具体的かつ実行可能な指示書を出力してください。キーは日本語で記述してください。\n\n\\\`\\\`\\\`json\n{{\n  \"ユーザー質問の分析と再定義\": {{\n    \"質問の核心\": \"ユーザーが最も知りたい本質的な問いを1～2文で記述\",\n    \"想定される背景・ニーズ\": \"ユーザーがこの質問をするに至った背景や、解決したい課題などを具体的に推測して記述\"\n  }},\n  \"情報収集戦略\": {{\n    \"推奨検索クエリ群\": [\n      \"効果的な検索クエリを具体的かつ多様なキーワードで3～7個提案\",\n      \"例: 『〇〇 具体的な手続き』、『〇〇 費用 相場』、『〇〇 メリット デメリット 最新情報』\"\n    ],\n    \"情報収集時の着眼点\": [\n      \"検索結果をレビューする際に特に注目すべきキーワードや情報カテゴリを3～5点記述\",\n      \"例: 『公的機関の発表情報』、『専門家の見解』、『最新の統計データ』。指定ファイルがある場合は、そのファイルからの情報を優先するよう指示\"\n    ]\n  }},\n  \"回答生成AIへの指示\": {{\n    \"回答の基本方針\": \"ユーザーの疑問点を解消し、次の行動を具体的に促せるような、明確で実用的な情報提供を心がける。指定ファイルからの情報を最優先とする。\",
+    const queryAnalysisPromptTemplateString = `\nあなたは、ユーザーからの質問の意図を完璧に読み解き、その質問に対して最も的確かつ包括的な回答を生成するために、後続のAIアシスタント（以下、AnswerGenerationAI）がどのように情報を収集し、どのように回答を組み立てるべきかの戦略を立案する、プロフェッショナルなAIコンサルタントです。\n\nあなたのタスクは、以下のユーザーの質問を分析し、AnswerGenerationAIが最高のパフォーマンスを発揮できるように、具体的かつ実行可能な指示をJSON形式で提供することです。\n\nユーザーの質問:\n「{user_query}」\nユーザーが事前に選択した参照ファイル群についての情報: {selected_source_filenames_message}\n\n以下の思考プロセスに従って、AnswerGenerationAIへの指示書を作成してください。\n\n1.  **質問の核心の特定**: ユーザーが本当に知りたいことは何か？質問の背景にある真のニーズは何か？を深く洞察してください。\n2.  **情報収集戦略の立案**: articulating strategy for information gathering
+    *   特定した核心的ニーズに答えるために、どのような情報が必要か？\n    *   **最優先事項**: ユーザーによって事前に参照すべきファイル群が指定されている場合（ユーザーが「{selected_source_filenames_message}」でファイル名を挙げている状況）、まずはそれらのファイル群から徹底的に情報を検索し、回答の主要な根拠とすること。\n    *   その情報を効率的かつ網羅的に収集するために、どのような検索クエリが最適か？（複数の観点から、具体的なキーワードで3～7個提案。**生成する検索クエリには、ユーザーが指定したファイル名そのものを含めないでください。** 指定ファイルがある場合は、それらのファイル内容と関連性の高いキーワードベースのクエリを優先）\n    *   検索結果から特に注目すべき情報や、深掘りすべきポイントは何か？（指定ファイルがある場合は、そのファイル内のどの部分が特に重要かを示すこと）\n    *   指定されたファイル群だけでは情報が不足する場合、またはファイル指定がない場合に限り、より広範な情報源からの検索も検討する。その際の検索戦略も併せて立案すること。\n3.  **AnswerGenerationAIへの指示事項の策定**:
+    *   AnswerGenerationAIがユーザーに回答を提示する際に、どのような点に注意すべきか？（例: 特に強調すべきポイント、避けるべき表現、補足すべき背景情報など。指定ファイルがある場合は、その内容を最大限活用するよう指示）\n    *   ユーザーが次に知りたくなるであろう関連情報や、提示することでより満足度が高まるであろう情報は何か？\n    *   **ユーザーが要求する回答の詳細度（「{verbosity_instruction}」で示される）を踏まえ、AnswerGenerationAIが生成する回答の粒度（簡潔さ、網羅性、具体例の量など）を具体的に指示すること。**\n    *   **最重要指示**: AnswerGenerationAIが最終的にユーザーへ提示する回答文には、AI自身の内部的な処理、思考の過程、あるいは他のAIシステム（あなた自身の存在を含む）や、「指示書」「分析サマリー」「内部情報」といった言葉への言及を**絶対に含めない**ように、AnswerGenerationAIへ厳重に指示してください。AnswerGenerationAIは、あたかも全ての情報を独自に理解し、ユーザーのためだけに自然な言葉で回答を生成したかのように振る舞うべきです。この指示は、生成するJSON内の「回答の基本方針」や「回答時の注意点」に明確に反映させてください。\n\n上記の思考プロセスに基づき、以下のJSON形式で、具体的かつ実行可能な指示書を出力してください。キーは日本語で記述してください。\n\n\\\`\\\`\\\`json\n{{\n  \"ユーザー質問の分析と再定義\": {{\n    \"質問の核心\": \"ユーザーが最も知りたい本質的な問いを1～2文で記述\",\n    \"想定される背景・ニーズ\": \"ユーザーがこの質問をするに至った背景や、解決したい課題などを具体的に推測して記述\"\n  }},\n  \"情報収集戦略\": {{\n    \"推奨検索クエリ群\": [\n      \"効果的な検索クエリを具体的かつ多様なキーワードで3～7個提案\",\n      \"例: 『〇〇 具体的な手続き』、『〇〇 費用 相場』、『〇〇 メリット デメリット 最新情報』\"\n    ],\n    \"情報収集時の着眼点\": [\n      \"検索結果をレビューする際に特に注目すべきキーワードや情報カテゴリを3～5点記述\",\n      \"例: 『公的機関の発表情報』、『専門家の見解』、『最新の統計データ』。指定ファイルがある場合は、そのファイルからの情報を優先するよう指示\"\n    ]\n  }},\n  \"回答生成AIへの指示\": {{\n    \"回答の基本方針\": \"ユーザーの疑問点を解消し、次の行動を具体的に促せるような、明確で実用的な情報提供を心がける。指定ファイルからの情報を最優先とする。\",
     \"期待される回答の詳細度\": \"{verbosity_instruction}\",
     \"強調すべき主要ポイント\": [\n      \"ユーザーにとって特に価値の高い情報や、誤解を招きやすい点などを具体的に2～4点記述\"\n    ],\n    \"補足すべき有益情報\": [\n      \"質問の直接的な答え以外で、ユーザーが知っておくと役立つ関連情報や豆知識などを2～4点提案\"\n    ],\n    \"回答時の注意点\": [\n      \"専門用語の使用は避け、平易な言葉で説明する。\",
       \"ユーザー向けの回答文には、AI自身の内部処理や思考プロセス、システム構造に関する言葉（例：AI、指示、分析結果など）は一切含めず、自然な対話形式で回答する。\",
@@ -155,18 +159,21 @@ export async function POST(request) {
     // --- ファイル名解決 ---
     let encodedSourceFilenamesForRpc = null;
     if (validSourceFilenames && validSourceFilenames.length > 0) {
+      // Base64エンコード済みファイル名と元のファイル名の両方で検索
       const { data: manualData, error: manualError } = await authenticatedSupabase
         .from('manuals')
         .select('file_name, original_file_name')
-        .in('original_file_name', validSourceFilenames);
+        .or(`file_name.in.(${validSourceFilenames.map(f => `"${f}"`).join(',')}),original_file_name.in.(${validSourceFilenames.map(f => `"${f}"`).join(',')})`);
       if (manualError) {
         console.error(`[API /api/qa] Error fetching manual data:`, manualError);
         return NextResponse.json({ error: `ファイル名の解決に失敗しました: ${manualError.message}` }, { status: 500 });
       }
       if (manualData && manualData.length > 0) {
         encodedSourceFilenamesForRpc = manualData.map(manual => manual.file_name);
+        console.log('[API /api/qa] Resolved file_names from DB:', encodedSourceFilenamesForRpc);
       } else {
         encodedSourceFilenamesForRpc = [];
+        console.log('[API /api/qa] No matching files found in DB for:', validSourceFilenames);
       }
     }
     console.log('[API /api/qa] Encoded source filenames for RPC:', encodedSourceFilenamesForRpc);
@@ -221,13 +228,54 @@ export async function POST(request) {
     for (const searchQuery of searchQueries) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') continue;
       console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
-      const embedding = await embeddings.embedQuery(searchQuery);
+      
+      // ★ デバッグログ追加: embedding生成の詳細確認
+      console.log(`[Phase 2] Embedding生成開始: "${searchQuery}"`);
+      
+      // キャッシュ問題を回避するため、各クエリごとに新しいembeddingsインスタンスを作成
+      const freshEmbeddings = new GoogleGenerativeAIEmbeddings({
+        apiKey: geminiApiKey,
+        model: "text-embedding-004",
+        cache: false,
+      });
+      
+      const embedding = await freshEmbeddings.embedQuery(searchQuery);
+      console.log(`[Phase 2] Embedding生成完了. 次元数: ${embedding ? embedding.length : 'undefined'}, 最初の10要素: ${embedding ? embedding.slice(0, 10) : 'undefined'}`);
+      
+      // ★ 現在のユーザーIDを取得（共有ページの場合はnull）
+      let currentUserId = null;
+      if (!shareId) {  // 共有ページではない場合のみユーザーIDを取得
+        try {
+          const authHeader = request.headers.get('Authorization');
+          if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.replace('Bearer ', '');
+            const parts = token.split('.');
+            if (parts.length === 3) {
+              const payload = JSON.parse(atob(parts[1]));
+              currentUserId = payload.sub || payload.user_id || payload.user_metadata?.user_id;
+            }
+          }
+        } catch (e) {
+          console.error('[Phase 2] Failed to extract user ID from JWT:', e);
+        }
+      }
+      
+      console.log(`[Phase 2] Current user ID: ${currentUserId}, ShareId: ${shareId ? 'Present' : 'None'}`);
+      
       const { data: chunks, error: matchError } = await authenticatedSupabase.rpc('match_manual_chunks', {
         query_embedding: embedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
         p_selected_filenames: encodedSourceFilenamesForRpc,
+        p_user_id: currentUserId  // ★ 共有ページの場合はnullが渡される
       });
+      
+      // ★ デバッグログ追加: RPC呼び出し結果の詳細確認
+      console.log(`[Phase 2] RPC結果 - chunks数: ${chunks ? chunks.length : 0}, エラー: ${matchError ? matchError.message : 'なし'}`);
+      if (chunks && chunks.length > 0) {
+        console.log(`[Phase 2] 取得したチャンクの詳細:`, chunks.map(c => ({ id: c.id, similarity: c.similarity, filename: c.manual_filename })));
+      }
+      
       if (matchError) {
         console.error(`[Phase 2] チャンク検索エラー (クエリ: "${searchQuery}"):`, matchError);
         continue; 

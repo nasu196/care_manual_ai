@@ -332,7 +332,19 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         return;
       }
 
+      // upload-manual-functionからのレスポンスをパース
+      const uploadResult = await uploadResponse.json();
+      const storagePath = uploadResult.storagePath; // `userId/encodedFileName` 形式のパス
 
+      if (!storagePath) {
+        console.error('[handleUpload] storagePath not found in upload-manual-function response:', uploadResult);
+        updateUploadStatus(uploadId, {
+          status: 'error',
+          error: 'アップロード処理は成功しましたが、サーバーからの応答が不正です。',
+          message: 'エラー: サーバー応答不備'
+        });
+        return;
+      }
       
       updateUploadStatus(uploadId, {
         status: 'processing',
@@ -348,7 +360,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         };
-        const body = JSON.stringify({ fileName: encodedFileName, originalFileName });
+        // process-manual-function には storagePath を fileNameとして渡す
+        const body = JSON.stringify({ fileName: storagePath, originalFileName });
 
         const response = await fetch(requestUrl, {
           method: 'POST',

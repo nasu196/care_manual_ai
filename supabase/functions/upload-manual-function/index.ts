@@ -89,9 +89,12 @@ serve(async (req: Request) => {
       },
       auth: { persistSession: false }
     });
+    
+    // Storageパスを userId/encodedFileName 形式で構築
+    const storagePath = `${userId}/${encodedFileName}`;
 
     // 1. Storageにファイルをアップロード（サービスロールでRLSバイパス）
-    const { error: uploadError } = await storageClient.storage.from('manuals').upload(encodedFileName, file.stream(), {
+    const { error: uploadError } = await storageClient.storage.from('manuals').upload(storagePath, file.stream(), {
       upsert: true,
       contentType: file.type,
     })
@@ -109,20 +112,20 @@ serve(async (req: Request) => {
         original_file_name: originalFileName,
         user_id: userId,
         summary: null,
-        storage_path: `manuals/${encodedFileName}` // NOT NULL制約対応
+        storage_path: `manuals/${storagePath}` // バケット名を含めたフルパス
         // uploaded_at, updated_atはDBのデフォルト値に任せる
       });
 
     if (dbError) {
       console.error('[upload-manual-function] Database insert error:', dbError);
       // ストレージからファイルを削除（ロールバック）
-      await storageClient.storage.from('manuals').remove([encodedFileName]);
+      await storageClient.storage.from('manuals').remove([storagePath]);
       return new Response(JSON.stringify({ error: `Database insert failed: ${dbError.message}` }), { status: 500, headers: corsHeaders })
     }
 
-    console.log(`[upload-manual-function] Successfully uploaded and registered: ${encodedFileName}`);
+    console.log(`[upload-manual-function] Successfully uploaded and registered: ${storagePath}`);
 
-    return new Response(JSON.stringify({ message: 'Upload successful', fileName: encodedFileName }), {
+    return new Response(JSON.stringify({ message: 'Upload successful', fileName: encodedFileName, storagePath: storagePath }), {
       status: 201,
       headers: corsHeaders,
     })
