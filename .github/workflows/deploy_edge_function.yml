@@ -28,25 +28,16 @@ jobs:
           echo "Deploying to ${{ github.ref == 'refs/heads/main' && 'PRODUCTION' || 'DEVELOPMENT' }} environment..."
           echo "Target Project ID: $PROJECT_ID"
           
-          # 環境ごとの環境変数を設定してデプロイ
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            # 本番環境の環境変数
-            supabase secrets set SUPABASE_URL="${{ secrets.SUPABASE_URL_PRODUCTION }}" --project-ref $PROJECT_ID
-            supabase secrets set SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY_PRODUCTION }}" --project-ref $PROJECT_ID
-            supabase secrets set SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY_PRODUCTION }}" --project-ref $PROJECT_ID
-            supabase secrets set GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" --project-ref $PROJECT_ID
-            supabase secrets set GOOGLE_VISION_API_KEY="${{ secrets.GOOGLE_VISION_API_KEY }}" --project-ref $PROJECT_ID
-            supabase secrets set OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" --project-ref $PROJECT_ID
-          else
-            # 開発環境の環境変数
-            supabase secrets set SUPABASE_URL="${{ secrets.SUPABASE_URL_DEVELOPMENT }}" --project-ref $PROJECT_ID
-            supabase secrets set SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY_DEVELOPMENT }}" --project-ref $PROJECT_ID
-            supabase secrets set SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY_DEVELOPMENT }}" --project-ref $PROJECT_ID
-            supabase secrets set GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" --project-ref $PROJECT_ID
-            supabase secrets set GOOGLE_VISION_API_KEY="${{ secrets.GOOGLE_VISION_API_KEY }}" --project-ref $PROJECT_ID
-            supabase secrets set OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" --project-ref $PROJECT_ID
-          fi
+          # 環境ごとのカスタム環境変数を設定してデプロイ
+          # SUPABASE_ で始まるものは自動設定されるので、ここでは設定しない
+          echo "Setting custom secrets..."
+          supabase secrets set GEMINI_API_KEY="${{ secrets.GEMINI_API_KEY }}" --project-ref $PROJECT_ID
+          supabase secrets set GOOGLE_VISION_API_KEY="${{ secrets.GOOGLE_VISION_API_KEY }}" --project-ref $PROJECT_ID
+          supabase secrets set OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}" --project-ref $PROJECT_ID
+          # 他にカスタムの環境変数があればここに追加（例: RESEND_API_KEYなど、ただしEdge Functionで使う場合のみ）
+          echo "Custom secrets set."
           
           # Edge Functionsをデプロイ
+          echo "Deploying functions..."
           supabase functions deploy --project-ref $PROJECT_ID --no-verify-jwt
           echo "Deployment of all functions to ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }} completed."
