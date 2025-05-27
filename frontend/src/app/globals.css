@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+/* @custom-variant dark (&:is(.dark *)); */
 
 @theme inline {
   --color-background: var(--background);
@@ -201,4 +201,37 @@
   .prose-h3 {
     @apply text-lg font-semibold;
   }
+}
+
+@tailwind utilities;
+
+/* Tiptapエディタ内のテーブルスタイル (proseコンテキストを考慮) */
+.prose .ProseMirror table,
+.prose table {
+  @apply w-full my-4 border-collapse;
+}
+
+.prose .ProseMirror th,
+.prose .ProseMirror td,
+.prose th,
+.prose td {
+  @apply border border-gray-300 px-3 py-2 text-left;
+}
+
+.prose .ProseMirror th,
+.prose th {
+  @apply bg-gray-100 font-semibold;
+}
+
+/* ダークモード時のスタイル (proseコンテキストを考慮) */
+.dark .prose .ProseMirror th,
+.dark .prose .ProseMirror td,
+.dark .prose th,
+.dark .prose td {
+  @apply border-gray-600;
+}
+
+.dark .prose .ProseMirror th,
+.dark .prose th {
+  @apply bg-gray-800;
 }
