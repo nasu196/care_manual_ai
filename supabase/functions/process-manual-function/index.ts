@@ -810,8 +810,6 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     const genAI = new GoogleGenerativeAI(geminiApiKey);
     console.log("[Handler] GoogleGenerativeAI client for summary initialized");
 
-    const formData = await req.formData();
-
     let userId: string | null = null;
     const authHeader = req.headers.get('Authorization');
     console.log('[Auth] Authorization Header (Clerk JWT expected):', authHeader);
