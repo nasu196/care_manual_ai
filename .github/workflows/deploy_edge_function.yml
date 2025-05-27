@@ -3,27 +3,29 @@ name: Deploy Supabase Edge Function
 on:
   push:
     branches:
-      - develop  # developブランチへのpushをトリガーにする
-      - main     # mainブランチへのpushもトリガーにする
+      - develop  # developブランチ -> 開発環境
+      - main     # mainブランチ -> 本番環境
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment:
-      name: Supabase Deployment # オプション: 環境名を指定
+      name: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      # ブランチに応じてプロジェクトIDを切り替え
+      PROJECT_ID: ${{ github.ref == 'refs/heads/main' && secrets.SUPABASE_PROJECT_ID_PRODUCTION || secrets.SUPABASE_PROJECT_ID_DEVELOPMENT }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest # もし特定のバージョンを指定したい場合は変更 (例: '1.167.4')
+          version: latest
 
       - name: Deploy All Edge Functions
         run: |
-          echo "Deploying all Edge Functions..."
+          echo "Deploying to ${{ github.ref == 'refs/heads/main' && 'PRODUCTION' || 'DEVELOPMENT' }} environment..."
+          echo "Target Project ID: $PROJECT_ID"
           supabase functions deploy --project-ref $PROJECT_ID --no-verify-jwt
-          echo "Deployment of all functions attempted."
+          echo "Deployment of all functions to ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }} completed."
