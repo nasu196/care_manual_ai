@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai';
+// import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai'; // OpenAIを使用するためコメントアウト
+import { OpenAIEmbeddings } from '@langchain/openai'; // OpenAIEmbeddingsをインポート
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { LLMChain } from "langchain/chains";
 import { PromptTemplate } from "@langchain/core/prompts";
@@ -9,34 +10,29 @@ import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/ge
 // 環境変数
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-const geminiApiKey = process.env.GEMINI_API_KEY;
+const geminiApiKey = process.env.GEMINI_API_KEY; // ChatGoogleGenerativeAI で引き続き使用
+const openaiApiKey = process.env.OPENAI_API_KEY; // OpenAIEmbeddings で使用
+// const gcpProjectId = process.env.GCP_PROJECT_ID; // Vertex AI 用のプロジェクトID -> コメントアウト
+// const gcpLocation = process.env.GCP_LOCATION; // Vertex AI 用のロケーション -> コメントアウト
 
 // グローバルスコープでの初期化 (App Routerの性質上、リクエストごとに再初期化される可能性に注意)
 let supabase;
-let embeddings;
 let chatModelForAnalysis;
 let queryAnalysisChain;
 let geminiModelForAnswer;
 
 // 初期化関数
 function initializeClientsAndChains() {
-  if (!supabaseUrl || !supabaseAnonKey || !geminiApiKey) {
-    console.error("エラー: 必要な環境変数 (SUPABASE_URL, SUPABASE_ANON_KEY, GEMINI_API_KEY) が設定されていません。");
-    // このエラーはリクエスト処理中に適切にハンドリングされるべき
-    throw new Error("サーバー設定エラー: APIキーが不足しています。");
+  // OpenAI APIキーのチェックを追加 (geminiApiKeyのチェックはChatモデル用に残す)
+  if (!supabaseUrl || !supabaseAnonKey || !geminiApiKey || !openaiApiKey) {
+    console.error("エラー: 必要な環境変数 (SUPABASE_URL, SUPABASE_ANON_KEY, GEMINI_API_KEY, OPENAI_API_KEY) が設定されていません。");
+    throw new Error("サーバー設定エラー: APIキーまたはURLが不足しています。");
   }
 
   if (!supabase) {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
   }
-  if (!embeddings) {
-    embeddings = new GoogleGenerativeAIEmbeddings({
-      apiKey: geminiApiKey,
-      model: "text-embedding-004",
-      // キャッシュを無効化して、毎回新しいembeddingを生成
-      cache: false,
-    });
-  }
+  
   if (!chatModelForAnalysis) {
     chatModelForAnalysis = new ChatGoogleGenerativeAI({
         apiKey: geminiApiKey,
@@ -158,25 +154,34 @@ export async function POST(request) {
 
     // --- ファイル名解決 ---
     let encodedSourceFilenamesForRpc = null;
+    let selectedManualIdsForRpc = null;
+
     if (validSourceFilenames && validSourceFilenames.length > 0) {
-      // Base64エンコード済みファイル名と元のファイル名の両方で検索
+      console.log(`[API /api/qa] ファイル名解決開始: validSourceFilenames =`, validSourceFilenames);
+      // Base64エンコード済みファイル名と元のファイル名の両方で検索し、idも取得
       const { data: manualData, error: manualError } = await authenticatedSupabase
         .from('manuals')
-        .select('file_name, original_file_name')
+        .select('id, file_name, original_file_name')
         .or(`file_name.in.(${validSourceFilenames.map(f => `"${f}"`).join(',')}),original_file_name.in.(${validSourceFilenames.map(f => `"${f}"`).join(',')})`);
+      
       if (manualError) {
         console.error(`[API /api/qa] Error fetching manual data:`, manualError);
         return NextResponse.json({ error: `ファイル名の解決に失敗しました: ${manualError.message}` }, { status: 500 });
       }
+      console.log(`[API /api/qa] DBから取得したマニュアルデータ (manualData):`, manualData ? `${manualData.length}件` : '0件', manualData);
       if (manualData && manualData.length > 0) {
         encodedSourceFilenamesForRpc = manualData.map(manual => manual.file_name);
+        selectedManualIdsForRpc = manualData.map(manual => manual.id);
         console.log('[API /api/qa] Resolved file_names from DB:', encodedSourceFilenamesForRpc);
+        console.log('[API /api/qa] Resolved manual_ids from DB:', selectedManualIdsForRpc);
       } else {
         encodedSourceFilenamesForRpc = [];
+        selectedManualIdsForRpc = [];
         console.log('[API /api/qa] No matching files found in DB for:', validSourceFilenames);
       }
     }
     console.log('[API /api/qa] Encoded source filenames for RPC:', encodedSourceFilenamesForRpc);
+    console.log('[API /api/qa] Selected manual IDs for RPC:', selectedManualIdsForRpc);
 
     // --- 第1段階: 質問分析 ---
     console.log(`[Phase 1] ユーザーの質問を分析中: "${userQuery}"`);
@@ -220,7 +225,7 @@ export async function POST(request) {
 
     // --- 第2段階: ベクトル検索 ---
     console.log('[Phase 2] 複数の検索クエリで類似チャンクを検索中...');
-    const matchThreshold = 0.4;
+    const matchThreshold = 0.1;
     const matchCount = 3;
     let allChunks = [];
     const retrievedChunkIds = new Set();
@@ -229,22 +234,29 @@ export async function POST(request) {
       if (typeof searchQuery !== 'string' || searchQuery.trim() === '') continue;
       console.log(`[Phase 2] 検索実行中: "${searchQuery}"`);
       
-      // ★ デバッグログ追加: embedding生成の詳細確認
-      console.log(`[Phase 2] Embedding生成開始: "${searchQuery}"`);
+      let embedding;
+      let freshEmbeddings; 
+
+      if (searchQuery) {
+        console.log('[Phase 2] Initializing OpenAIEmbeddings for query embedding generation.');
+        freshEmbeddings = new OpenAIEmbeddings(); // APIキーは環境変数から自動読み込み
+        // freshEmbeddings = new GoogleGenerativeAIEmbeddings({
+        //   apiKey: geminiApiKey,
+        //   model: "text-embedding-004", 
+        //   taskType: "SEMANTIC_SIMILARITY", // RETRIEVAL_QUERY or SEMANTIC_SIMILARITY
+        // });
+
+        console.log(`[Phase 2] Embedding生成開始: "${searchQuery}"`);
+        try {
+          embedding = await freshEmbeddings.embedQuery(searchQuery);
+        } catch (embeddingError) {
+          console.error(`[Phase 2] Embedding生成エラー:`, embeddingError);
+          continue;
+        }
+      }
       
-      // キャッシュ問題を回避するため、各クエリごとに新しいembeddingsインスタンスを作成
-      const freshEmbeddings = new GoogleGenerativeAIEmbeddings({
-        apiKey: geminiApiKey,
-        model: "text-embedding-004",
-        cache: false,
-      });
-      
-      const embedding = await freshEmbeddings.embedQuery(searchQuery);
-      console.log(`[Phase 2] Embedding生成完了. 次元数: ${embedding ? embedding.length : 'undefined'}, 最初の10要素: ${embedding ? embedding.slice(0, 10) : 'undefined'}`);
-      
-      // ★ 現在のユーザーIDを取得（共有ページの場合はnull）
       let currentUserId = null;
-      if (!shareId) {  // 共有ページではない場合のみユーザーIDを取得
+      if (!shareId) {  
         try {
           const authHeader = request.headers.get('Authorization');
           if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -262,28 +274,76 @@ export async function POST(request) {
       
       console.log(`[Phase 2] Current user ID: ${currentUserId}, ShareId: ${shareId ? 'Present' : 'None'}`);
       
-      const { data: chunks, error: matchError } = await authenticatedSupabase.rpc('match_manual_chunks', {
+      const rpcParams = {
         query_embedding: embedding,
         match_threshold: matchThreshold,
         match_count: matchCount,
-        p_selected_filenames: encodedSourceFilenamesForRpc,
-        p_user_id: currentUserId  // ★ 共有ページの場合はnullが渡される
+        p_user_id: currentUserId,
+        p_selected_manual_ids: selectedManualIdsForRpc,
+        p_share_id: shareId
+      };
+      
+      console.log('[Phase 2] Calling match_manual_chunks with params:', { 
+        match_threshold: rpcParams.match_threshold, 
+        match_count: rpcParams.match_count, 
+        p_user_id: rpcParams.p_user_id, 
+        p_selected_manual_ids: rpcParams.p_selected_manual_ids,
+        p_selected_manual_ids_count: rpcParams.p_selected_manual_ids?.length,
+        p_share_id: rpcParams.p_share_id,
+        embedding_length: rpcParams.query_embedding?.length
       });
+
+      // 変数名を fetchedChunks に変更して衝突を回避
+      const { data: fetchedChunks, error } = await authenticatedSupabase.rpc('match_manual_chunks', rpcParams);
       
-      // ★ デバッグログ追加: RPC呼び出し結果の詳細確認
-      console.log(`[Phase 2] RPC結果 - chunks数: ${chunks ? chunks.length : 0}, エラー: ${matchError ? matchError.message : 'なし'}`);
-      if (chunks && chunks.length > 0) {
-        console.log(`[Phase 2] 取得したチャンクの詳細:`, chunks.map(c => ({ id: c.id, similarity: c.similarity, filename: c.manual_filename })));
+      if (error) {
+        console.error(`[Phase 2] RPC呼び出しエラー:`, {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code,
+          query: searchQuery,
+          params: {
+            match_threshold: rpcParams.match_threshold,
+            p_user_id: rpcParams.p_user_id,
+            p_selected_manual_ids: rpcParams.p_selected_manual_ids,
+            p_share_id: rpcParams.p_share_id
+          }
+        });
+        continue;
       }
       
-      if (matchError) {
-        console.error(`[Phase 2] チャンク検索エラー (クエリ: "${searchQuery}"):`, matchError);
-        continue; 
+      console.log(`[Phase 2] RPC結果 - fetchedChunks数: ${fetchedChunks ? fetchedChunks.length : 0}`);
+      if (fetchedChunks && fetchedChunks.length > 0) {
+        console.log(`[Phase 2] 取得したチャンクの詳細:`, fetchedChunks.map(c => ({ 
+          id: c.id, 
+          similarity: c.similarity, 
+          filename: c.manual_filename,
+          original_filename: c.original_manual_filename,
+          text_preview: c.chunk_text ? c.chunk_text.substring(0, 50) + '...' : 'N/A'
+        })));
+      } else {
+        console.warn(`[Phase 2] チャンクが0件でした。クエリ: "${searchQuery}"`);
+        if (selectedManualIdsForRpc && selectedManualIdsForRpc.length > 0) {
+          const { data: debugChunks, error: debugError } = await authenticatedSupabase
+            .from('manual_chunks')
+            .select('id, manual_id')
+            .in('manual_id', selectedManualIdsForRpc)
+            .limit(5);
+          
+          if (debugError) {
+            console.error(`[Phase 2 Debug] チャンク存在確認エラー:`, debugError);
+          } else if (debugChunks) {
+            console.log(`[Phase 2 Debug] 対象マニュアルのチャンク存在確認: ${debugChunks.length}件存在`);
+          }
+        }
       }
-      if (chunks && chunks.length > 0) {
-        chunks.forEach(chunk => {
+      
+      // fetchedChunks を allChunks にマージする
+      if (fetchedChunks && fetchedChunks.length > 0) {
+        fetchedChunks.forEach(chunk => {
           if (chunk && chunk.id && !retrievedChunkIds.has(chunk.id)) {
-            allChunks.push(chunk);
+            allChunks.push(chunk); // allChunks はループの外で宣言されている想定
             retrievedChunkIds.add(chunk.id);
           }
         });
@@ -402,5 +462,41 @@ ${userQuery}
   } catch (error) {
     console.error("[API /api/qa] 全体エラーハンドラ:", error);
     return NextResponse.json({ error: error.message || 'サーバー内部エラーが発生しました。' }, { status: 500 });
+  }
+}
+
+// デバッグ用: Embedding生成のテスト
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const testQuery = searchParams.get('query') || 'テスト';
+    
+    if (!openaiApiKey) { // OpenAI APIキーをチェック
+      return NextResponse.json({ error: 'OPENAI_API_KEY not configured' }, { status: 500 });
+    }
+    
+    const testEmbeddings = new OpenAIEmbeddings(); // APIキーは環境変数から自動読み込み
+    // const testEmbeddings = new GoogleGenerativeAIEmbeddings({
+    //   apiKey: geminiApiKey,
+    //   model: "text-embedding-004",
+    //   taskType: "SEMANTIC_SIMILARITY", 
+    // });
+    
+    const embedding = await testEmbeddings.embedQuery(testQuery);
+    
+    const stats = {
+      query: testQuery,
+      dimensions: embedding.length,
+      first10: embedding.slice(0, 10),
+      last10: embedding.slice(-10),
+      mean: embedding.reduce((a, b) => a + b, 0) / embedding.length,
+      min: Math.min(...embedding),
+      max: Math.max(...embedding),
+      variance: embedding.reduce((sum, val) => sum + Math.pow(val - (embedding.reduce((a, b) => a + b, 0) / embedding.length), 2), 0) / embedding.length
+    };
+    
+    return NextResponse.json({ success: true, stats });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 } 
