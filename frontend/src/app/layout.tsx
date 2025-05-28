@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from '@clerk/nextjs';
+import { customJaJp } from '@/lib/clerk-custom-localization';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -25,6 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <ClerkProvider
+      localization={customJaJp}
       afterSignInUrl="/"
       afterSignUpUrl="/"
       signInUrl="/sign-in"
