@@ -21,6 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PremiumStatus } from './DeveloperPanel';
 
 interface SourceFile {
   id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
@@ -44,9 +45,15 @@ interface SourceManagerProps {
   selectedSourceNames: string[];
   onSelectionChange: (selectedNames: string[]) => void;
   isMobileView?: boolean;
+  premiumStatus?: PremiumStatus; // ★ 追加: プレミアムプランの状態
 }
 
-const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSelectionChange, isMobileView }) => { // ★ propsを受け取るように変更
+const SourceManager: React.FC<SourceManagerProps> = ({ 
+  selectedSourceNames, 
+  onSelectionChange, 
+  isMobileView,
+  premiumStatus = { isPremium: false, fileLimit: 3, fileSizeLimit: 30 } // ★ デフォルト値
+}) => {
   // 共有ページかどうかを判定（クライアントサイドでのみ）
   const [shareId, setShareId] = useState<string | null>(null);
   
@@ -73,7 +80,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   const [loadingSourceData, setLoadingSourceData] = useState(false);
 
   // ★ メッセージ設定ヘルパー関数（自動消去機能付き）
-  const setMessageWithAutoHide = useCallback((msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 10000) => {
+  const setMessageWithAutoHide = useCallback((msg: { type: 'success' | 'error' | 'info'; text: string } | null, autoHideDelay: number = 5000) => {
     // 既存のタイマーをクリア
     if (messageTimerRef.current) {
       clearTimeout(messageTimerRef.current);
@@ -82,8 +89,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     
     setMessage(msg);
     
-    // 成功メッセージの場合のみ自動消去
-    if (msg && msg.type === 'success') {
+    // ★ 全てのメッセージタイプで自動消去（エラーメッセージも含む）
+    if (msg) {
       messageTimerRef.current = setTimeout(() => {
         setMessage(null);
         messageTimerRef.current = null;
@@ -197,6 +204,28 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
     setMessageWithAutoHide(null);
     if (event.target.files && event.target.files.length > 0) {
       const files = Array.from(event.target.files);
+      
+      // ★ ファイル制限チェック
+      for (const file of files) {
+        // ファイルサイズチェック
+        const fileSizeMB = file.size / (1024 * 1024);
+        if (fileSizeMB > premiumStatus.fileSizeLimit) {
+          setMessageWithAutoHide({ 
+            type: 'error', 
+            text: `ファイル "${file.name}" のサイズ (${fileSizeMB.toFixed(1)}MB) が制限 (${premiumStatus.fileSizeLimit}MB) を超えています。${!premiumStatus.isPremium ? ' 有料プランにアップグレードすると100MBまでアップロード可能です。' : ''}` 
+          });
+          return;
+        }
+
+        // ファイル数制限チェック
+        if (sourceFiles.length >= premiumStatus.fileLimit) {
+          setMessageWithAutoHide({ 
+            type: 'error', 
+            text: `ファイル数の制限 (${premiumStatus.fileLimit}ファイル) に達しています。${!premiumStatus.isPremium ? ' 有料プランにアップグレードすると無制限でアップロード可能です。' : ''}` 
+          });
+          return;
+        }
+      }
       
       // 複数ファイルを並行してアップロード
       files.forEach(file => {
@@ -351,8 +380,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         message: `処理中...`
       });
 
-      await fetchUploadedFiles();
-
       try {
         // ★ process-manual-function Edge Functionを呼び出し
         const requestUrl = `${supabaseUrl}/functions/v1/process-manual-function`;
@@ -399,6 +426,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
         if (!selectedSourceNames.includes(originalFileName)) {
           onSelectionChange([...selectedSourceNames, originalFileName]);
         }
+        // ★ プロセス完了後にのみファイルリストを更新
         await fetchUploadedFiles();
 
         // 3秒後にキューから削除
@@ -704,12 +732,25 @@ const SourceManager: React.FC<SourceManagerProps> = ({ selectedSourceNames, onSe
   return (
     <div className="flex flex-col h-full">
       {/* ヘッダーセクション */}
-      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
-        <h2 className="text-lg font-semibold">ソース管理</h2>
-        <Button onClick={handleFileTrigger} size="icon" variant="outline">
-          <PlusIcon className="h-5 w-5" />
-          <span className="sr-only">ファイル追加</span>
-        </Button>
+      <div className="px-4 pt-4 pb-2 border-b">
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-lg font-semibold">ソース管理</h2>
+          <Button onClick={handleFileTrigger} size="icon" variant="outline">
+            <PlusIcon className="h-5 w-5" />
+            <span className="sr-only">ファイル追加</span>
+          </Button>
+        </div>
+        
+        {/* ★ プレミアム制限表示 */}
+        <div className="flex justify-between items-center text-xs text-gray-600">
+          <span>
+            ファイル数: {sourceFiles.length} / {premiumStatus.fileLimit === Infinity ? '無制限' : premiumStatus.fileLimit}
+          </span>
+          <span>
+            サイズ制限: {premiumStatus.fileSizeLimit}MB
+          </span>
+        </div>
+        
         <input
           type="file"
           ref={fileInputRef}

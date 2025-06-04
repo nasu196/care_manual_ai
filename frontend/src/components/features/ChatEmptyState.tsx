@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Image from 'next/image';
 
 // 介護現場での実用的な入力例
 const inputExamples = [
@@ -18,12 +17,7 @@ const inputExamples = [
 ];
 
 export const ChatEmptyState: React.FC = () => {
-  const [imageLoaded, setImageLoaded] = useState(true);
   const [currentExample, setCurrentExample] = useState('');
-
-  const handleImageError = () => {
-    setImageLoaded(false);
-  };
 
   useEffect(() => {
     // コンポーネントマウント時にランダムな例示を選択
@@ -32,33 +26,20 @@ export const ChatEmptyState: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[500px] h-full text-center">
-      {/* マスコット画像 */}
-      <div className="mb-6">
-        {imageLoaded ? (
-          <Image 
-            src="/care-mascot.png" 
-            alt="ケアマニュアルAIマスコット" 
-            width={192}
-            height={192}
-            className="object-contain opacity-80"
-            onError={handleImageError}
-          />
-        ) : (
-          <div className="w-48 h-48 bg-blue-100 rounded-full flex items-center justify-center text-blue-500 text-6xl">
-            🤖
-          </div>
-        )}
-      </div>
+    <div className="flex flex-col items-center justify-center min-h-[560px] w-full text-center">
+      {/* メッセージグループ - 中央配置 */}
+      <div className="flex flex-col items-center">
+        {/* メインメッセージ - モダンなグラデーション文字 */}
+        <div className="mb-6">
+          <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-blue-300 via-sky-300 to-slate-400 bg-clip-text text-transparent leading-tight">
+            下の入力欄から質問を送信して<br />会話を始めましょう
+          </h1>
+        </div>
 
-      {/* 使い方のヒント */}
-      <div className="text-base text-gray-500 mb-2">
-        下の入力欄から質問を送信して会話を始めましょう
-      </div>
-
-      {/* 例示 */}
-      <div className="text-sm text-gray-400">
-        例：{currentExample}
+        {/* 例示 */}
+        <div className="text-lg text-gray-500">
+          例：{currentExample}
+        </div>
       </div>
     </div>
   );

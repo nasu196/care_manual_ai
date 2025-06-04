@@ -6,6 +6,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import ChatInterfaceMain from '@/components/ChatInterfaceMain'; // 作成したコンポーネントをインポート
 import SourceManager from '@/components/features/SourceManager'; // ★ SourceManager をインポート
 import MemoStudio from '@/components/admin/MemoStudio'; // ★ MemoStudio をインポート
+import { DeveloperPanel, PremiumStatus } from '@/components/features/DeveloperPanel'; // ★ DeveloperPanel をインポート
 import { useMemoStore } from '@/store/memoStore'; // 編集権限管理用
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -45,8 +46,18 @@ function HomePageContent() {
   const [shareData, setShareData] = useState<ShareData | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [isLoadingShare, setIsLoadingShare] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [premiumStatus, setPremiumStatus] = useState<PremiumStatus>({ // ★ プレミアム状態管理を追加
+    isPremium: false,
+    fileLimit: 3,
+    fileSizeLimit: 30
+  });
   
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
+
+  // ★ プレミアム状態変更ハンドラー
+  const handlePremiumStatusChange = useCallback((status: PremiumStatus) => {
+    setPremiumStatus(status);
+  }, []);
 
   // 共有データを取得する関数
   const fetchShareData = useCallback(async (id: string) => {
@@ -155,10 +166,19 @@ function HomePageContent() {
   return (
     <AppLayout
       sourceSlot={ // ★ sourceSlot に SourceManager を明示的に指定
-        <SourceManager 
-          selectedSourceNames={selectedSourceNames} 
-          onSelectionChange={handleSourceSelectionChange} // ★ props名をSourceManagerの実装に合わせる
-        />
+        <div className="h-full flex flex-col">
+          <SourceManager 
+            selectedSourceNames={selectedSourceNames} 
+            onSelectionChange={handleSourceSelectionChange} // ★ props名をSourceManagerの実装に合わせる
+            premiumStatus={premiumStatus} // ★ プレミアム状態を渡す
+          />
+          {/* ★ 開発用パネルを追加（共有モードでは非表示） */}
+          {!shareId && process.env.NODE_ENV === 'development' && (
+            <div className="p-4 border-t">
+              <DeveloperPanel onPremiumStatusChange={handlePremiumStatusChange} />
+            </div>
+          )}
+        </div>
       }
       chatSlot={
         <ChatInterfaceMain 

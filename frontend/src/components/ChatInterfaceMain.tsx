@@ -319,16 +319,16 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         </DropdownMenu>
       </div>
       
-      <div className="flex-grow overflow-hidden px-6 min-h-0">
+      <div className="flex-grow overflow-hidden min-h-0">
         <ScrollArea className="h-full w-full" ref={scrollAreaRef}>
           {messages.length === 0 ? (
             <ChatEmptyState />
           ) : (
-            <div className="pt-4 pb-4 pr-2">
+            <div className="p-4 space-y-3">
               {messages.map((msg) => (
                 <div
                   key={msg.id}
-                  className={`mb-3 ${msg.isUser ? 'flex justify-end' : ''}`}
+                  className={`${msg.isUser ? 'flex justify-end' : ''}`}
                 >
                   <div className={`flex ${msg.isUser ? 'justify-end' : 'justify-start'}`}>
                     <div

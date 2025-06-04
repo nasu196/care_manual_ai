@@ -538,14 +538,14 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           <div 
             className="fixed inset-0 flex items-center justify-center p-4"
             style={{ 
-              backgroundColor: 'rgba(0, 0, 0, 0.1)',
-              zIndex: 999999
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              zIndex: 9999
             }}
           >
             <motion.div 
               className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full relative"
               style={{ 
-                zIndex: 1000000
+                zIndex: 10000
               }}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -568,7 +568,11 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
                       <SlidersHorizontal className="ml-2 h-4 w-4 opacity-50" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent className="w-56">
+                  <DropdownMenuContent 
+                    className="w-56" 
+                    style={{ zIndex: 10001 }}
+                    sideOffset={5}
+                  >
                     <DropdownMenuLabel>回答の詳細度</DropdownMenuLabel>
                     <DropdownMenuSeparator />
                     <DropdownMenuRadioGroup value={aiVerbosity} onValueChange={(value) => setAiVerbosity(value as AiVerbosity)}>
