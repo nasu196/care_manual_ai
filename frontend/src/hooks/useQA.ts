@@ -43,7 +43,13 @@ export function useQA() {
         throw new Error('認証が必要です。ログインしてください。');
       }
 
-      const requestBody = {
+      const requestBody: {
+        query: string;
+        source_filenames: string[] | null;
+        verbosity: string;
+        chat_history: Array<{ type: 'user' | 'ai'; content: string }>;
+        shareId?: string;
+      } = {
         query: question,
         source_filenames: sourceFilenames,
         verbosity: verbosity,
