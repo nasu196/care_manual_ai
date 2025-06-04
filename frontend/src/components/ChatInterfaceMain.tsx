@@ -128,7 +128,13 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       }
 
       // useQAフックを使用してAPIリクエスト
-      const qaResult = await askQuestion(questionText, selectedSourceNames, aiVerbosity, shareId, authToken);
+      const qaResult = await askQuestion(
+        questionText, 
+        selectedSourceNames.length > 0 ? selectedSourceNames : null, 
+        aiVerbosity, 
+        shareId, 
+        authToken
+      );
       
       let accumulatedData = '';
       let finishedStreamingText = false;
