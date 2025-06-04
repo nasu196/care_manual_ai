@@ -25,7 +25,7 @@ interface Message {
   id: string;
   text: string;
   isUser: boolean;
-  sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number; original_file_name?: string }>;
+  sources?: Array<{ id: string; page_number: number; text_snippet: string; similarity: number; original_file_name?: string }> | null;
   isStreaming?: boolean;
   timestamp?: Date;
 }
