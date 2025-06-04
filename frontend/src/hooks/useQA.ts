@@ -2,16 +2,16 @@ import { useState, useCallback } from 'react';
 
 export function useQA() {
   const [isLoading, setIsLoading] = useState(false);
-  const [chatHistory, setChatHistory] = useState([]); // 30往復分の会話履歴を管理
+  const [chatHistory, setChatHistory] = useState<Array<{ type: 'user' | 'ai'; content: string }>>([]); // 30往復分の会話履歴を管理
 
   const MAX_HISTORY_ENTRIES = 30; // 最大30往復分
 
-  const addToChatHistory = useCallback((userMessage, aiResponse) => {
+  const addToChatHistory = useCallback((userMessage: string, aiResponse: string) => {
     setChatHistory(prevHistory => {
       const newHistory = [
         ...prevHistory,
-        { type: 'user', content: userMessage },
-        { type: 'ai', content: aiResponse }
+        { type: 'user' as const, content: userMessage },
+        { type: 'ai' as const, content: aiResponse }
       ];
       // 最大30往復（60エントリ）を超えた場合は古いものから削除
       if (newHistory.length > MAX_HISTORY_ENTRIES * 2) {
@@ -25,7 +25,13 @@ export function useQA() {
     setChatHistory([]);
   }, []);
 
-  const askQuestion = useCallback(async (question, sourceFilenames = null, verbosity = 'standard', shareId = null, authToken = null) => {
+  const askQuestion = useCallback(async (
+    question: string, 
+    sourceFilenames: string[] | null = null, 
+    verbosity: string = 'standard', 
+    shareId: string | null = null, 
+    authToken: string | null = null
+  ) => {
     if (!question?.trim()) {
       throw new Error('質問を入力してください。');
     }
@@ -48,7 +54,7 @@ export function useQA() {
         requestBody.shareId = shareId;
       }
 
-      const headers = {
+      const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
 
@@ -74,7 +80,7 @@ export function useQA() {
       }
 
       let accumulatedText = '';
-      let sources = null;
+      let sources: Array<{ id: string; page_number: number; text_snippet: string; similarity: number; original_file_name?: string }> | null = null;
       const decoder = new TextDecoder();
 
       return {
