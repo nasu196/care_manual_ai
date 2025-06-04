@@ -19,6 +19,7 @@ import {
 import { useMemoStore } from '@/store/memoStore';
 import { ChatEmptyState } from '@/components/features/ChatEmptyState';
 import { useAuth } from '@clerk/nextjs';
+import { useQA } from '@/hooks/useQA';
 
 interface Message {
   id: string;
@@ -38,22 +39,21 @@ interface ChatInterfaceMainProps {
 export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterfaceMainProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [aiVerbosity, setAiVerbosity] = useState<AiVerbosity>('default');
   const { getToken } = useAuth();
   const setNewMemoRequest = useMemoStore((state) => state.setNewMemoRequest);
   const setMemoViewExpanded = useMemoStore((state) => state.setMemoViewExpanded);
-  const hasEditPermission = useMemoStore((state) => state.hasEditPermission); // ★ 編集権限を取得
+  const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
+  
+  // useQAフックを使用してクライアントサイド履歴管理
+  const { askQuestion, isLoading } = useQA();
 
   // 追加: ユーザーが一番下を見ているかどうかのstate
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   // ★ ファイル選択状態のチェック
   const hasSelectedFiles = selectedSourceNames.length > 0;
-
-  // sourcesSeparatorを定義
-  const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
 
   // localStorageからaiVerbosity設定を読み込む
   useEffect(() => {
@@ -97,8 +97,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     };
 
     setMessages((prevMessages) => [...prevMessages, userMessage]);
+    const questionText = inputValue;
     setInputValue('');
-    setIsLoading(true);
 
     const tempAiMessageId = (Date.now() + 1).toString();
     const tempAiMessage: Message = {
@@ -118,163 +118,84 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         shareId = urlParams.get('shareId');
       }
 
-      let apiRequestBody;
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      };
-
-      if (shareId) {
-        // 共有ページの場合は認証不要
-        apiRequestBody = {
-          query: inputValue,
-          source_filenames: selectedSourceNames,
-          verbosity: aiVerbosity,
-          shareId: shareId,
-        };
-      } else {
-        // 通常ページの場合は認証が必要
-        const token = await getToken({ template: 'supabase' });
-        if (!token) {
+      // Clerkから認証トークンを取得
+      let authToken: string | null = null;
+      if (!shareId) {
+        authToken = await getToken({ template: 'supabase' });
+        if (!authToken) {
           throw new Error('認証情報の取得に失敗しました。');
         }
-
-        apiRequestBody = {
-          query: inputValue,
-          source_filenames: selectedSourceNames,
-          verbosity: aiVerbosity,
-        };
-
-        headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const response = await fetch('/api/qa', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(apiRequestBody),
-      });
+      // useQAフックを使用してAPIリクエスト
+      const qaResult = await askQuestion(questionText, selectedSourceNames, aiVerbosity, shareId, authToken);
+      
+      let accumulatedData = '';
+      let finishedStreamingText = false;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "APIからのエラー応答が不正です。" }));
-        setMessages((prevMessages) => 
-          prevMessages.map(msg => 
-            msg.id === tempAiMessageId 
-              ? { ...msg, text: errorData.error || `APIエラー: ${response.status}`, isStreaming: false } 
-              : msg
-          )
-        );
-        throw new Error(errorData.error || `APIエラー: ${response.status}`);
-      }
-
-      if (response.body) {
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulatedData = '';
-        let finishedStreamingText = false;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            if (!finishedStreamingText && accumulatedData) {
-                setMessages((prevMessages) =>
-                    prevMessages.map(msg => 
-                        msg.id === tempAiMessageId ? { ...msg, text: accumulatedData, isStreaming: false } : msg
-                    )
-                );
-            } else if (!accumulatedData && !finishedStreamingText) {
-                 setMessages((prevMessages) =>
-                    prevMessages.map(msg => 
-                        msg.id === tempAiMessageId ? { ...msg, text: "AIからの応答が空でした。", isStreaming: false } : msg
-                    )
-                );
-            }
-             setMessages((prevMessages) =>
+      for await (const chunk of qaResult.stream()) {
+        if (chunk.isComplete) {
+          finishedStreamingText = true;
+          // ソース情報が含まれている場合は処理
+          if (chunk.sources) {
+            setMessages((prevMessages) =>
               prevMessages.map(msg => 
-                msg.id === tempAiMessageId ? { ...msg, isStreaming: false } : msg
+                msg.id === tempAiMessageId 
+                  ? { ...msg, text: chunk.text, sources: chunk.sources, isStreaming: false } 
+                  : msg
               )
             );
-            break;
-          }
-          accumulatedData += decoder.decode(value, { stream: true });
-          
-          if (!finishedStreamingText) {
-            const separatorIndex = accumulatedData.indexOf(sourcesSeparator);
-            if (separatorIndex !== -1) {
-              const textPart = accumulatedData.substring(0, separatorIndex);
-              const sourcesJsonPart = accumulatedData.substring(separatorIndex + sourcesSeparator.length);
-              
-              setMessages((prevMessages) =>
-                prevMessages.map(msg => 
-                  msg.id === tempAiMessageId ? { ...msg, text: textPart, isStreaming: false } : msg
-                )
-              );
-              finishedStreamingText = true;
-              accumulatedData = sourcesJsonPart;
-              
-              try {
-                const sources = JSON.parse(accumulatedData);
-                setMessages((prevMessages) =>
-                  prevMessages.map(msg => 
-                    msg.id === tempAiMessageId ? { ...msg, sources: sources, isStreaming: false } : msg
-                  )
-                );
-                accumulatedData = "";
-              } catch (e) {
-                console.warn("Failed to parse sources JSON, data might be incomplete or malformed:", accumulatedData, e);
-                 setMessages((prevMessages) =>
-                    prevMessages.map(msg => 
-                        msg.id === tempAiMessageId ? { ...msg, text: msg.text + "\n(参照情報の取得に失敗しました)", sources: [], isStreaming: false } : msg
-                    )
-                );
-              }
-            } else {
-              setMessages((prevMessages) =>
-                prevMessages.map(msg => 
-                  msg.id === tempAiMessageId ? { ...msg, text: accumulatedData } : msg
-                )
-              );
-            }
           } else {
-            try {
-                const sources = JSON.parse(accumulatedData);
-                setMessages((prevMessages) =>
-                  prevMessages.map(msg => 
-                    msg.id === tempAiMessageId ? { ...msg, sources: sources, isStreaming: false } : msg
-                  )
-                );
-                accumulatedData = "";
-              } catch (_) {
-                console.error("Error during source data chunk processing:", _);
-                console.log("Waiting for more source data chunks...");
-              }
+            setMessages((prevMessages) =>
+              prevMessages.map(msg => 
+                msg.id === tempAiMessageId 
+                  ? { ...msg, text: chunk.text, isStreaming: false } 
+                  : msg
+              )
+            );
           }
+          break;
+        } else {
+          accumulatedData += chunk.text;
+          setMessages((prevMessages) =>
+            prevMessages.map(msg => 
+              msg.id === tempAiMessageId 
+                ? { ...msg, text: accumulatedData } 
+                : msg
+            )
+          );
         }
-      } else {
-        console.warn("API response body is not streamable, attempting to parse as JSON.");
-        const data = await response.json().catch(() => ({ answer: "AIからの応答形式が不正です。", sources: [] }));
+      }
+
+      if (!finishedStreamingText && accumulatedData) {
         setMessages((prevMessages) =>
           prevMessages.map(msg => 
-            msg.id === tempAiMessageId 
-              ? { ...msg, text: data.answer || "回答がありませんでした。", sources: data.sources || [], isStreaming: false }
-              : msg
+            msg.id === tempAiMessageId ? { ...msg, text: accumulatedData, isStreaming: false } : msg
+          )
+        );
+      } else if (!accumulatedData && !finishedStreamingText) {
+        setMessages((prevMessages) =>
+          prevMessages.map(msg => 
+            msg.id === tempAiMessageId ? { ...msg, text: "AIからの応答が空でした。", isStreaming: false } : msg
           )
         );
       }
+      
+      setMessages((prevMessages) =>
+        prevMessages.map(msg => 
+          msg.id === tempAiMessageId ? { ...msg, isStreaming: false } : msg
+        )
+      );
 
     } catch (error) {
-      console.error("APIリクエストエラー（catchブロック）:", error);
-      setMessages((prevMessages) => {
-        const aiMsgExists = prevMessages.find(m => m.id === tempAiMessageId);
-        if (aiMsgExists) {
-          return prevMessages.map(msg => 
-            msg.id === tempAiMessageId 
-              ? { ...msg, text: (msg.text && msg.text !== '' ? msg.text + "\n" : "") + (error instanceof Error ? error.message : "不明なエラーが発生しました。"), isStreaming: false } 
-              : msg
-          );
-        }
-        return prevMessages;
-      });
-    } finally {
-      setIsLoading(false);
+      console.error('QA API呼び出しエラー:', error);
+      setMessages((prevMessages) => 
+        prevMessages.map(msg => 
+          msg.id === tempAiMessageId 
+            ? { ...msg, text: error instanceof Error ? error.message : '回答の生成中にエラーが発生しました。', isStreaming: false } 
+            : msg
+        )
+      );
     }
   };
 

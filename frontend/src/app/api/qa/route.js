@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 // import { GoogleGenerativeAIEmbeddings } from '@langchain/google-genai'; // OpenAIを使用するためコメントアウト
 import { OpenAIEmbeddings } from '@langchain/openai'; // OpenAIEmbeddingsをインポート
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { LLMChain } from "langchain/chains";
+import { LLMChain } from "langchain/chains"; // ConversationChain を削除
 import { PromptTemplate } from "@langchain/core/prompts";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from '@google/generative-ai';
 
@@ -20,6 +20,8 @@ let supabase;
 let chatModelForAnalysis;
 let queryAnalysisChain;
 let geminiModelForAnswer;
+let chatModelForPhase0; // Phase 0 用チャットモデル（履歴はクライアント管理）
+let phase0Chain; // Phase 0 用チェーン（メモリなし）
 
 // 初期化関数
 function initializeClientsAndChains() {
@@ -33,23 +35,70 @@ function initializeClientsAndChains() {
     supabase = createClient(supabaseUrl, supabaseAnonKey);
   }
   
+  if (!chatModelForPhase0) {
+    chatModelForPhase0 = new ChatGoogleGenerativeAI({
+        apiKey: geminiApiKey,
+        model: "gemini-1.5-flash-latest",
+        temperature: 0.2,
+    });
+  }
+
+  if (!phase0Chain) {
+    // Phase 0 の RAG要否判定と簡易応答生成用プロンプト（履歴はクライアントから受信）
+    const phase0PromptTemplateString = `あなたはユーザーとの対話履歴と現在の質問を分析し、ドキュメント検索(RAG)が必要かどうかを判断し、必要に応じて直接回答を生成するAIアシスタントです。
+
+以下の極めて限定的な条件でのみRAGが不要と判断してください：
+- 純粋な挨拶（「こんにちは」「おはよう」「こんばんは」）
+- 純粋な感謝（「ありがとう」「お疲れ様」）
+- 会話終了の意思表示（「さようなら」「終了します」「終わります」）
+- 前回のAI回答内容の正確な翻訳依頼（「〇〇語に翻訳して」「〇〇語で教えて」）
+
+**重要：以下は必ずRAGが必要です：**
+- マニュアルの内容に関する質問
+- 新しい情報を求める質問
+- 手順や方法を尋ねる質問
+- 機能や設定について聞く質問
+- 前回の回答に対する追加の詳細を求める質問
+
+RAGが不要と判断した場合（極めて限定的な場合のみ）：
+- 会話履歴の内容を参照して応答してください
+- 翻訳の場合は、前回のAIの回答内容を正確に指定言語に翻訳してください
+- 回答の前に "RAG_NOT_NEEDED_ANSWER_FOLLOWS:" を付けてください
+
+RAGが必要と判断した場合（ほとんどの場合）：
+- "RAG_NEEDED" という文字列のみを出力してください
+
+これまでの会話履歴:
+{chat_history}
+
+ユーザーの現在の質問:
+{user_query}
+
+あなたの判断と応答:`;
+    const phase0PromptTemplate = PromptTemplate.fromTemplate(phase0PromptTemplateString);
+
+    phase0Chain = new LLMChain({
+      llm: chatModelForPhase0,
+      prompt: phase0PromptTemplate,
+      outputKey: "phase0_output",
+    });
+    console.log("[API /api/qa] Phase 0 chain initialized (client-side history).");
+  }
+
   if (!chatModelForAnalysis) {
     chatModelForAnalysis = new ChatGoogleGenerativeAI({
         apiKey: geminiApiKey,
-        model: "gemini-2.0-flash",
+        model: "gemini-1.5-flash-latest",
         temperature: 0.4,
     });
+    console.log("[API /api/qa] Gemini model for answer generation initialized with gemini-1.5-flash-latest.");
   }
 
   // --- 第1段階LLM用: 質問分析とクエリ生成 ---
   if (!queryAnalysisChain) {
-    const queryAnalysisPromptTemplateString = `\nあなたは、ユーザーからの質問の意図を完璧に読み解き、その質問に対して最も的確かつ包括的な回答を生成するために、後続のAIアシスタント（以下、AnswerGenerationAI）がどのように情報を収集し、どのように回答を組み立てるべきかの戦略を立案する、プロフェッショナルなAIコンサルタントです。\n\nあなたのタスクは、以下のユーザーの質問を分析し、AnswerGenerationAIが最高のパフォーマンスを発揮できるように、具体的かつ実行可能な指示をJSON形式で提供することです。\n\nユーザーの質問:\n「{user_query}」\nユーザーが事前に選択した参照ファイル群についての情報: {selected_source_filenames_message}\n\n以下の思考プロセスに従って、AnswerGenerationAIへの指示書を作成してください。\n\n1.  **質問の核心の特定**: ユーザーが本当に知りたいことは何か？質問の背景にある真のニーズは何か？を深く洞察してください。\n2.  **情報収集戦略の立案**: articulating strategy for information gathering
+    const queryAnalysisPromptTemplateString = `\nあなたは、ユーザーからの質問の意図を完璧に読み解き、その質問に対して最も的確かつ包括的な回答を生成するために、後続のAIアシスタント（以下、AnswerGenerationAI）がどのように情報を収集し、どのように回答を組み立てるべきかの戦略を立案する、プロフェッショナルなAIコンサルタントです。\n\nあなたのタスクは、以下のユーザーの質問を分析し、AnswerGenerationAIが最高のパフォーマンスを発揮できるように、具体的かつ実行可能な指示をJSON形式で提供することです。\n\nユーザーの質問:\n「{user_query}」\nユーザーが事前に選択した参照ファイル群についての情報: {selected_source_filenames_message}\n会話履歴: {chat_history_summary}\n\n以下の思考プロセスに従って、AnswerGenerationAIへの指示書を作成してください。\n\n1.  **質問の核心の特定**: ユーザーが本当に知りたいことは何か？質問の背景にある真のニーズは何か？を深く洞察してください。会話履歴も参考にして文脈を理解してください。\n2.  **情報収集戦略の立案**: articulating strategy for information gathering
     *   特定した核心的ニーズに答えるために、どのような情報が必要か？\n    *   **最優先事項**: ユーザーによって事前に参照すべきファイル群が指定されている場合（ユーザーが「{selected_source_filenames_message}」でファイル名を挙げている状況）、まずはそれらのファイル群から徹底的に情報を検索し、回答の主要な根拠とすること。\n    *   その情報を効率的かつ網羅的に収集するために、どのような検索クエリが最適か？（複数の観点から、具体的なキーワードで3～7個提案。**生成する検索クエリには、ユーザーが指定したファイル名そのものを含めないでください。** 指定ファイルがある場合は、それらのファイル内容と関連性の高いキーワードベースのクエリを優先）\n    *   検索結果から特に注目すべき情報や、深掘りすべきポイントは何か？（指定ファイルがある場合は、そのファイル内のどの部分が特に重要かを示すこと）\n    *   指定されたファイル群だけでは情報が不足する場合、またはファイル指定がない場合に限り、より広範な情報源からの検索も検討する。その際の検索戦略も併せて立案すること。\n3.  **AnswerGenerationAIへの指示事項の策定**:
-    *   AnswerGenerationAIがユーザーに回答を提示する際に、どのような点に注意すべきか？（例: 特に強調すべきポイント、避けるべき表現、補足すべき背景情報など。指定ファイルがある場合は、その内容を最大限活用するよう指示）\n    *   ユーザーが次に知りたくなるであろう関連情報や、提示することでより満足度が高まるであろう情報は何か？\n    *   **ユーザーが要求する回答の詳細度（「{verbosity_instruction}」で示される）を踏まえ、AnswerGenerationAIが生成する回答の粒度（簡潔さ、網羅性、具体例の量など）を具体的に指示すること。**\n    *   **最重要指示**: AnswerGenerationAIが最終的にユーザーへ提示する回答文には、AI自身の内部的な処理、思考の過程、あるいは他のAIシステム（あなた自身の存在を含む）や、「指示書」「分析サマリー」「内部情報」といった言葉への言及を**絶対に含めない**ように、AnswerGenerationAIへ厳重に指示してください。AnswerGenerationAIは、あたかも全ての情報を独自に理解し、ユーザーのためだけに自然な言葉で回答を生成したかのように振る舞うべきです。この指示は、生成するJSON内の「回答の基本方針」や「回答時の注意点」に明確に反映させてください。\n\n上記の思考プロセスに基づき、以下のJSON形式で、具体的かつ実行可能な指示書を出力してください。キーは日本語で記述してください。\n\n\\\`\\\`\\\`json\n{{\n  \"ユーザー質問の分析と再定義\": {{\n    \"質問の核心\": \"ユーザーが最も知りたい本質的な問いを1～2文で記述\",\n    \"想定される背景・ニーズ\": \"ユーザーがこの質問をするに至った背景や、解決したい課題などを具体的に推測して記述\"\n  }},\n  \"情報収集戦略\": {{\n    \"推奨検索クエリ群\": [\n      \"効果的な検索クエリを具体的かつ多様なキーワードで3～7個提案\",\n      \"例: 『〇〇 具体的な手続き』、『〇〇 費用 相場』、『〇〇 メリット デメリット 最新情報』\"\n    ],\n    \"情報収集時の着眼点\": [\n      \"検索結果をレビューする際に特に注目すべきキーワードや情報カテゴリを3～5点記述\",\n      \"例: 『公的機関の発表情報』、『専門家の見解』、『最新の統計データ』。指定ファイルがある場合は、そのファイルからの情報を優先するよう指示\"\n    ]\n  }},\n  \"回答生成AIへの指示\": {{\n    \"回答の基本方針\": \"ユーザーの疑問点を解消し、次の行動を具体的に促せるような、明確で実用的な情報提供を心がける。指定ファイルからの情報を最優先とする。\",
-    \"期待される回答の詳細度\": \"{verbosity_instruction}\",
-    \"強調すべき主要ポイント\": [\n      \"ユーザーにとって特に価値の高い情報や、誤解を招きやすい点などを具体的に2～4点記述\"\n    ],\n    \"補足すべき有益情報\": [\n      \"質問の直接的な答え以外で、ユーザーが知っておくと役立つ関連情報や豆知識などを2～4点提案\"\n    ],\n    \"回答時の注意点\": [\n      \"専門用語の使用は避け、平易な言葉で説明する。\",
-      \"ユーザー向けの回答文には、AI自身の内部処理や思考プロセス、システム構造に関する言葉（例：AI、指示、分析結果など）は一切含めず、自然な対話形式で回答する。\",
-      \"情報の鮮度や正確性には最大限配慮する。\"
+    *   AnswerGenerationAIがユーザーに回答を提示する際に、どのような点に注意すべきか？（例: 特に強調すべきポイント、避けるべき表現、補足すべき背景情報など。指定ファイルがある場合は、その内容を最大限活用するよう指示）\n    *   ユーザーが次に知りたくなるであろう関連情報や、提示することでより満足度が高まるであろう情報は何か？\n    *   **ユーザーが要求する回答の詳細度（「{verbosity_instruction}」で示される）を踏まえ、AnswerGenerationAIが生成する回答の粒度（簡潔さ、網羅性、具体例の量など）を具体的に指示すること。**\n    *   **最重要指示**: AnswerGenerationAIが最終的にユーザーへ提示する回答文には、AI自身の内部的な処理、思考の過程、あるいは他のAIシステム（あなた自身の存在を含む）や、「指示書」「分析サマリー」「内部情報」といった言葉への言及を**絶対に含めない**ように、AnswerGenerationAIへ厳重に指示してください。AnswerGenerationAIは、あたかも全ての情報を独自に理解し、ユーザーのためだけに自然な言葉で回答を生成したかのように振る舞うべきです。この指示は、生成するJSON内の「回答の基本方針」や「回答時の注意点」に明確に反映させてください。\n\n上記の思考プロセスに基づき、以下のJSON形式で、具体的かつ実行可能な指示書を出力してください。キーは日本語で記述してください。\n\n\\\`\\\`\\\`json\n{{\n  \"ユーザー質問の分析と再定義\": {{\n    \"質問の核心\": \"ユーザーが最も知りたい本質的な問いを1～2文で記述\",\n    \"想定される背景・ニーズ\": \"ユーザーがこの質問をするに至った背景や、解決したい課題などを具体的に推測して記述\"\n  }},\n  \"情報収集戦略\": {{\n    \"推奨検索クエリ群\": [\n      \"効果的な検索クエリを具体的かつ多様なキーワードで3～7個提案\",\n      \"例: 『〇〇 具体的な手続き』、『〇〇 費用 相場』、『〇〇 メリット デメリット 最新情報』\"\n    ],\n    \"情報収集時の着眼点\": [\n      \"検索結果をレビューする際に特に注目すべきキーワードや情報カテゴリを3～5点記述\",\n      \"例: 『公的機関の発表情報』、『専門家の見解』、『最新の統計データ』。指定ファイルがある場合は、そのファイルからの情報を優先するよう指示\"\n    ]\n  }},\n  \"回答生成AIへの指示\": {{\n    \"回答の基本方針\": \"ユーザーの疑問点を解消し、次の行動を具体的に促せるような、明確で実用的な情報提供を心がける。指定ファイルからの情報を最優先とする。\",\n    \"期待される回答の詳細度\": \"{verbosity_instruction}\",\n    \"強調すべき主要ポイント\": [\n      \"ユーザーにとって特に価値の高い情報や、誤解を招きやすい点などを具体的に2～4点記述\"\n    ],\n    \"補足すべき有益情報\": [\n      \"質問の直接的な答え以外で、ユーザーが知っておくと役立つ関連情報や豆知識などを2～4点提案\"\n    ],\n    \"回答時の注意点\": [\n      \"専門用語の使用は避け、平易な言葉で説明する。\",\n      \"ユーザー向けの回答文には、AI自身の内部処理や思考プロセス、システム構造に関する言葉（例：AI、指示、分析結果など）は一切含めず、自然な対話形式で回答する。\",\n      \"情報の鮮度や正確性には最大限配慮する。\"
     ]\n  }}\n}}\n\\\`\\\`\\\`\n\nあなたの分析結果と提案（JSON形式）:\n`;
     const queryAnalysisPromptTemplate = PromptTemplate.fromTemplate(queryAnalysisPromptTemplateString);
     queryAnalysisChain = new LLMChain({
@@ -84,7 +133,7 @@ export async function POST(request) {
 
     // リクエストボディを先に取得してshareIdをチェック
     const requestBody = await request.json();
-    const { query: userQuery, source_filenames: initialSourceFilenames, verbosity: userVerbosity, shareId } = requestBody;
+    const { query: userQuery, source_filenames: initialSourceFilenames, verbosity: userVerbosity, shareId, chat_history } = requestBody; // chat_history を追加
     let sourceFilenames = initialSourceFilenames;
 
     // リクエストヘッダーからAuthorizationを取得
@@ -146,6 +195,80 @@ export async function POST(request) {
       return NextResponse.json({ error: '質問内容 (query) が必要です。' }, { status: 400 });
     }
 
+    // クライアントから送られた会話履歴を整形
+    const formattedChatHistory = Array.isArray(chat_history) && chat_history.length > 0
+      ? chat_history.map(msg => `${msg.type === 'user' ? 'ユーザー' : 'AI'}: ${msg.content}`).join('\n')
+      : '会話履歴なし';
+
+    // Phase 0: RAG要否判定と簡易応答
+    console.log(`[Phase 0] RAG要否判定開始: "${userQuery}"`);
+    console.log(`[Phase 0] クライアント履歴:`, formattedChatHistory);
+
+    const phase0Result = await phase0Chain.invoke({ 
+      user_query: userQuery,
+      chat_history: formattedChatHistory
+    });
+    const phase0Output = phase0Result.phase0_output;
+    console.log(`[Phase 0] 判定結果: ${phase0Output}`);
+    console.log(`[Phase 0] 判定結果の先頭文字列確認: "${phase0Output.substring(0, 50)}"`);
+    console.log(`[Phase 0] startsWith check:`, phase0Output.startsWith("RAG_NOT_NEEDED_ANSWER_FOLLOWS:"));
+
+    if (phase0Output.startsWith("RAG_NOT_NEEDED_ANSWER_FOLLOWS:")) {
+      const directAnswer = phase0Output.substring("RAG_NOT_NEEDED_ANSWER_FOLLOWS:".length).trim();
+      console.log(`[Phase 0] RAG不要と判定。直接回答を返却: "${directAnswer}"`);
+      console.log(`[Phase 0] directAnswerの長さ: ${directAnswer.length}`);
+      
+      // ストリーミング形式で回答を返す（JSON形式ではなく）
+      const stream = new ReadableStream({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          try {
+            console.log(`[Phase 0] ストリーミング開始: "${directAnswer}"`);
+            
+            // 文字を少しずつ送信して自然なストリーミング感を演出
+            const chunkSize = 20; // 10文字ずつ送信
+            for (let i = 0; i < directAnswer.length; i += chunkSize) {
+              const chunk = directAnswer.substring(i, i + chunkSize);
+              controller.enqueue(encoder.encode(chunk));
+              console.log(`[Phase 0] チャンク送信: "${chunk}"`);
+              
+              // 少し遅延を入れて自然なストリーミング感を演出
+              if (i + chunkSize < directAnswer.length) {
+                await new Promise(resolve => setTimeout(resolve, 30)); // 30ms遅延
+              }
+            }
+            
+            console.log(`[Phase 0] 回答ストリーミング完了`);
+            
+            // ソースセパレータを別のchunkとして送信（フロントエンドの処理に合わせて）
+            const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
+            controller.enqueue(encoder.encode(sourcesSeparator));
+            console.log(`[Phase 0] セパレータエンコード完了`);
+            
+            // ソース情報を別のchunkとして送信
+            controller.enqueue(encoder.encode(JSON.stringify([])));
+            console.log(`[Phase 0] ソース情報エンコード完了`);
+            
+            console.log("[Phase 0] ストリーミング完了（直接回答）。");
+          } catch (e) {
+            console.error("[Phase 0] 直接回答ストリーミング中にエラー発生:", e);
+            const errorMessage = `\n\nエラー: 回答の生成中に問題が発生しました。詳細: ${e.message}`;
+            controller.enqueue(encoder.encode(errorMessage));
+          }
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        headers: { 
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff'
+        },
+      });
+    }
+    
+    console.log(`[Phase 0] RAG必要と判定。従来のRAGフローへ。`);
+
     const validSourceFilenames = Array.isArray(sourceFilenames) && sourceFilenames.every(item => typeof item === 'string') 
       ? sourceFilenames 
       : null;
@@ -195,10 +318,17 @@ export async function POST(request) {
     } else if (userVerbosity === 'detailed') {
       verbosityInstruction = "回答は可能な限り詳細に、背景情報や具体例を豊富に盛り込んで記述してください。";
     }
+    
+    // 会話履歴のサマリーを作成（長すぎる場合は短縮）
+    const chatHistorySummary = formattedChatHistory.length > 500 
+      ? formattedChatHistory.substring(0, 500) + "...(以下省略)"
+      : formattedChatHistory;
+    
     const analysisResultRaw = await queryAnalysisChain.invoke({ 
         user_query: userQuery,
         selected_source_filenames_message: selectedSourceFilenamesMessage,
-        verbosity_instruction: verbosityInstruction
+        verbosity_instruction: verbosityInstruction,
+        chat_history_summary: chatHistorySummary
     });
     let analysisData;
     try {
@@ -225,8 +355,8 @@ export async function POST(request) {
 
     // --- 第2段階: ベクトル検索 ---
     console.log('[Phase 2] 複数の検索クエリで類似チャンクを検索中...');
-    const matchThreshold = 0.1;
-    const matchCount = 3;
+    const matchThreshold = 0.6;   // 0.8 → 0.6 に調整（バランス重視）
+    const matchCount = 5;          // 5 を維持
     let allChunks = [];
     const retrievedChunkIds = new Set();
 
@@ -350,16 +480,11 @@ export async function POST(request) {
       }
     }
     allChunks.sort((a, b) => b.similarity - a.similarity);
-    const topNChunks = allChunks.slice(0, 7); 
+    const topNChunks = allChunks.slice(0, 12);  // 7 → 12 に増加
     console.log(`[Phase 2] 検索結果: ${topNChunks.length}件のチャンクを取得。`);
 
-    const sourcesForClient = topNChunks.map(chunk => ({
-      id: chunk.id.toString(), 
-      page_number: chunk.page_number,
-      text_snippet: chunk.chunk_text ? chunk.chunk_text.substring(0, 200) : "",
-      similarity: chunk.similarity,
-      original_file_name: chunk.manual_filename
-    }));
+    // 参照元は非表示にする（関係ない情報の場合に混乱を避けるため）
+    const sourcesForClient = [];
 
     // ★ デバッグログ追加: sourcesForClient の内容確認
     console.log("[API /api/qa] Sources for client:", JSON.stringify(sourcesForClient, null, 2));
@@ -382,20 +507,23 @@ export async function POST(request) {
 
     const analysisSummaryForPrompt = JSON.stringify(analysisData, null, 2);
     const answerGenerationSystemPrompt = `
-あなたは、ユーザーの質問に対して、提供された「分析サマリー」と「背景情報」を基に、最高品質の回答を生成する高度なAIアシスタントです。
+あなたは、ユーザーの質問に対して、提供された「分析サマリー」と「背景情報」、「会話履歴」を基に、最高品質の回答を生成する高度なAIアシスタントです。
 
 提供された「分析サマリー」は以下の通りです。これを回答生成の主要な指針としてください。
 <分析サマリー>
 ${analysisSummaryForPrompt}
 </分析サマリー>
 
-上記「分析サマリー」と、別途提供される「背景情報」を徹底的に参照し、ユーザーの質問の意図を深く理解し、役立つ回答を生成してください。
+これまでの会話履歴:
+${formattedChatHistory}
+
+上記「分析サマリー」と、別途提供される「背景情報」、「会話履歴」を徹底的に参照し、ユーザーの質問の意図を深く理解し、役立つ回答を生成してください。
 **特に、「分析サマリー」内で指摘されている「強調すべき主要ポイント」や「補足すべき有益情報」、「回答時の注意点」、「期待される回答の詳細度」を必ず反映させてください。**
 
 ユーザーからの質問「${userQuery}」に対して、以下の思考プロセスに従って、網羅的かつ分かりやすい回答を生成してください。
 
 1.  提供された「分析サマリー」の確認と理解: 「分析サマリー」（上記）を熟読し、特に「回答の基本方針」「期待される回答の詳細度」「強調すべき主要ポイント」「補足すべき有益情報」「回答時の注意点」を完全に把握します。
-2.  質問の分解と理解 (「分析サマリー」の分析を踏まえて): ユーザーの質問「${userQuery}」と「分析サマリー」による「ユーザー質問の分析と再定義」を照らし合わせ、ユーザーが何を知りたいのかの核心を再確認します。
+2.  質問の分解と理解 (「分析サマリー」と会話履歴を踏まえて): ユーザーの質問「${userQuery}」と「分析サマリー」による「ユーザー質問の分析と再定義」、そして会話履歴を照らし合わせ、ユーザーが何を知りたいのかの核心を再確認します。
 3.  背景情報の徹底的なスキャン (「分析サマリー」の着眼点を参考に): 提供された「背景情報」全体を注意深く読み込み、「分析サマリー」が示した「情報収集時の着眼点」も参考にしながら、ユーザーの質問と「分析サマリー」の指示内容に関連する可能性のある全ての箇所をリストアップします。
 4.  情報の抽出と整理: リストアップした箇所から、質問に答えるために必要な情報を正確に抽出します。複数の箇所に関連情報がある場合は、それらを統合し、矛盾がないか確認します。情報の重要度や関連性に応じて順序付けを行います。
 5.  回答の構築 (「分析サマリー」の指示に従って): 抽出・整理した情報のみに基づいて、「分析サマリー」の「回答の基本方針」と「期待される回答の詳細度」に沿って、質問の核心に直接的かつ明確に回答します。ユーザーが情報を理解し、活用できるように、具体的で、「分析サマリー」が指示する詳細度で説明を補足し、論理的な順序で構成してください。
@@ -407,7 +535,7 @@ ${analysisSummaryForPrompt}
 6.  自己検証
 
 **重要な指示:**
-*   提供された「分析サマリー」と「背景情報」を最優先の根拠とします。推測や不確実な情報、個人的な意見は決して含めないでください。
+*   提供された「分析サマリー」と「背景情報」、「会話履歴」を最優先の根拠とします。推測や不確実な情報、個人的な意見は決して含めないでください。
 *   もし「分析サマリー」や「背景情報」だけでは答えられない場合や、質問が「背景情報」の内容と明らかに関連がないと判断される場合は、その旨を正直に、そして明確に伝えてください。
 *   回答は必ず日本語で、自然で分かりやすい文章で記述してください。
 *   **最重要:** ユーザーへの回答文には、あなた自身の内部処理、思考プロセス、または「分析サマリー」や「背景情報」といった言葉を含む、内部的な情報源やシステムの存在を示唆するような記述は一切しないでください。あたかもあなたが全ての情報を直接理解し、ユーザーのためだけに回答を生成したかのように、自然に振る舞ってください。
@@ -443,10 +571,13 @@ ${userQuery}
             controller.enqueue(encoder.encode(sourcesSeparator));
             controller.enqueue(encoder.encode(JSON.stringify(sourcesForClient)));
           }
+          
+          // Note: クライアントサイド履歴管理のため、ここでの履歴保存は不要
           console.log("[Phase 3] ストリーミング完了。");
         } catch (e) {
           console.error("[Phase 3] 回答生成ストリーミング中にエラー発生:", e);
-          controller.enqueue(encoder.encode(`\n\nエラー: 回答の生成中に問題が発生しました。詳細: ${e.message}`));
+          const errorMessage = `\n\nエラー: 回答の生成中に問題が発生しました。詳細: ${e.message}`;
+          controller.enqueue(encoder.encode(errorMessage));
         }
         controller.close();
       },
