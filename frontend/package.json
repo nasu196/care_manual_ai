@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@clerk/agent-toolkit": "^0.0.40",
     "@clerk/localizations": "^3.16.2",
     "@clerk/nextjs": "^6.20.0",
     "@langchain/core": "^0.3.57",
