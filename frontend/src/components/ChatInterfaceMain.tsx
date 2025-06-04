@@ -49,6 +49,9 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   // 追加: ユーザーが一番下を見ているかどうかのstate
   const [isAtBottom, setIsAtBottom] = useState(true);
 
+  // ★ ファイル選択状態のチェック
+  const hasSelectedFiles = selectedSourceNames.length > 0;
+
   // sourcesSeparatorを定義
   const sourcesSeparator = "\n\nSOURCES_SEPARATOR_MAGIC_STRING\n\n";
 
@@ -63,6 +66,28 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!inputValue.trim()) return;
+
+    // ★ ファイル選択チェックを追加
+    if (!hasSelectedFiles) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        text: '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
+        isUser: false,
+        timestamp: new Date(),
+        isStreaming: false,
+      };
+
+      const userMessage: Message = {
+        id: (Date.now() - 1).toString(),
+        text: inputValue,
+        isUser: true,
+        timestamp: new Date(),
+      };
+
+      setMessages((prevMessages) => [...prevMessages, userMessage, errorMessage]);
+      setInputValue('');
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -396,7 +421,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
             className="flex-1 h-12 text-base md:h-10 md:text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-gray-300 focus:shadow-none focus-visible:outline-none focus-visible:ring-0"
             disabled={isLoading}
           />
-          <Button type="submit" disabled={isLoading} className="h-12 text-base px-4 md:h-10 md:px-6 md:text-sm">
+          <Button 
+            type="submit" 
+            disabled={isLoading} 
+            className="h-12 text-base px-4 md:h-10 md:px-6 md:text-sm"
+          >
             {isLoading ? '送信中...' : '送信'}
           </Button>
         </form>
