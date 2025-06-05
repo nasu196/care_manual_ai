@@ -14,7 +14,7 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 import { OpenAIEmbeddings } from "npm:@langchain/openai"; // OpenAIEmbeddingsをインポート
 import officeParser from "npm:officeparser";
-import pdfParse from "npm:pdf-parse"; // ★ pdf-parse を直接インポート
+import pdf from "npm:pdf-parse"; // ★ pdf-parse を直接インポート
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -43,26 +43,35 @@ function sanitizeText(text: string): string {
 
 // ★ OCR判定関数：テキスト抽出が不十分かどうかを判定
 function isTextExtractionInsufficient(text: string, numPages: number): boolean {
+  console.log(`[OCR判定] 元テキスト長: ${text.length} 文字`);
+  console.log(`[OCR判定] 元テキスト（最初の200文字）: ${text.substring(0, 200)}...`);
+  
   const cleanText = sanitizeText(text);
   const textLength = cleanText.length;
+  
+  console.log(`[OCR判定] sanitize後テキスト長: ${textLength} 文字`);
+  console.log(`[OCR判定] sanitize後テキスト（最初の200文字）: ${cleanText.substring(0, 200)}...`);
   
   // 判定基準
   const minTextPerPage = 50; // 1ページあたり最低50文字
   const minTotalText = 100;  // 総文字数最低100文字
   
-  console.log(`[OCR判定] テキスト長: ${textLength}, ページ数: ${numPages}, ページあたり: ${Math.round(textLength / Math.max(numPages, 1))}`);
+  const textPerPage = Math.round(textLength / Math.max(numPages, 1));
+  
+  console.log(`[OCR判定] テキスト長: ${textLength}, ページ数: ${numPages}, ページあたり: ${textPerPage}`);
+  console.log(`[OCR判定] 判定基準 - 総文字数: ${minTotalText}以上, ページあたり: ${minTextPerPage}以上`);
   
   if (textLength < minTotalText) {
-    console.log(`[OCR判定] 総文字数不足 (${textLength} < ${minTotalText})`);
+    console.log(`[OCR判定] 総文字数不足 (${textLength} < ${minTotalText}) → OCR実行`);
     return true;
   }
   
-  if (numPages > 0 && (textLength / numPages) < minTextPerPage) {
-    console.log(`[OCR判定] 1ページあたりの文字数不足 (${Math.round(textLength / numPages)} < ${minTextPerPage})`);
+  if (numPages > 0 && textPerPage < minTextPerPage) {
+    console.log(`[OCR判定] 1ページあたりの文字数不足 (${textPerPage} < ${minTextPerPage}) → OCR実行`);
     return true;
   }
   
-  console.log(`[OCR判定] テキスト抽出は十分です`);
+  console.log(`[OCR判定] テキスト抽出は十分です → OCRスキップ`);
   return false;
 }
 
@@ -280,23 +289,58 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     console.log(`一時ファイルとして保存: ${actualTmpFilePath}`);
 
     let docs: Array<{ pageContent: string; metadata: Record<string, unknown> }> = [];
+    let numPages = 0;
+    let textContent = '';
 
     console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Before parsing (${fileExtension}): ${actualTmpFilePath}`); // ★ 追加
     if (fileExtension === '.pdf') {
       console.log("\npdf-parseでドキュメントを読み込み開始...");
+      console.log(`[環境確認] GOOGLE_VISION_API_KEY: ${googleVisionApiKey ? '設定済み' : '未設定'}`);
       try {
-        const pdfData = await pdfParse(fileBuffer); // ★ PDFLoaderの代わりにpdfParseを使用
+        const pdfBuffer = new Uint8Array(fileBuffer);
+        console.log(`[PDF情報] ファイルサイズ: ${pdfBuffer.length} bytes`);
         
-        // pdfDataのnull/undefinedチェック ★
-        if (!pdfData) {
-          throw new Error("pdf-parse returned null/undefined data");
-        }
+        const pdfData = await pdf(pdfBuffer);
         
-        // textプロパティの存在確認 ★
-        let textContent = pdfData.text || '';
-        const numPages = pdfData.numpages || 0;
+        // PDFメタデータの詳細ログ
+        console.log(`[PDF詳細情報]:`);
+        console.log(`  - ページ数: ${pdfData.numpages}`);
+        console.log(`  - バージョン: ${pdfData.version || 'N/A'}`);
+        console.log(`  - 作成者: ${pdfData.info?.Creator || 'N/A'}`);
+        console.log(`  - 作成日: ${pdfData.info?.CreationDate || 'N/A'}`);
+        console.log(`  - 変更日: ${pdfData.info?.ModDate || 'N/A'}`);
+        console.log(`  - セキュリティ: ${pdfData.info?.Security || 'N/A'}`);
+        console.log(`  - PDF Producer: ${pdfData.info?.Producer || 'N/A'}`);
+        console.log(`  - PDF Title: ${pdfData.info?.Title || 'N/A'}`);
         
-        console.log(`PDF解析結果: テキスト長=${textContent.length}文字, ページ数=${numPages}`);
+        // 文字抽出の詳細ログ
+        const rawText = pdfData.text;
+        console.log(`[テキスト抽出結果]:`);
+        console.log(`  - 生テキスト長: ${rawText.length} 文字`);
+        console.log(`  - 最初の500文字: "${rawText.substring(0, 500)}"`);
+        console.log(`  - 最後の500文字: "${rawText.substring(Math.max(0, rawText.length - 500))}"`);
+        
+        // 文字の種類を分析
+        const unicodeRanges = {
+          ascii: /[\x00-\x7F]/g,
+          latin: /[\x80-\xFF]/g,
+          hiragana: /[\u3040-\u309F]/g,
+          katakana: /[\u30A0-\u30FF]/g,
+          kanji: /[\u4E00-\u9FAF]/g,
+          symbols: /[\u2000-\u2BFF]/g,
+          control: /[\x00-\x1F\x7F-\x9F]/g
+        };
+        
+        console.log(`[文字種別分析]:`);
+        Object.entries(unicodeRanges).forEach(([name, regex]) => {
+          const matches = rawText.match(regex);
+          const count = matches ? matches.length : 0;
+          const percentage = rawText.length > 0 ? (count / rawText.length * 100).toFixed(2) : '0.00';
+          console.log(`  - ${name}: ${count}文字 (${percentage}%)`);
+        });
+        
+                 numPages = pdfData.numpages;
+         textContent = rawText;
         
         // ★ OCR判定とOCR処理の統合
         if (isTextExtractionInsufficient(textContent, numPages)) {
