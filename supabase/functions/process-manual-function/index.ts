@@ -21,6 +21,8 @@ import { Buffer } from "node:buffer";
 import "npm:dotenv/config";
 import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai"; // ★ 追加
 import { corsHeaders } from '../_shared/cors.ts'; // ★ CORSヘッダーをインポート
+import { GoogleAuth } from 'npm:google-auth-library'; // npmモジュールをインポート
+import { encode } from "https://deno.land/std@0.208.0/encoding/base64.ts"; // Deno標準のBase64エンコーダー
 
 // ★ テキストサニタイズ関数を追加
 function sanitizeText(text: string): string {
@@ -248,6 +250,93 @@ interface ChunkObject {
     embedding?: number[]; // embeddingはベクトル化後に設定される
 }
 
+// Document AI Processor の情報を設定
+const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
+const GOOGLE_CLIENT_EMAIL = Deno.env.get('GOOGLE_CLIENT_EMAIL');
+// Supabaseの環境変数で \n が \\n になっている場合を考慮し、実際の改行に戻す
+const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\\n');
+
+const DOC_AI_LOCATION = 'us'; // 例: 'us' や 'eu' など、プロセッサを作成したリージョン
+const DOC_AI_PROCESSOR_ID = Deno.env.get('DOC_AI_PROCESSOR_ID'); // SupabaseのSecretsに設定したプロセッサID
+
+if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI_PROCESSOR_ID) {
+  console.error("Missing Google Cloud credentials or Document AI Processor ID in environment variables.");
+  // 起動時にエラーにするか、リクエスト時にエラーレスポンスを返すかは設計による
+  // ここでは起動時のログ出力に留めるが、実際のリクエスト処理前にもチェック推奨
+}
+
+const auth = new GoogleAuth({
+  credentials: {
+    client_email: GOOGLE_CLIENT_EMAIL,
+    private_key: GOOGLE_PRIVATE_KEY,
+  },
+  scopes: 'https://www.googleapis.com/auth/cloud-platform',
+});
+
+async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: string): Promise<string | null> {
+  if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI_PROCESSOR_ID) {
+    console.error("Google Cloud credentials or Document AI Processor ID not configured.");
+    throw new Error("Document AI OCR not configured.");
+  }
+  if (!fileContentBase64 || !mimeType) {
+    throw new Error('Missing fileContentBase64 or mimeType for Document AI');
+  }
+
+  console.log('[Auth] Obtaining access token for Document AI...');
+  const client = await auth.getClient();
+  const accessToken = (await client.getAccessToken()).token;
+  console.log('[Auth] Access token obtained for Document AI.');
+
+  if (!accessToken) {
+    throw new Error('Failed to obtain access token for Document AI');
+  }
+
+  const endpoint = `https://${DOC_AI_LOCATION}-documentai.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${DOC_AI_LOCATION}/processors/${DOC_AI_PROCESSOR_ID}:process`;
+
+  console.log(`[DocumentAI] Processing document. Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
+
+  const requestBody = {
+    rawDocument: {
+      content: fileContentBase64,
+      mimeType: mimeType,
+    },
+    // 必要に応じて Human Review をスキップする設定などを追加
+    // processOptions: {
+    //   ocrConfig: {
+    //     enableNativePdfParsing: true, // PDFの場合、より高品質な結果を得るために推奨されることがある
+    //     // enableImageQualityScores: true,
+    //   }
+    // },
+    // skipHumanReview: true,
+  };
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json', // レスポンス形式を明示
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  console.log(`[DocumentAI] Response status: ${response.status}`);
+  const responseData = await response.json();
+
+  if (!response.ok) {
+    console.error('[DocumentAI] Error response:', JSON.stringify(responseData, null, 2));
+    throw new Error(responseData.error?.message || `Document AI API request failed with status ${response.status}`);
+  }
+
+  const extractedText = responseData.document?.text;
+  console.log('[DocumentAI] Extracted text length:', extractedText?.length || 0);
+  if (extractedText && extractedText.length > 0) {
+    console.log('[DocumentAI] Extracted text snippet:', extractedText.substring(0, 200) + "...");
+  }
+
+  return extractedText || null;
+}
+
 async function downloadAndProcessFile(fileName: string, supabaseClient: SupabaseClient) {
   if (!supabaseClient) throw new Error("Supabase client not initialized");
   
@@ -294,88 +383,35 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
     console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Before parsing (${fileExtension}): ${actualTmpFilePath}`); // ★ 追加
     if (fileExtension === '.pdf') {
-      console.log("\npdf-parseでドキュメントを読み込み開始...");
-      console.log(`[環境確認] GOOGLE_VISION_API_KEY: ${googleVisionApiKey ? '設定済み' : '未設定'}`);
+      console.log("[Process] Processing PDF with Document AI...");
       try {
-        const pdfBuffer = new Uint8Array(fileBuffer);
-        console.log(`[PDF情報] ファイルサイズ: ${pdfBuffer.length} bytes`);
+        // fileBuffer は ArrayBuffer なので、Uint8Array に変換し、その後 Base64 文字列にエンコードする
+        const uint8Array = new Uint8Array(fileBuffer);
+        const fileContentBase64 = encode(uint8Array); // encode は既にインポートされている想定
+
+        const rawExtractedText = await extractTextWithDocumentAI(fileContentBase64, 'application/pdf');
         
-        const pdfData = await pdf(pdfBuffer);
-        
-        // PDFメタデータの詳細ログ
-        console.log(`[PDF詳細情報]:`);
-        console.log(`  - ページ数: ${pdfData.numpages}`);
-        console.log(`  - バージョン: ${pdfData.version || 'N/A'}`);
-        console.log(`  - 作成者: ${pdfData.info?.Creator || 'N/A'}`);
-        console.log(`  - 作成日: ${pdfData.info?.CreationDate || 'N/A'}`);
-        console.log(`  - 変更日: ${pdfData.info?.ModDate || 'N/A'}`);
-        console.log(`  - セキュリティ: ${pdfData.info?.Security || 'N/A'}`);
-        console.log(`  - PDF Producer: ${pdfData.info?.Producer || 'N/A'}`);
-        console.log(`  - PDF Title: ${pdfData.info?.Title || 'N/A'}`);
-        
-        // 文字抽出の詳細ログ
-        const rawText = pdfData.text;
-        console.log(`[テキスト抽出結果]:`);
-        console.log(`  - 生テキスト長: ${rawText.length} 文字`);
-        console.log(`  - 最初の500文字: "${rawText.substring(0, 500)}"`);
-        console.log(`  - 最後の500文字: "${rawText.substring(Math.max(0, rawText.length - 500))}"`);
-        
-        // 文字の種類を分析
-        const unicodeRanges = {
-          ascii: /[\x00-\x7F]/g,
-          latin: /[\x80-\xFF]/g,
-          hiragana: /[\u3040-\u309F]/g,
-          katakana: /[\u30A0-\u30FF]/g,
-          kanji: /[\u4E00-\u9FAF]/g,
-          symbols: /[\u2000-\u2BFF]/g,
-          control: /[\x00-\x1F\x7F-\x9F]/g
-        };
-        
-        console.log(`[文字種別分析]:`);
-        Object.entries(unicodeRanges).forEach(([name, regex]) => {
-          const matches = rawText.match(regex);
-          const count = matches ? matches.length : 0;
-          const percentage = rawText.length > 0 ? (count / rawText.length * 100).toFixed(2) : '0.00';
-          console.log(`  - ${name}: ${count}文字 (${percentage}%)`);
-        });
-        
-                 numPages = pdfData.numpages;
-         textContent = rawText;
-        
-        // ★ OCR判定とOCR処理の統合
-        if (isTextExtractionInsufficient(textContent, numPages)) {
-          console.log(`[OCR] PDFテキスト抽出が不十分です。OCR処理を実行します...`);
-          
-          const ocrText = await performOCROnPdf(fileBuffer.buffer);
-          if (ocrText && ocrText.length > 0) {
-            console.log(`[OCR] OCR完了: ${ocrText.length}文字追加`);
-            // 既存テキストとOCRテキストを統合
-            textContent = textContent.length > 0 ? 
-              `${textContent}\n\n[OCR抽出テキスト]\n${ocrText}` : 
-              ocrText;
-            console.log(`[OCR] 統合後テキスト長: ${textContent.length}文字`);
-          } else {
-            console.warn(`[OCR] OCR処理に失敗したか、テキストが検出されませんでした`);
-          }
+        if (rawExtractedText && rawExtractedText.trim().length > 0) {
+          textContent = sanitizeText(rawExtractedText);
+          console.log(`[Process] Text extracted via Document AI. Length: ${textContent.length}`);
+        } else {
+          console.warn("[Process] Document AI OCR resulted in empty or whitespace-only text for PDF.");
+          textContent = "";
         }
-        
-        if (textContent.length === 0) {
-          console.warn("PDFからテキストが抽出されませんでした。画像のみのPDFか、テキスト抽出に失敗した可能性があります。");
+      } catch (e) {
+        if (e instanceof Error) {
+          console.error(`[Process] Error processing PDF with Document AI: ${e.message}`, e.stack);
+          docs.push({
+            pageContent: `Error processing PDF with Document AI: ${e.message}`,
+            metadata: { source: actualTmpFilePath, type: 'error', error_details: e.stack }
+          });
+        } else {
+          console.error(`[Process] Unknown error processing PDF with Document AI:`, e);
+          docs.push({
+            pageContent: `Error processing PDF with Document AI: An unknown error occurred.`,
+            metadata: { source: actualTmpFilePath, type: 'error', error_details: String(e) }
+          });
         }
-        
-        docs = [{
-          pageContent: textContent,
-          metadata: { 
-              source: fileName, 
-              type: 'pdf',
-              totalPages: numPages,
-              hasOCR: textContent.includes('[OCR抽出テキスト]'), // ★ OCR使用フラグ
-          }
-        }];
-        console.log(`ドキュメントの読み込み完了。合計 ${numPages} ページ (テキストは結合)。`);
-      } catch (pdfError) {
-        console.error(`PDF処理中にエラーが発生しました:`, pdfError);
-        throw new Error(`PDF processing failed: ${pdfError instanceof Error ? pdfError.message : 'Unknown error'}`);
       }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
@@ -1055,3 +1091,12 @@ console.log("Process manual function (Deno native HTTP) server running!");
     Or using PowerShell:
     Invoke-WebRequest -Uri 'http://localhost:8000/process-manual-function' -Method POST -ContentType 'application/json\' -Body \'{"fileName":"your-file-in-storage.pdf"}\'
   */
+
+// Base64文字列かどうかを簡易的にチェックするヘルパー関数 (必要なら)
+function isBase64(str: string): boolean {
+  if (typeof str !== 'string') return false;
+  // Base64の基本的な文字セットとパディングのチェック（完全ではないが簡易的なもの）
+  const base64Regex = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+  // さらに、文字列長が4の倍数であることも条件の一つ
+  return base64Regex.test(str) && str.length % 4 === 0;
+}
