@@ -258,7 +258,8 @@ interface ChunkObject {
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const GOOGLE_CLIENT_EMAIL = Deno.env.get('GOOGLE_CLIENT_EMAIL');
 // Supabaseの環境変数で \n が \\n になっている場合を考慮し、実際の改行に戻す
-const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\\n');
+// const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\n'); // 一時的にコメントアウト
+const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY'); // replace処理を削除して直接取得
 
 const DOC_AI_LOCATION = 'us'; // 例: 'us' や 'eu' など、プロセッサを作成したリージョン
 const DOC_AI_PROCESSOR_ID = Deno.env.get('DOC_AI_PROCESSOR_ID'); // SupabaseのSecretsに設定したプロセッサID
