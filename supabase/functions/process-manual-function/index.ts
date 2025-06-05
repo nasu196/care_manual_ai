@@ -102,6 +102,7 @@ function convertPdfPageToImage(pdfBuffer: ArrayBuffer, _pageNumber: number = 1):
 }
 
 // ★ Google Vision API OCR実行関数
+/* // ★ コメントアウト開始
 async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
   if (!googleVisionApiKey) {
     console.warn(`[OCR] Google Vision API キーが設定されていないため、OCRをスキップします`);
@@ -203,12 +204,13 @@ async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
     return null;
   }
 }
+*/ // ★ コメントアウト終了
 
 // Supabaseクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-const googleVisionApiKey = Deno.env.get("GOOGLE_VISION_API_KEY"); // ★ Google Vision API キーを追加
+// const googleVisionApiKey = Deno.env.get("GOOGLE_VISION_API_KEY"); // ★ Google Vision API キーをコメントアウト
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY"); // OpenAI APIキーを追加
 
 if (!supabaseUrl || !supabaseAnonKey) {
@@ -217,9 +219,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 if (!geminiApiKey) {
   console.error("エラー: GEMINI_API_KEY が環境変数に設定されていません。");
 }
+/* // ★ コメントアウト開始
 if (!googleVisionApiKey) {
   console.warn("警告: GOOGLE_VISION_API_KEY が環境変数に設定されていません。OCR機能は無効になります。");
 }
+*/ // ★ コメントアウト終了
 if (!openaiApiKey) { // OpenAI APIキーのチェックを追加
   console.warn("警告: OPENAI_API_KEY が環境変数に設定されていません。OpenAIを使用する場合は設定してください。");
 }
@@ -260,7 +264,12 @@ const DOC_AI_LOCATION = 'us'; // 例: 'us' や 'eu' など、プロセッサを�
 const DOC_AI_PROCESSOR_ID = Deno.env.get('DOC_AI_PROCESSOR_ID'); // SupabaseのSecretsに設定したプロセッサID
 
 if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI_PROCESSOR_ID) {
-  console.error("Missing Google Cloud credentials or Document AI Processor ID in environment variables.");
+  let errorMessage = "Missing Google Cloud credentials or Document AI Processor ID. Please check the following environment variables:";
+  if (!GOOGLE_PROJECT_ID) errorMessage += "\n- GOOGLE_PROJECT_ID";
+  if (!GOOGLE_CLIENT_EMAIL) errorMessage += "\n- GOOGLE_CLIENT_EMAIL";
+  if (!GOOGLE_PRIVATE_KEY) errorMessage += "\n- GOOGLE_PRIVATE_KEY";
+  if (!DOC_AI_PROCESSOR_ID) errorMessage += "\n- DOC_AI_PROCESSOR_ID";
+  console.error(errorMessage);
   // 起動時にエラーにするか、リクエスト時にエラーレスポンスを返すかは設計による
   // ここでは起動時のログ出力に留めるが、実際のリクエスト処理前にもチェック推奨
 }
