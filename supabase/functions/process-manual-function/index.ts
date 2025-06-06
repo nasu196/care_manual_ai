@@ -276,11 +276,14 @@ if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI
 }
 
 const auth = new GoogleAuth({
+  projectId: GOOGLE_PROJECT_ID,
   credentials: {
+    type: "service_account",
+    project_id: GOOGLE_PROJECT_ID,
     client_email: GOOGLE_CLIENT_EMAIL,
     private_key: GOOGLE_PRIVATE_KEY,
   },
-  scopes: 'https://www.googleapis.com/auth/cloud-platform',
+  scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
 
 async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: string): Promise<string | null> {
@@ -293,9 +296,19 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
   }
 
   console.log('[Auth] Obtaining access token for Document AI...');
-  const client = await auth.getClient();
-  const accessToken = (await client.getAccessToken()).token;
-  console.log('[Auth] Access token obtained for Document AI.');
+  console.log('[Debug] Project ID:', GOOGLE_PROJECT_ID?.substring(0, 10) + '***');
+  console.log('[Debug] Client Email Domain:', GOOGLE_CLIENT_EMAIL?.split('@')[1]);
+  console.log('[Debug] Private Key starts with:', GOOGLE_PRIVATE_KEY?.substring(0, 30) + '***');
+  
+  let accessToken: string | null = null;
+  try {
+    const client = await auth.getClient();
+    accessToken = (await client.getAccessToken()).token || null;
+    console.log('[Auth] Access token obtained for Document AI.');
+  } catch (authError) {
+    console.error('[Auth] Authentication failed:', authError);
+    throw authError;
+  }
 
   if (!accessToken) {
     throw new Error('Failed to obtain access token for Document AI');
