@@ -24,26 +24,91 @@ import { corsHeaders } from '../_shared/cors.ts'; // ★ CORSヘッダーをイ�
 import { GoogleAuth } from 'npm:google-auth-library'; // npmモジュールをインポート
 import { encode } from "https://deno.land/std@0.208.0/encoding/base64.ts"; // Deno標準のBase64エンコーダー
 
-// ★ テキストサニタイズ関数を追加
+// ★ テキストサニタイズ関数（厳格版）- OCRノイズ対応
 function sanitizeText(text: string): string {
   if (!text || typeof text !== 'string') {
     return '';
   }
   
-  return text
-    // NULL文字を除去
+  console.log(`[Sanitize] Before: ${text.length} chars`);
+  
+  let cleaned = text
+    // 1. NULL文字と制御文字を除去
     // deno-lint-ignore no-control-regex
-    .replace(/\u0000/g, '')
-    // その他の制御文字を除去（改行・タブ・スペースは保持）
-    // deno-lint-ignore no-control-regex
-    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-    // 連続する空白を単一スペースに変換
-    .replace(/\s+/g, ' ')
-    // 前後の空白を除去
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
+    
+    // 2. OCRで頻繁に出現する意味のない記号・文字を除去
+    .replace(/[▪▫■□●○◆◇▲△▼▽★☆※]/g, '')
+    .replace(/[｜￨∣]/g, '') // 縦線系
+    .replace(/[－―‐‑‒–—]/g, '-') // ダッシュ系を統一
+    .replace(/[''""]/g, '"') // クォート系を統一
+    
+    // 3. 繰り返し記号（OCRエラーで発生しやすい）を制限
+    .replace(/(.)\1{4,}/g, '$1$1$1') // 同じ文字が5回以上繰り返される場合は3文字に制限
+    
+    // 4. 意味のない短い断片を除去（1文字だけの行など）
+    .replace(/\n\s*[^\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]\s*\n/g, '\n')
+    
+    // 5. 不要な特殊文字・記号を除去（ただし基本的な句読点は保持）
+    .replace(/[\\|~`\^{}\[\]<>]/g, '')
+    .replace(/[＜＞｛｝［］]/g, '')
+    
+    // 6. 連続する句読点を制限
+    .replace(/[。、]{3,}/g, '。')
+    .replace(/[!！]{2,}/g, '!')
+    .replace(/[?？]{2,}/g, '?')
+    
+    // 7. 空白・改行の正規化
+    .replace(/[\t\u00A0\u2000-\u200B\u2028-\u2029\u3000]/g, ' ') // 各種空白文字を通常スペースに統一
+    .replace(/\r\n/g, '\n') // 改行統一
+    .replace(/\r/g, '\n')
+    .replace(/\n{3,}/g, '\n\n') // 3行以上の連続改行を2行に制限
+    .replace(/[ \t]+/g, ' ') // 連続するスペース・タブを単一スペースに
+    .replace(/[ ]*\n[ ]*/g, '\n') // 行の前後の不要スペースを除去
+    
+    // 8. 前後の空白を除去
     .trim();
+    
+  // 9. 意味のない短い単語の除去（OCRノイズ対策）
+  const lines = cleaned.split('\n');
+  const meaningfulLines = lines.filter(line => {
+    const trimmedLine = line.trim();
+    // 空行はスキップ
+    if (!trimmedLine) return true;
+    
+    // 1文字だけの行で、かつ文字・数字・基本的な句読点以外はスキップ
+    if (trimmedLine.length === 1 && !/[a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF。、！？]/.test(trimmedLine)) {
+      return false;
+    }
+    
+    // 2文字以下で、意味のない記号のみの行はスキップ
+    if (trimmedLine.length <= 2 && !/[a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(trimmedLine)) {
+      return false;
+    }
+    
+    return true;
+  });
+  
+  const finalText = meaningfulLines.join('\n').trim();
+  
+  console.log(`[Sanitize] After: ${finalText.length} chars (removed ${text.length - finalText.length} chars)`);
+  console.log(`[Sanitize] Sample output: ${finalText.substring(0, 100)}...`);
+  
+  return finalText;
 }
 
-// ★ OCR判定関数：テキスト抽出が不十分かどうかを判定
+// ★ 意味のあるテキスト判定関数
+function calculateMeaningfulTextRatio(text: string): number {
+  if (!text) return 0;
+  
+  // 意味のある文字（日本語、英語、数字、基本的な句読点）をカウント
+  const meaningfulChars = text.match(/[a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF。、！？\.\,\!\?]/g) || [];
+  const totalChars = text.length;
+  
+  return totalChars > 0 ? meaningfulChars.length / totalChars : 0;
+}
+
+// ★ OCR判定関数：テキスト抽出が不十分かどうかを判定（厳格化版）
 function isTextExtractionInsufficient(text: string, numPages: number): boolean {
   console.log(`[OCR判定] 元テキスト長: ${text.length} 文字`);
   console.log(`[OCR判定] 元テキスト（最初の200文字）: ${text.substring(0, 200)}...`);
@@ -54,14 +119,19 @@ function isTextExtractionInsufficient(text: string, numPages: number): boolean {
   console.log(`[OCR判定] sanitize後テキスト長: ${textLength} 文字`);
   console.log(`[OCR判定] sanitize後テキスト（最初の200文字）: ${cleanText.substring(0, 200)}...`);
   
-  // 判定基準
-  const minTextPerPage = 50; // 1ページあたり最低50文字
-  const minTotalText = 100;  // 総文字数最低100文字
+  // 意味のあるテキスト率をチェック
+  const meaningfulRatio = calculateMeaningfulTextRatio(cleanText);
+  console.log(`[OCR判定] 意味のあるテキスト率: ${(meaningfulRatio * 100).toFixed(1)}%`);
+  
+     // 判定基準（サニタイズ厳格化 + 意味のあるテキスト率追加）
+   const minTextPerPage = 50; // 1ページあたり最低50文字（パワポ等を考慮）
+   const minTotalText = 100;  // 総文字数最低100文字（パワポ等を考慮）
+   const minMeaningfulRatio = 0.6; // 意味のあるテキスト率60%以上（OCRノイズ対策の新規追加）
   
   const textPerPage = Math.round(textLength / Math.max(numPages, 1));
   
   console.log(`[OCR判定] テキスト長: ${textLength}, ページ数: ${numPages}, ページあたり: ${textPerPage}`);
-  console.log(`[OCR判定] 判定基準 - 総文字数: ${minTotalText}以上, ページあたり: ${minTextPerPage}以上`);
+  console.log(`[OCR判定] 判定基準 - 総文字数: ${minTotalText}以上, ページあたり: ${minTextPerPage}以上, 意味のあるテキスト率: ${(minMeaningfulRatio * 100).toFixed(1)}%以上`);
   
   if (textLength < minTotalText) {
     console.log(`[OCR判定] 総文字数不足 (${textLength} < ${minTotalText}) → OCR実行`);
@@ -70,6 +140,11 @@ function isTextExtractionInsufficient(text: string, numPages: number): boolean {
   
   if (numPages > 0 && textPerPage < minTextPerPage) {
     console.log(`[OCR判定] 1ページあたりの文字数不足 (${textPerPage} < ${minTextPerPage}) → OCR実行`);
+    return true;
+  }
+  
+  if (meaningfulRatio < minMeaningfulRatio) {
+    console.log(`[OCR判定] 意味のあるテキスト率不足 (${(meaningfulRatio * 100).toFixed(1)}% < ${(minMeaningfulRatio * 100).toFixed(1)}%) → OCR実行`);
     return true;
   }
   
@@ -285,7 +360,14 @@ console.log('[Auth] Testing with minimal service account credentials:');
 console.log('- project_id:', serviceAccountCredentials.project_id ? 'SET' : 'MISSING');
 console.log('- client_email:', serviceAccountCredentials.client_email ? 'SET' : 'MISSING');
 console.log('- private_key length:', serviceAccountCredentials.private_key?.length || 0);
-console.log('[Debug] Full client email:', GOOGLE_CLIENT_EMAIL);
+  console.log('[Debug] Full client email:', GOOGLE_CLIENT_EMAIL);
+  console.log('[Debug] Expected service accounts:');
+  console.log('  - care-manual-ai-vertex-user@gen-lang-client-000238207.iam.gserviceaccount.com');
+  console.log('  - doc-ai-processor-caller@gen-lang-client-000238207.iam.gserviceaccount.com');
+  console.log('[Debug] Current client email matches expected?', 
+    GOOGLE_CLIENT_EMAIL === 'care-manual-ai-vertex-user@gen-lang-client-000238207.iam.gserviceaccount.com' ||
+    GOOGLE_CLIENT_EMAIL === 'doc-ai-processor-caller@gen-lang-client-000238207.iam.gserviceaccount.com'
+  );
 
 // 認証テスト：まずは最小構成で試す
 const auth = new GoogleAuth({
@@ -452,30 +534,37 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
              textContent = sanitizeText(pdfData.text);
              console.log(`[Process] PDF processed successfully with pdf-parse. Pages: ${numPages}, Text length: ${textContent.length}`);
            } else {
-             console.warn("[Process] pdf-parse resulted in empty text, creating placeholder document");
-             textContent = `PDFファイル（${fileName}）からテキストを抽出できませんでした。画像ベースのPDFまたは特殊な形式の可能性があります。`;
+             console.error("[Process] pdf-parse resulted in empty text. Both Document AI and pdf-parse failed to extract meaningful content.");
+             throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。画像ベースのPDFまたは特殊な形式のため、AIが回答できるコンテンツを作成できません。`);
            }
          } catch (pdfParseError) {
            console.error(`[Process] pdf-parse also failed:`, pdfParseError);
-           // 両方失敗した場合の処理
-           const errorMessage = `PDFの処理に失敗しました（Document AI認証エラー、pdf-parse処理エラー）。ファイル: ${fileName}`;
-           textContent = errorMessage;
-           console.log(`[Process] Setting fallback error message: ${errorMessage}`);
+           // 両方失敗した場合は処理を中断
+           if (pdfParseError instanceof Error && pdfParseError.message.includes('からテキストを抽出できませんでした')) {
+             // 上記で投げたエラーをそのまま再スロー
+             throw pdfParseError;
+           } else {
+             // pdf-parse自体のエラー
+             throw new Error(`ファイル「${fileName}」の処理に失敗しました。Document AIとpdf-parseの両方でエラーが発生したため、AIが回答できるコンテンツを作成できません。`);
+           }
          }
        }
        
-       // 常にdocsを構築（textContentが空でも処理可能にする）
-       if (textContent || fileExtension === '.pdf') {
+       // テキスト抽出が成功した場合のみdocsを構築
+       if (textContent && textContent.trim().length > 0) {
          docs = [{
-           pageContent: textContent || `PDFファイル（${fileName}）の処理が完了しましたが、テキストが抽出されませんでした。`,
+           pageContent: textContent,
            metadata: {
              source: fileName,
              type: 'pdf',
              pages: numPages || 1,
-             processing_status: textContent && textContent.trim().length > 0 ? 'success' : 'partial_failure'
+             processing_status: 'success'
            }
          }];
-         console.log(`[Process] PDF docs created. Content length: ${docs[0].pageContent.length}, Status: ${docs[0].metadata.processing_status}`);
+         console.log(`[Process] PDF docs created successfully. Content length: ${docs[0].pageContent.length}`);
+       } else {
+         // テキストが抽出できない場合は処理を中断
+         throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。AIが回答に使用できるコンテンツが含まれていません。`);
        }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
@@ -515,15 +604,21 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
         }
       });
       
-      // 最終的なdataの検証 ★
+      // データの検証と処理判定 ★
       const validData = data || '';
       console.log(`${fileExtension} ファイルのテキスト抽出完了。文字数: ${validData.length}`);
+      
+      // テキストが抽出できない場合は処理を中断
+      if (!validData || validData.trim().length === 0) {
+        throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。${fileExtension}ファイルの内容が読み取れないため、AIが回答できるコンテンツを作成できません。`);
+      }
       
       docs = [{
         pageContent: validData,
         metadata: {
           source: fileName,
           type: fileExtension.substring(1),
+          processing_status: 'success'
         }
       }];
     } else {
