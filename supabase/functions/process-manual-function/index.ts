@@ -377,21 +377,31 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
 
   const endpoint = `https://${DOC_AI_LOCATION}-documentai.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${DOC_AI_LOCATION}/processors/${DOC_AI_PROCESSOR_ID}:process`;
 
-  console.log(`[DocumentAI] Processing document. Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
+  console.log(`[DocumentAI] Processing document with imageless mode (30 pages limit). Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
 
   const requestBody = {
     rawDocument: {
       content: fileContentBase64,
       mimeType: mimeType,
     },
-    // 必要に応じて Human Review をスキップする設定などを追加
-    // processOptions: {
-    //   ocrConfig: {
-    //     enableNativePdfParsing: true, // PDFの場合、より高品質な結果を得るために推奨されることがある
-    //     // enableImageQualityScores: true,
-    //   }
-    // },
-    // skipHumanReview: true,
+    // ★ imageless mode を指定して30ページ制限に対応
+    processOptions: {
+      ocrConfig: {
+        enableNativePdfParsing: true,
+        enableImageQualityScores: false,
+        enableSymbol: false,
+        computeStyleInfo: false,
+        disableCharacterBoxesDetection: true, // ★ imageless mode用設定
+      },
+      layoutConfig: {
+        chunkingConfig: {
+          includeAncestorHeadings: false,
+        }
+      }
+    },
+    // ★ imageless mode を明示的に指定
+    imagelessMode: true,
+    skipHumanReview: true,
   };
 
   const response = await fetch(endpoint, {
