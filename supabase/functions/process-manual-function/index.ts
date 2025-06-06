@@ -1086,7 +1086,34 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         }
 
         // 2. Manualレコードと関連チャンクの削除
-        console.log(`[Handler] Cleanup check: manualIdForRollback=${manualIdForRollback}`);
+        console.log(`[Handler] Cleanup check: manualIdForRollback=${manualIdForRollback}, fileName=${fileNameForRollback}`);
+        
+        // manualIdForRollbackがない場合は、ファイル名から検索して削除
+        // セキュリティ: user_idでフィルタリングするため、他のユーザーのファイルは絶対に削除されない
+        if (!manualIdForRollback && fileNameForRollback && supabaseClient) {
+          console.log(`[Handler] SEARCHING for manual by fileName: ${fileNameForRollback} for user: ${userId}`);
+          try {
+            const expectedStoragePath = `${BUCKET_NAME}/${fileNameForRollback}`;
+            const { data: foundManual, error: searchError } = await supabaseClient
+              .from('manuals')
+              .select('id')
+              .eq('storage_path', expectedStoragePath)
+              .eq('user_id', userId) // 重要: 現在のユーザーのファイルのみ検索・削除
+              .single();
+            
+            if (searchError && searchError.code !== 'PGRST116') {
+              console.error(`[Handler] Error searching for manual:`, searchError);
+            } else if (foundManual && foundManual.id) {
+              console.log(`[Handler] Found manual to cleanup: ${foundManual.id}`);
+              manualIdForRollback = foundManual.id;
+            } else {
+              console.log(`[Handler] No manual found for cleanup`);
+            }
+          } catch (searchErr) {
+            console.error(`[Handler] Exception while searching for manual:`, searchErr);
+          }
+        }
+        
         if (manualIdForRollback && supabaseClient) {
           console.log(`[Handler] EXECUTING DB CLEANUP for manual_id=${manualIdForRollback}`);
           try {
@@ -1119,7 +1146,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             console.error(`[Handler] Exception during DB cleanup:`, dbDeleteError);
           }
         } else {
-          console.log(`[Handler] SKIPPING DB CLEANUP: No manualIdForRollback available`);
+          console.log(`[Handler] SKIPPING DB CLEANUP: No manual found for cleanup`);
         }
 
         const message = error instanceof Error ? error.message : "ファイル処理中に予期しないエラーが発生しました。";
