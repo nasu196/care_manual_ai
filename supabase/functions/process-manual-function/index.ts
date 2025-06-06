@@ -273,27 +273,21 @@ if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI
   console.error(errorMessage);
 }
 
-// 完全なサービスアカウント認証情報を構築
+// シンプルなサービスアカウント認証情報（最小構成でテスト）
 const serviceAccountCredentials = {
   type: "service_account",
   project_id: GOOGLE_PROJECT_ID,
-  private_key_id: GOOGLE_PRIVATE_KEY_ID,
   private_key: GOOGLE_PRIVATE_KEY,
   client_email: GOOGLE_CLIENT_EMAIL,
-  client_id: GOOGLE_CLIENT_ID,
-  auth_uri: "https://accounts.google.com/o/oauth2/auth",
-  token_uri: "https://oauth2.googleapis.com/token",
-  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-  client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${encodeURIComponent(GOOGLE_CLIENT_EMAIL || '')}`,
 };
 
-console.log('[Auth] Service account credentials configured:');
+console.log('[Auth] Testing with minimal service account credentials:');
 console.log('- project_id:', serviceAccountCredentials.project_id ? 'SET' : 'MISSING');
-console.log('- private_key_id:', serviceAccountCredentials.private_key_id ? 'SET' : 'MISSING');
 console.log('- client_email:', serviceAccountCredentials.client_email ? 'SET' : 'MISSING');
-console.log('- client_id:', serviceAccountCredentials.client_id ? 'SET' : 'MISSING');
 console.log('- private_key length:', serviceAccountCredentials.private_key?.length || 0);
+console.log('[Debug] Full client email:', GOOGLE_CLIENT_EMAIL);
 
+// 認証テスト：まずは最小構成で試す
 const auth = new GoogleAuth({
   projectId: GOOGLE_PROJECT_ID,
   credentials: serviceAccountCredentials,
