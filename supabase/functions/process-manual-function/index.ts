@@ -6,7 +6,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import "npm:pdf-parse";
 
-console.log("Hello from Functions!")
+console.log("Hello from Functions! - Clean version deployed")
 
 import { serve, ConnInfo } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -1084,7 +1084,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
 serve(handler);
 
-console.log("Process manual function (Deno native HTTP) server running!");
+console.log("Process manual function (Deno native HTTP) server running! - Clean reset version");
 
 /* To invoke locally:
 
