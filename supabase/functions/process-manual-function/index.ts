@@ -865,33 +865,43 @@ async function processAndStoreDocuments(
     }
     
     // エラー時のクリーンアップ処理：新規作成したmanualレコードがある場合は削除
+    console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Cleanup check: manualId=${manualId}, existingManual=${!!existingManual}`);
+    
     if (manualId && !existingManual) {
-      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Cleaning up newly created manual (ID: ${manualId}) due to error`);
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] EXECUTING CLEANUP for newly created manual (ID: ${manualId}) due to error`);
       try {
         // まずチャンクを削除
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 1: Deleting chunks for manual_id=${manualId}`);
         const { error: deleteChunksError } = await supabaseClient
           .from('manual_chunks')
           .delete()
           .eq('manual_id', manualId);
         
         if (deleteChunksError && !deleteChunksError.message?.includes("Not Found")) {
-          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error deleting chunks during cleanup:`, deleteChunksError);
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] ERROR deleting chunks during cleanup:`, deleteChunksError);
+        } else {
+          console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully deleted chunks for manual_id=${manualId}`);
         }
 
         // 次にmanualレコードを削除
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 2: Deleting manual record with id=${manualId}`);
         const { error: deleteManualError } = await supabaseClient
           .from('manuals')
           .delete()
           .eq('id', manualId);
         
         if (deleteManualError && !deleteManualError.message?.includes("Not Found")) {
-          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error deleting manual during cleanup:`, deleteManualError);
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] ERROR deleting manual during cleanup:`, deleteManualError);
         } else {
           console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully cleaned up manual (ID: ${manualId})`);
         }
       } catch (cleanupError) {
-        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error during cleanup:`, cleanupError);
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Exception during cleanup:`, cleanupError);
       }
+    } else if (manualId && existingManual) {
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] SKIPPING CLEANUP: Manual ${manualId} already existed, not deleting`);
+    } else {
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] SKIPPING CLEANUP: No manualId available for cleanup`);
     }
     
     return null; // ★ エラー時はnullを返す
@@ -1076,34 +1086,40 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         }
 
         // 2. Manualレコードと関連チャンクの削除
+        console.log(`[Handler] Cleanup check: manualIdForRollback=${manualIdForRollback}`);
         if (manualIdForRollback && supabaseClient) {
+          console.log(`[Handler] EXECUTING DB CLEANUP for manual_id=${manualIdForRollback}`);
           try {
             // まずチャンクを削除
+            console.log(`[Handler] Step 1: Deleting chunks for manual_id=${manualIdForRollback}`);
             const { error: deleteChunksError } = await supabaseClient
               .from('manual_chunks')
               .delete()
               .eq('manual_id', manualIdForRollback);
             
             if (deleteChunksError && !deleteChunksError.message?.includes("Not Found")) {
-              console.error(`エラー時のチャンク削除エラー:`, deleteChunksError);
+              console.error(`[Handler] ERROR deleting chunks:`, deleteChunksError);
             } else {
-              console.log(`エラー発生のため、作成されたチャンクを削除しました`);
+              console.log(`[Handler] Successfully deleted chunks for manual_id=${manualIdForRollback}`);
             }
 
             // 次にmanualレコードを削除
+            console.log(`[Handler] Step 2: Deleting manual record with id=${manualIdForRollback}`);
             const { error: deleteManualError } = await supabaseClient
               .from('manuals')
               .delete()
               .eq('id', manualIdForRollback);
             
             if (deleteManualError && !deleteManualError.message?.includes("Not Found")) {
-              console.error(`エラー時のmanual削除エラー:`, deleteManualError);
+              console.error(`[Handler] ERROR deleting manual:`, deleteManualError);
             } else {
-              console.log(`エラー発生のため、作成されたmanualレコードを削除しました`);
+              console.log(`[Handler] Successfully deleted manual record with id=${manualIdForRollback}`);
             }
           } catch (dbDeleteError) {
-            console.error(`DB削除中にエラー:`, dbDeleteError);
+            console.error(`[Handler] Exception during DB cleanup:`, dbDeleteError);
           }
+        } else {
+          console.log(`[Handler] SKIPPING DB CLEANUP: No manualIdForRollback available`);
         }
 
         const message = error instanceof Error ? error.message : "ファイル処理中に予期しないエラーが発生しました。";
