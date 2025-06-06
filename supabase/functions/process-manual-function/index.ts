@@ -619,8 +619,10 @@ async function processAndStoreDocuments(
   const parsedDocs = processedFile.docs;
   console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Processing file: ${sourceFileName}, original: ${originalFileName || 'N/A'}, Parsed doc count: ${parsedDocs.length}`); // ★ タイムスタンプ追加
   
+  let manualId: string | undefined;
+  let existingManual: { id: string } | null = null;
+  
   try {
-    let manualId: string;
 
     // --- 既存マニュアルのチェック処理を修正 ---
     let existingManualData: { id: string } | null = null;
@@ -775,7 +777,7 @@ async function processAndStoreDocuments(
         const sanitizedChunkText = sanitizeText(text);
         if (sanitizedChunkText.length > 0) { // 空のチャンクは除外
           chunks.push({
-            manual_id: manualId,
+            manual_id: manualId!, // この時点でmanualIdは確実に設定済み
             chunk_text: sanitizedChunkText,
             chunk_order: index + 1,
           });
@@ -855,12 +857,43 @@ async function processAndStoreDocuments(
     }
     
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully completed.`); // ★ タイムスタンプ追加
-    return { manualId, summary: summaryText, chunksCount: chunksToInsert.length }; // ★ 成功時の返り値
+    return { manualId: manualId!, summary: summaryText, chunksCount: chunksToInsert.length }; // ★ 成功時の返り値
   } catch (error) {
     console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ タイムスタンプ追加
     if (error instanceof Error) {
         console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error details:`, error.stack || error.message); // ★ タイムスタンプ追加
     }
+    
+    // エラー時のクリーンアップ処理：新規作成したmanualレコードがある場合は削除
+    if (manualId && !existingManual) {
+      console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Cleaning up newly created manual (ID: ${manualId}) due to error`);
+      try {
+        // まずチャンクを削除
+        const { error: deleteChunksError } = await supabaseClient
+          .from('manual_chunks')
+          .delete()
+          .eq('manual_id', manualId);
+        
+        if (deleteChunksError && !deleteChunksError.message?.includes("Not Found")) {
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error deleting chunks during cleanup:`, deleteChunksError);
+        }
+
+        // 次にmanualレコードを削除
+        const { error: deleteManualError } = await supabaseClient
+          .from('manuals')
+          .delete()
+          .eq('id', manualId);
+        
+        if (deleteManualError && !deleteManualError.message?.includes("Not Found")) {
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error deleting manual during cleanup:`, deleteManualError);
+        } else {
+          console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully cleaned up manual (ID: ${manualId})`);
+        }
+      } catch (cleanupError) {
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error during cleanup:`, cleanupError);
+      }
+    }
+    
     return null; // ★ エラー時はnullを返す
   }
 }

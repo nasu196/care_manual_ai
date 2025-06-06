@@ -443,7 +443,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         updateUploadStatus(uploadId, {
           status: 'error',
           error: errorMessage,
-          message: `処理エラー: ${errorMessage}`
+          message: `処理エラー`
         });
         // ★ エラーの場合も10秒後にキューから削除
         setTimeout(() => {
@@ -457,6 +457,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         error: `ファイルアップロード中に予期せぬエラー: ${e instanceof Error ? e.message : String(e)}`,
         message: 'アップロードエラー'
       });
+      // ★ エラーの場合も10秒後にキューから削除
+      setTimeout(() => {
+        removeFromUploadQueue(uploadId);
+      }, 10000);
     }
   };
 
