@@ -299,6 +299,10 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
   console.log('[Debug] Project ID:', GOOGLE_PROJECT_ID?.substring(0, 10) + '***');
   console.log('[Debug] Client Email Domain:', GOOGLE_CLIENT_EMAIL?.split('@')[1]);
   console.log('[Debug] Private Key starts with:', GOOGLE_PRIVATE_KEY?.substring(0, 30) + '***');
+  console.log('[Debug] Private Key ends with:', GOOGLE_PRIVATE_KEY?.substring(GOOGLE_PRIVATE_KEY.length - 30) + '***');
+  console.log('[Debug] Private Key contains "BEGIN PRIVATE KEY":', GOOGLE_PRIVATE_KEY?.includes('BEGIN PRIVATE KEY'));
+  console.log('[Debug] Private Key contains "END PRIVATE KEY":', GOOGLE_PRIVATE_KEY?.includes('END PRIVATE KEY'));
+  console.log('[Debug] Private Key total length:', GOOGLE_PRIVATE_KEY?.length);
   
   let accessToken: string | null = null;
   try {
@@ -422,19 +426,46 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
           textContent = "";
         }
       } catch (e) {
+        console.error(`[Process] Document AI failed, attempting pdf-parse fallback...`);
         if (e instanceof Error) {
-          console.error(`[Process] Error processing PDF with Document AI: ${e.message}`, e.stack);
-          docs.push({
-            pageContent: `Error processing PDF with Document AI: ${e.message}`,
-            metadata: { source: actualTmpFilePath, type: 'error', error_details: e.stack }
-          });
-        } else {
-          console.error(`[Process] Unknown error processing PDF with Document AI:`, e);
-          docs.push({
-            pageContent: `Error processing PDF with Document AI: An unknown error occurred.`,
-            metadata: { source: actualTmpFilePath, type: 'error', error_details: String(e) }
-          });
+          console.error(`[Process] Document AI Error: ${e.message}`);
         }
+        
+        // pdf-parse でのフォールバック処理
+        try {
+          console.log("[Process] Attempting PDF processing with pdf-parse...");
+          const pdfData = await pdf(fileBuffer);
+          numPages = pdfData.numpages || 0;
+          
+          if (pdfData.text && pdfData.text.trim().length > 0) {
+            textContent = sanitizeText(pdfData.text);
+            console.log(`[Process] PDF processed successfully with pdf-parse. Pages: ${numPages}, Text length: ${textContent.length}`);
+          } else {
+            console.warn("[Process] pdf-parse resulted in empty text");
+            textContent = "";
+          }
+        } catch (pdfParseError) {
+          console.error(`[Process] pdf-parse also failed:`, pdfParseError);
+          // 両方失敗した場合のみエラーとして処理
+          const errorMessage = `Both Document AI and pdf-parse failed. Document AI: ${e instanceof Error ? e.message : 'Unknown error'}. pdf-parse: ${pdfParseError instanceof Error ? pdfParseError.message : 'Unknown error'}`;
+          docs.push({
+            pageContent: errorMessage,
+            metadata: { source: actualTmpFilePath, type: 'error', error_details: errorMessage }
+          });
+          textContent = "";
+        }
+      }
+      
+      // textContentが取得できた場合、docsを構築
+      if (textContent && textContent.trim().length > 0) {
+        docs = [{
+          pageContent: textContent,
+          metadata: {
+            source: fileName,
+            type: 'pdf',
+            pages: numPages || 1
+          }
+        }];
       }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
