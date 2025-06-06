@@ -69,10 +69,14 @@ export async function POST(request) {
   try {
     initializeClients();
 
-    const { input } = await request.json();
+    const requestBody = await request.json();
+    console.log('[API /api/generate-memo] Request body:', requestBody);
+
+    // フロントエンドから送信される実際のパラメータを取得
+    const { crafted_prompt, source_filenames, verbosity } = requestBody;
     
-    if (!input || typeof input !== 'string' || input.trim() === '') {
-      return NextResponse.json({ error: '入力内容が必要です。' }, { status: 400 });
+    if (!crafted_prompt || typeof crafted_prompt !== 'string' || crafted_prompt.trim() === '') {
+      return NextResponse.json({ error: 'プロンプト内容が必要です。' }, { status: 400 });
     }
 
     // リクエストヘッダーからAuthorizationを取得
@@ -81,15 +85,20 @@ export async function POST(request) {
       return NextResponse.json({ error: '認証情報が必要です。' }, { status: 401 });
     }
 
-    console.log(`[API /api/generate-memo] メモ生成開始: "${input}"`);
+    console.log(`[API /api/generate-memo] メモ生成開始: "${crafted_prompt}"`);
+    console.log(`[API /api/generate-memo] Source files: ${source_filenames ? source_filenames.join(', ') : 'none'}`);
+    console.log(`[API /api/generate-memo] Verbosity: ${verbosity || 'default'}`);
 
-    const result = await memoChain.invoke({ input });
+    // プロンプトを使用してメモを生成
+    const result = await memoChain.invoke({ input: crafted_prompt });
     const generatedText = result.text;
 
     console.log(`[API /api/generate-memo] メモ生成完了`);
 
+    // フロントエンドが期待するレスポンス形式に合わせる
     return NextResponse.json({ 
-      result: generatedText,
+      generated_memo: generatedText,
+      sources: source_filenames || [],
     });
 
   } catch (error) {
