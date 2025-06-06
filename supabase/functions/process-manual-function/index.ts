@@ -352,7 +352,7 @@ if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI
 const serviceAccountCredentials = {
   type: "service_account",
   project_id: GOOGLE_PROJECT_ID,
-  private_key: GOOGLE_PRIVATE_KEY,
+    private_key: GOOGLE_PRIVATE_KEY,
   client_email: GOOGLE_CLIENT_EMAIL,
 };
 
@@ -399,9 +399,9 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
   
   let accessToken: string | null = null;
   try {
-    const client = await auth.getClient();
+  const client = await auth.getClient();
     accessToken = (await client.getAccessToken()).token || null;
-    console.log('[Auth] Access token obtained for Document AI.');
+  console.log('[Auth] Access token obtained for Document AI.');
   } catch (authError) {
     console.error('[Auth] Authentication failed:', authError);
     throw authError;
@@ -413,21 +413,31 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
 
   const endpoint = `https://${DOC_AI_LOCATION}-documentai.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${DOC_AI_LOCATION}/processors/${DOC_AI_PROCESSOR_ID}:process`;
 
-  console.log(`[DocumentAI] Processing document. Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
+  console.log(`[DocumentAI] Processing document with imageless mode (30 pages limit). Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
 
   const requestBody = {
     rawDocument: {
       content: fileContentBase64,
       mimeType: mimeType,
     },
-    // 必要に応じて Human Review をスキップする設定などを追加
-    // processOptions: {
-    //   ocrConfig: {
-    //     enableNativePdfParsing: true, // PDFの場合、より高品質な結果を得るために推奨されることがある
-    //     // enableImageQualityScores: true,
-    //   }
-    // },
-    // skipHumanReview: true,
+    // ★ imageless mode を指定して30ページ制限に対応
+    processOptions: {
+      ocrConfig: {
+        enableNativePdfParsing: true,
+        enableImageQualityScores: false,
+        enableSymbol: false,
+        computeStyleInfo: false,
+        disableCharacterBoxesDetection: true, // ★ imageless mode用設定
+      },
+      layoutConfig: {
+        chunkingConfig: {
+          includeAncestorHeadings: false,
+        }
+      }
+    },
+    // ★ imageless mode を明示的に指定
+    imagelessMode: true,
+    skipHumanReview: true,
   };
 
   const response = await fetch(endpoint, {
@@ -509,7 +519,17 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
         const uint8Array = new Uint8Array(fileBuffer);
         const fileContentBase64 = encode(uint8Array); // encode は既にインポートされている想定
 
-        const rawExtractedText = await extractTextWithDocumentAI(fileContentBase64, 'application/pdf');
+        // Document AI API の30ページ制限をチェック
+        console.log(`[Process] PDF pages: ${numPages}, Document AI limit: 30 pages`);
+        
+        let rawExtractedText: string | null = null;
+        if (numPages > 30) {
+          console.log(`[Process] PDF exceeds Document AI 30-page limit (${numPages} pages). Skipping Document AI and using pdf-parse directly.`);
+          // 30ページ超過の場合はDocument AIをスキップ
+          rawExtractedText = null;
+        } else {
+          rawExtractedText = await extractTextWithDocumentAI(fileContentBase64, 'application/pdf');
+        }
         
         if (rawExtractedText && rawExtractedText.trim().length > 0) {
           textContent = sanitizeText(rawExtractedText);
@@ -519,35 +539,21 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
           textContent = "";
         }
       } catch (e) {
-        console.error(`[Process] Document AI failed, attempting pdf-parse fallback...`);
+        console.error(`[Process] Document AI processing failed:`, e);
         if (e instanceof Error) {
           console.error(`[Process] Document AI Error: ${e.message}`);
+          
+          // Document AI失敗の理由をチェック
+          if (e.message.includes('pages exceed the limit') || e.message.includes('PAGE_LIMIT_EXCEEDED')) {
+            throw new Error(`ファイル「${fileName}」はページ数が多すぎるため処理できません（30ページ制限）。ファイルを分割するか、より小さなファイルをアップロードしてください。`);
+          } else if (e.message.includes('invalid_grant') || e.message.includes('account not found')) {
+            throw new Error(`Document AI認証エラーが発生しました。システム管理者にお問い合わせください。`);
+        } else {
+            throw new Error(`ファイル「${fileName}」の高度なテキスト抽出に失敗しました。Document AIエラー: ${e.message}`);
+          }
+        } else {
+          throw new Error(`ファイル「${fileName}」の処理中に予期しないエラーが発生しました。`);
         }
-        
-                 // pdf-parse でのフォールバック処理
-         try {
-           console.log("[Process] Attempting PDF processing with pdf-parse...");
-           const pdfData = await pdf(fileBuffer);
-           numPages = pdfData.numpages || 0;
-           
-           if (pdfData.text && pdfData.text.trim().length > 0) {
-             textContent = sanitizeText(pdfData.text);
-             console.log(`[Process] PDF processed successfully with pdf-parse. Pages: ${numPages}, Text length: ${textContent.length}`);
-           } else {
-             console.error("[Process] pdf-parse resulted in empty text. Both Document AI and pdf-parse failed to extract meaningful content.");
-             throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。画像ベースのPDFまたは特殊な形式のため、AIが回答できるコンテンツを作成できません。`);
-           }
-         } catch (pdfParseError) {
-           console.error(`[Process] pdf-parse also failed:`, pdfParseError);
-           // 両方失敗した場合は処理を中断
-           if (pdfParseError instanceof Error && pdfParseError.message.includes('からテキストを抽出できませんでした')) {
-             // 上記で投げたエラーをそのまま再スロー
-             throw pdfParseError;
-           } else {
-             // pdf-parse自体のエラー
-             throw new Error(`ファイル「${fileName}」の処理に失敗しました。Document AIとpdf-parseの両方でエラーが発生したため、AIが回答できるコンテンツを作成できません。`);
-           }
-         }
        }
        
        // テキスト抽出が成功した場合のみdocsを構築
@@ -565,7 +571,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
        } else {
          // テキストが抽出できない場合は処理を中断
          throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。AIが回答に使用できるコンテンツが含まれていません。`);
-       }
+      }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
       const data = await new Promise<string>((resolve, reject) => {
