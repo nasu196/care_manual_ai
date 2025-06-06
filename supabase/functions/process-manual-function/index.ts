@@ -543,12 +543,22 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
             const ocrText = await extractTextWithDocumentAI(fileContentBase64, 'application/pdf');
             
             if (ocrText && ocrText.length > 0) {
-              console.log(`[OCR] Document AI OCR完了: ${ocrText.length}文字追加`);
-              // 既存テキストとOCRテキストを統合
-              textContent = textContent.length > 0 ? 
-                `${textContent}\n\n[Document AI OCR抽出テキスト]\n${sanitizeText(ocrText)}` : 
-                sanitizeText(ocrText);
-              console.log(`[OCR] 統合後テキスト長: ${textContent.length}文字`);
+              const sanitizedOcrText = sanitizeText(ocrText);
+              const ocrMeaningfulRatio = calculateMeaningfulTextRatio(sanitizedOcrText);
+              console.log(`[OCR] Document AI OCR完了: ${ocrText.length}文字, 意味のあるテキスト率: ${(ocrMeaningfulRatio * 100).toFixed(1)}%`);
+              
+              // OCRの品質が良い場合は、文字化けした元テキストを破棄してOCRのみを使用
+              if (ocrMeaningfulRatio > 0.8) { // OCRの品質が80%以上の場合
+                console.log(`[OCR] OCR品質が高いため、元テキストを破棄してOCRテキストのみを使用`);
+                textContent = sanitizedOcrText;
+              } else {
+                // OCRの品質が低い場合は統合
+                console.log(`[OCR] OCR品質が低いため、元テキストと統合`);
+                textContent = textContent.length > 0 ? 
+                  `${textContent}\n\n[Document AI OCR抽出テキスト]\n${sanitizedOcrText}` : 
+                  sanitizedOcrText;
+              }
+              console.log(`[OCR] 最終テキスト長: ${textContent.length}文字`);
             } else {
               console.warn(`[OCR] Document AI OCR処理に失敗したか、テキストが検出されませんでした`);
             }
