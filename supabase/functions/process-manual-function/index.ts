@@ -257,9 +257,9 @@ interface ChunkObject {
 // Document AI Processor の情報を設定
 const GOOGLE_PROJECT_ID = Deno.env.get('GOOGLE_PROJECT_ID');
 const GOOGLE_CLIENT_EMAIL = Deno.env.get('GOOGLE_CLIENT_EMAIL');
-// Supabaseの環境変数で \n が \\n になっている場合を考慮し、実際の改行に戻す
-// const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\n'); // 一時的にコメントアウト
-const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\n'); // 正しいreplace処理を復活
+const GOOGLE_PRIVATE_KEY = Deno.env.get('GOOGLE_PRIVATE_KEY')?.replace(/\\n/g, '\n');
+const GOOGLE_PRIVATE_KEY_ID = Deno.env.get('GOOGLE_PRIVATE_KEY_ID');
+const GOOGLE_CLIENT_ID = Deno.env.get('GOOGLE_CLIENT_ID');
 
 const DOC_AI_LOCATION = 'us'; // 例: 'us' や 'eu' など、プロセッサを作成したリージョン
 const DOC_AI_PROCESSOR_ID = Deno.env.get('DOC_AI_PROCESSOR_ID'); // SupabaseのSecretsに設定したプロセッサID
@@ -271,18 +271,32 @@ if (!GOOGLE_PROJECT_ID || !GOOGLE_CLIENT_EMAIL || !GOOGLE_PRIVATE_KEY || !DOC_AI
   if (!GOOGLE_PRIVATE_KEY) errorMessage += "\n- GOOGLE_PRIVATE_KEY";
   if (!DOC_AI_PROCESSOR_ID) errorMessage += "\n- DOC_AI_PROCESSOR_ID";
   console.error(errorMessage);
-  // 起動時にエラーにするか、リクエスト時にエラーレスポンスを返すかは設計による
-  // ここでは起動時のログ出力に留めるが、実際のリクエスト処理前にもチェック推奨
 }
+
+// 完全なサービスアカウント認証情報を構築
+const serviceAccountCredentials = {
+  type: "service_account",
+  project_id: GOOGLE_PROJECT_ID,
+  private_key_id: GOOGLE_PRIVATE_KEY_ID,
+  private_key: GOOGLE_PRIVATE_KEY,
+  client_email: GOOGLE_CLIENT_EMAIL,
+  client_id: GOOGLE_CLIENT_ID,
+  auth_uri: "https://accounts.google.com/o/oauth2/auth",
+  token_uri: "https://oauth2.googleapis.com/token",
+  auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+  client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${encodeURIComponent(GOOGLE_CLIENT_EMAIL || '')}`,
+};
+
+console.log('[Auth] Service account credentials configured:');
+console.log('- project_id:', serviceAccountCredentials.project_id ? 'SET' : 'MISSING');
+console.log('- private_key_id:', serviceAccountCredentials.private_key_id ? 'SET' : 'MISSING');
+console.log('- client_email:', serviceAccountCredentials.client_email ? 'SET' : 'MISSING');
+console.log('- client_id:', serviceAccountCredentials.client_id ? 'SET' : 'MISSING');
+console.log('- private_key length:', serviceAccountCredentials.private_key?.length || 0);
 
 const auth = new GoogleAuth({
   projectId: GOOGLE_PROJECT_ID,
-  credentials: {
-    type: "service_account",
-    project_id: GOOGLE_PROJECT_ID,
-    client_email: GOOGLE_CLIENT_EMAIL,
-    private_key: GOOGLE_PRIVATE_KEY,
-  },
+  credentials: serviceAccountCredentials,
   scopes: ['https://www.googleapis.com/auth/cloud-platform'],
 });
 
@@ -431,42 +445,41 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
           console.error(`[Process] Document AI Error: ${e.message}`);
         }
         
-        // pdf-parse でのフォールバック処理
-        try {
-          console.log("[Process] Attempting PDF processing with pdf-parse...");
-          const pdfData = await pdf(fileBuffer);
-          numPages = pdfData.numpages || 0;
-          
-          if (pdfData.text && pdfData.text.trim().length > 0) {
-            textContent = sanitizeText(pdfData.text);
-            console.log(`[Process] PDF processed successfully with pdf-parse. Pages: ${numPages}, Text length: ${textContent.length}`);
-          } else {
-            console.warn("[Process] pdf-parse resulted in empty text");
-            textContent = "";
-          }
-        } catch (pdfParseError) {
-          console.error(`[Process] pdf-parse also failed:`, pdfParseError);
-          // 両方失敗した場合のみエラーとして処理
-          const errorMessage = `Both Document AI and pdf-parse failed. Document AI: ${e instanceof Error ? e.message : 'Unknown error'}. pdf-parse: ${pdfParseError instanceof Error ? pdfParseError.message : 'Unknown error'}`;
-          docs.push({
-            pageContent: errorMessage,
-            metadata: { source: actualTmpFilePath, type: 'error', error_details: errorMessage }
-          });
-          textContent = "";
-        }
-      }
-      
-      // textContentが取得できた場合、docsを構築
-      if (textContent && textContent.trim().length > 0) {
-        docs = [{
-          pageContent: textContent,
-          metadata: {
-            source: fileName,
-            type: 'pdf',
-            pages: numPages || 1
-          }
-        }];
-      }
+                 // pdf-parse でのフォールバック処理
+         try {
+           console.log("[Process] Attempting PDF processing with pdf-parse...");
+           const pdfData = await pdf(fileBuffer);
+           numPages = pdfData.numpages || 0;
+           
+           if (pdfData.text && pdfData.text.trim().length > 0) {
+             textContent = sanitizeText(pdfData.text);
+             console.log(`[Process] PDF processed successfully with pdf-parse. Pages: ${numPages}, Text length: ${textContent.length}`);
+           } else {
+             console.warn("[Process] pdf-parse resulted in empty text, creating placeholder document");
+             textContent = `PDFファイル（${fileName}）からテキストを抽出できませんでした。画像ベースのPDFまたは特殊な形式の可能性があります。`;
+           }
+         } catch (pdfParseError) {
+           console.error(`[Process] pdf-parse also failed:`, pdfParseError);
+           // 両方失敗した場合の処理
+           const errorMessage = `PDFの処理に失敗しました（Document AI認証エラー、pdf-parse処理エラー）。ファイル: ${fileName}`;
+           textContent = errorMessage;
+           console.log(`[Process] Setting fallback error message: ${errorMessage}`);
+         }
+       }
+       
+       // 常にdocsを構築（textContentが空でも処理可能にする）
+       if (textContent || fileExtension === '.pdf') {
+         docs = [{
+           pageContent: textContent || `PDFファイル（${fileName}）の処理が完了しましたが、テキストが抽出されませんでした。`,
+           metadata: {
+             source: fileName,
+             type: 'pdf',
+             pages: numPages || 1,
+             processing_status: textContent && textContent.trim().length > 0 ? 'success' : 'partial_failure'
+           }
+         }];
+         console.log(`[Process] PDF docs created. Content length: ${docs[0].pageContent.length}, Status: ${docs[0].metadata.processing_status}`);
+       }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
       console.log(`\nofficeparserで ${fileExtension} ファイルのテキスト抽出を開始...`);
       const data = await new Promise<string>((resolve, reject) => {
