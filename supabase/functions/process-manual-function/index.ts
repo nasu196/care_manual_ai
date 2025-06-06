@@ -311,6 +311,9 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
   console.log('[Debug] Private Key contains "BEGIN PRIVATE KEY":', GOOGLE_PRIVATE_KEY?.includes('BEGIN PRIVATE KEY'));
   console.log('[Debug] Private Key contains "END PRIVATE KEY":', GOOGLE_PRIVATE_KEY?.includes('END PRIVATE KEY'));
   console.log('[Debug] Private Key total length:', GOOGLE_PRIVATE_KEY?.length);
+  console.log('[Debug] Private Key newline count:', (GOOGLE_PRIVATE_KEY?.match(/\n/g) || []).length);
+  console.log('[Debug] Private Key \\\\n count:', (GOOGLE_PRIVATE_KEY?.match(/\\\\n/g) || []).length);
+  console.log('[Debug] Raw env var first 100 chars:', Deno.env.get('GOOGLE_PRIVATE_KEY')?.substring(0, 100));
   
   let accessToken: string | null = null;
   try {
