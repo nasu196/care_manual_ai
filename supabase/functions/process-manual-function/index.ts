@@ -987,7 +987,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        console.log(`\n--- ファイル処理パイプライン (ダウンロードと抽出) 成功: ${fileName} ---`);
+        console.log(`ファイル処理完了: ${fileName}`);
         const storeResult = await processAndStoreDocuments(
           processedFile,
           fileName,
@@ -998,9 +998,9 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
           genAI
         );
         if (storeResult && storeResult.manualId) {
-          console.log(`\n--- 全体処理完了 (チャンク化とDB保存含む) 成功: ${fileName} ---`);
+          console.log(`全体処理成功: ${fileName}`);
           return new Response(JSON.stringify({ 
-            message: `Successfully processed ${fileName}`,
+            message: `Successfully processed`,
             manual_id: storeResult.manualId,
             summary: storeResult.summary,
             chunks_count: storeResult.chunksCount
@@ -1013,33 +1013,27 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
           throw new Error(`ファイル処理中にエラーが発生しました。ストレージまたは埋め込み処理でエラーが発生した可能性があります。`);
         }
       } catch (error: unknown) {
-        // エラーの概要のみログ出力（詳細は不要）
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`ファイル処理エラー: ${errorMessage}`);
+        // エラーメッセージは既に適切に設定されているため、追加のログは不要
         
-        // ファイルロールバック処理 (元のコードから持ってくる)
+        // エラー時のStorageファイル削除処理
         if (fileNameForRollback && supabaseClient) {
-          console.warn(`処理中にエラー(${error instanceof Error ? error.message : String(error)})が発生したため、Storageからファイル ${fileNameForRollback} の削除を試みます。`);
           try {
-            const { error: deleteError } = await supabaseClient.storage // 修正: supabase -> supabaseClient
-              .from('manuals') // BUCKET_NAME は 'manuals' と仮定。実際のバケット名に置き換える
+            const { error: deleteError } = await supabaseClient.storage
+              .from(BUCKET_NAME)
               .remove([fileNameForRollback]); 
             if (deleteError) {
-              if (deleteError.message && deleteError.message.includes("Not Found") || (deleteError as { statusCode?: number }).statusCode === 404) {
-                console.log(`Storageにファイル ${fileNameForRollback} が見つからなかったため、削除はスキップされました。`);
-              } else {
-                console.error(`Storageからのファイル ${fileNameForRollback} の削除に失敗しました。`, deleteError);
+              if (!deleteError.message?.includes("Not Found") && (deleteError as { statusCode?: number }).statusCode !== 404) {
+                console.error(`Storageファイル削除エラー:`, deleteError);
               }
             } else {
-              console.log(`Storageからファイル ${fileNameForRollback} を削除しました。`);
+              console.log(`エラー発生のため、アップロードファイルを削除しました`);
             }
           } catch (storageDeleteError) {
-            console.error(`Storageからのファイル ${fileNameForRollback} の削除中に予期せぬエラー。`, storageDeleteError);
+            console.error(`Storageファイル削除中にエラー:`, storageDeleteError);
           }
         }
 
-        const message = error instanceof Error ? error.message : "An unknown error occurred during file processing.";
-        const detail = error instanceof Error ? error.stack || error.toString() : String(error); 
+        const message = error instanceof Error ? error.message : "ファイル処理中に予期しないエラーが発生しました。";
         
         return new Response(JSON.stringify({ 
             error: message, 
@@ -1057,7 +1051,6 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
                 console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました:`, unlinkError);
             }
         }
-        console.log(`[Handler] Finally block completed for ${fileNameForRollback || 'request associated with this handler invocation'}`);
       }
     } else {
       return new Response(
