@@ -529,10 +529,16 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
         console.log(`PDF解析結果: テキスト長=${rawText.length}文字, ページ数=${numPages}`);
         textContent = rawText;
 
-        // ★ Document AI の30ページ制限をチェック
+        // ★ Document AI の30ページ制限とテキスト品質をチェック
         if (numPages > 30) {
-          console.log(`[Process] PDF exceeds Document AI 30-page limit (${numPages} pages). Skipping Document AI OCR and using only pdf-parse results.`);
-          // 30ページ超過の場合はOCRをスキップし、pdf-parseの結果のみを使用
+          // 30ページ超過の場合、pdf-parseの品質をチェック
+          if (isTextExtractionInsufficient(textContent, numPages)) {
+            // pdf-parseが品質不十分かつ30ページ超過の場合は処理中断
+            throw new Error(`テキストの抽出品質が不十分なため対応できません。より小さなファイルに分割してアップロードしてください。`);
+          } else {
+            console.log(`[Process] PDF exceeds Document AI 30-page limit (${numPages} pages), but pdf-parse quality is sufficient. Using pdf-parse results only.`);
+            // pdf-parseが十分な品質の場合は30ページ超過でも処理続行
+          }
         } else if (isTextExtractionInsufficient(textContent, numPages)) {
           console.log(`[OCR] PDFテキスト抽出が不十分です。Document AI OCR処理を実行します...`);
 
