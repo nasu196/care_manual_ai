@@ -956,6 +956,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
 
       let fileNameForRollback: string | null = null; // エラー時のファイル名特定用
       let tmpFilePathToDelete: string | null = null; // 一時ファイル削除用
+      let manualIdForRollback: string | null = null; // エラー時のmanual削除用
 
       try {
         const body = await req.json();
@@ -997,6 +998,12 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
           embeddings,
           genAI
         );
+        
+        // エラー時のロールバック用にmanualIdを保存
+        if (storeResult && storeResult.manualId) {
+          manualIdForRollback = storeResult.manualId;
+        }
+        
         if (storeResult && storeResult.manualId) {
           console.log(`全体処理成功: ${fileName}`);
           return new Response(JSON.stringify({ 
@@ -1015,7 +1022,9 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
       } catch (error: unknown) {
         // エラーメッセージは既に適切に設定されているため、追加のログは不要
         
-        // エラー時のStorageファイル削除処理
+        // エラー時のクリーンアップ処理
+        
+        // 1. Storageファイル削除
         if (fileNameForRollback && supabaseClient) {
           try {
             const { error: deleteError } = await supabaseClient.storage
@@ -1030,6 +1039,37 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
             }
           } catch (storageDeleteError) {
             console.error(`Storageファイル削除中にエラー:`, storageDeleteError);
+          }
+        }
+
+        // 2. Manualレコードと関連チャンクの削除
+        if (manualIdForRollback && supabaseClient) {
+          try {
+            // まずチャンクを削除
+            const { error: deleteChunksError } = await supabaseClient
+              .from('manual_chunks')
+              .delete()
+              .eq('manual_id', manualIdForRollback);
+            
+            if (deleteChunksError && !deleteChunksError.message?.includes("Not Found")) {
+              console.error(`エラー時のチャンク削除エラー:`, deleteChunksError);
+            } else {
+              console.log(`エラー発生のため、作成されたチャンクを削除しました`);
+            }
+
+            // 次にmanualレコードを削除
+            const { error: deleteManualError } = await supabaseClient
+              .from('manuals')
+              .delete()
+              .eq('id', manualIdForRollback);
+            
+            if (deleteManualError && !deleteManualError.message?.includes("Not Found")) {
+              console.error(`エラー時のmanual削除エラー:`, deleteManualError);
+            } else {
+              console.log(`エラー発生のため、作成されたmanualレコードを削除しました`);
+            }
+          } catch (dbDeleteError) {
+            console.error(`DB削除中にエラー:`, dbDeleteError);
           }
         }
 
