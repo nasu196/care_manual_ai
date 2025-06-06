@@ -10,27 +10,25 @@ console.log("Hello from Functions!")
 
 import { serve, ConnInfo } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-// import { PDFLoader } from "npm:@langchain/community/document_loaders/fs/pdf"; // ★ コメントアウトまたは削除
+
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
-import { OpenAIEmbeddings } from "npm:@langchain/openai"; // OpenAIEmbeddingsをインポート
+import { OpenAIEmbeddings } from "npm:@langchain/openai";
 import officeParser from "npm:officeparser";
-import pdf from "npm:pdf-parse"; // ★ pdf-parse を直接インポート
+import pdf from "npm:pdf-parse";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
 import "npm:dotenv/config";
-import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai"; // ★ 追加
-import { corsHeaders } from '../_shared/cors.ts'; // ★ CORSヘッダーをインポート
-import { GoogleAuth } from 'npm:google-auth-library'; // npmモジュールをインポート
-import { encode } from "https://deno.land/std@0.208.0/encoding/base64.ts"; // Deno標準のBase64エンコーダー
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "npm:@google/generative-ai";
+import { corsHeaders } from '../_shared/cors.ts';
+import { GoogleAuth } from 'npm:google-auth-library';
+import { encode } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 
-// ★ テキストサニタイズ関数（厳格版）- OCRノイズ対応
+// テキストサニタイズ関数（厳格版）- OCRノイズ対応
 function sanitizeText(text: string): string {
   if (!text || typeof text !== 'string') {
     return '';
   }
-  
-  console.log(`[Sanitize] Before: ${text.length} chars`);
   
   let cleaned = text
     // 1. NULL文字と制御文字を除去
@@ -91,13 +89,10 @@ function sanitizeText(text: string): string {
   
   const finalText = meaningfulLines.join('\n').trim();
   
-  console.log(`[Sanitize] After: ${finalText.length} chars (removed ${text.length - finalText.length} chars)`);
-  console.log(`[Sanitize] Sample output: ${finalText.substring(0, 100)}...`);
-  
   return finalText;
 }
 
-// ★ 意味のあるテキスト判定関数
+// 意味のあるテキスト判定関数
 function calculateMeaningfulTextRatio(text: string): number {
   if (!text) return 0;
   
@@ -108,55 +103,39 @@ function calculateMeaningfulTextRatio(text: string): number {
   return totalChars > 0 ? meaningfulChars.length / totalChars : 0;
 }
 
-// ★ OCR判定関数：テキスト抽出が不十分かどうかを判定（厳格化版）
+// OCR判定関数：テキスト抽出が不十分かどうかを判定
 function isTextExtractionInsufficient(text: string, numPages: number): boolean {
-  console.log(`[OCR判定] 元テキスト長: ${text.length} 文字`);
-  console.log(`[OCR判定] 元テキスト（最初の200文字）: ${text.substring(0, 200)}...`);
-  
   const cleanText = sanitizeText(text);
   const textLength = cleanText.length;
   
-  console.log(`[OCR判定] sanitize後テキスト長: ${textLength} 文字`);
-  console.log(`[OCR判定] sanitize後テキスト（最初の200文字）: ${cleanText.substring(0, 200)}...`);
-  
   // 意味のあるテキスト率をチェック
   const meaningfulRatio = calculateMeaningfulTextRatio(cleanText);
-  console.log(`[OCR判定] 意味のあるテキスト率: ${(meaningfulRatio * 100).toFixed(1)}%`);
   
-  // 判定基準（サニタイズ厳格化 + 意味のあるテキスト率追加）
-  const minTextPerPage = 50; // 1ページあたり最低50文字（パワポ等を考慮）
-  const minTotalText = 100;  // 総文字数最低100文字（パワポ等を考慮）
-  const minMeaningfulRatio = 0.6; // 意味のあるテキスト率60%以上（OCRノイズ対策の新規追加）
+  // 判定基準
+  const minTextPerPage = 50; // 1ページあたり最低50文字
+  const minTotalText = 100;  // 総文字数最低100文字
+  const minMeaningfulRatio = 0.6; // 意味のあるテキスト率60%以上
   
   const textPerPage = Math.round(textLength / Math.max(numPages, 1));
   
-  console.log(`[OCR判定] テキスト長: ${textLength}, ページ数: ${numPages}, ページあたり: ${textPerPage}`);
-  console.log(`[OCR判定] 判定基準 - 総文字数: ${minTotalText}以上, ページあたり: ${minTextPerPage}以上, 意味のあるテキスト率: ${(minMeaningfulRatio * 100).toFixed(1)}%以上`);
-  
   if (textLength < minTotalText) {
-    console.log(`[OCR判定] 総文字数不足 (${textLength} < ${minTotalText}) → OCR実行`);
     return true;
   }
   
   if (numPages > 0 && textPerPage < minTextPerPage) {
-    console.log(`[OCR判定] 1ページあたりの文字数不足 (${textPerPage} < ${minTextPerPage}) → OCR実行`);
     return true;
   }
   
   if (meaningfulRatio < minMeaningfulRatio) {
-    console.log(`[OCR判定] 意味のあるテキスト率不足 (${(meaningfulRatio * 100).toFixed(1)}% < ${(minMeaningfulRatio * 100).toFixed(1)}%) → OCR実行`);
     return true;
   }
   
-  console.log(`[OCR判定] テキスト抽出は十分です → OCRスキップ`);
   return false;
 }
 
-// ★ PDF画像変換関数（安全なBase64変換版）
+// PDF画像変換関数（安全なBase64変換版）
 function convertPdfPageToImage(pdfBuffer: ArrayBuffer, _pageNumber: number = 1): string | null {
   try {
-    console.log(`[PDF変換] PDF を Base64 に変換開始 (サイズ: ${pdfBuffer.byteLength} bytes)`);
-    
     // 安全なBase64変換（チャンク単位）
     const uint8Array = new Uint8Array(pdfBuffer);
     const chunkSize = 8192; // 8KBずつ処理
@@ -168,125 +147,20 @@ function convertPdfPageToImage(pdfBuffer: ArrayBuffer, _pageNumber: number = 1):
     }
     
     const base64Pdf = btoa(binaryString);
-    console.log(`[PDF変換] PDF を Base64 に変換完了 (${base64Pdf.length} 文字)`);
     return base64Pdf;
   } catch (error) {
-    console.error(`[PDF変換] エラー:`, error);
+    console.error(`PDF変換エラー:`, error);
     return null;
   }
 }
 
-// ★ Google Vision API OCR実行関数
-/* // ★ コメントアウト開始
-async function performOCROnPdf(pdfBuffer: ArrayBuffer): Promise<string | null> {
-  if (!googleVisionApiKey) {
-    console.warn(`[OCR] Google Vision API キーが設定されていないため、OCRをスキップします`);
-    return null;
-  }
-  
-  try {
-    console.log(`[OCR] Google Vision API を使用してOCR処理を開始...`);
-    
-    // ファイルサイズチェック（Vision APIの制限: 20MB）
-    if (pdfBuffer.byteLength > 20 * 1024 * 1024) {
-      console.warn(`[OCR] PDFファイルが大きすぎます (${Math.round(pdfBuffer.byteLength / 1024 / 1024)}MB > 20MB制限)`);
-      return null;
-    }
-    
-    // PDF→Base64変換
-    const base64Image = convertPdfPageToImage(pdfBuffer);
-    if (!base64Image) {
-      throw new Error("PDF の画像変換に失敗しました");
-    }
-    
-    // Google Vision API リクエスト
-    const visionApiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${googleVisionApiKey}`;
-    
-    const requestBody = {
-      requests: [{
-        image: {
-          content: base64Image
-        },
-        features: [{
-          type: 'TEXT_DETECTION',
-          maxResults: 1
-        }]
-      }]
-    };
-    
-    console.log(`[OCR] Vision API にリクエスト送信中... (データサイズ: ${Math.round(base64Image.length / 1024)}KB)`);
-    const response = await fetch(visionApiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestBody)
-    });
-    
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`[OCR] Vision API エラー (${response.status}):`, errorText);
-      
-      // APIエラーの詳細分析
-      try {
-        const errorJson = JSON.parse(errorText);
-        if (errorJson.error && errorJson.error.message) {
-          console.error(`[OCR] API エラー詳細: ${errorJson.error.message}`);
-        }
-      } catch (parseError) {
-        console.error(`[OCR] エラーレスポンスの解析に失敗:`, parseError);
-      }
-      
-      throw new Error(`Vision API request failed: ${response.status} - ${errorText.substring(0, 200)}`);
-    }
-    
-    const result = await response.json();
-    console.log(`[OCR] Vision API レスポンス受信`, { 
-      hasResponses: !!result.responses, 
-      responseCount: result.responses?.length || 0 
-    });
-    
-    // OCR結果からテキストを抽出
-    if (result.responses && result.responses[0]) {
-      const firstResponse = result.responses[0];
-      
-      // エラーチェック
-      if (firstResponse.error) {
-        console.error(`[OCR] Vision API応答エラー:`, firstResponse.error);
-        return null;
-      }
-      
-      if (firstResponse.textAnnotations && firstResponse.textAnnotations.length > 0) {
-        const extractedText = firstResponse.textAnnotations[0].description || '';
-        console.log(`[OCR] テキスト抽出成功: ${extractedText.length} 文字`);
-        console.log(`[OCR] 抽出テキスト（最初の100文字）: ${extractedText.substring(0, 100)}...`);
-        return sanitizeText(extractedText);
-      }
-    }
-    
-    console.log(`[OCR] テキストが検出されませんでした`);
-    return null;
-    
-  } catch (error) {
-    console.error(`[OCR] Google Vision API エラー:`, error);
-    
-    // エラーの詳細情報を出力
-    if (error instanceof Error) {
-      console.error(`[OCR] エラー名: ${error.name}`);
-      console.error(`[OCR] エラーメッセージ: ${error.message}`);
-    }
-    
-    return null;
-  }
-}
-*/ // ★ コメントアウト終了
+
 
 // Supabaseクライアントの初期化 (環境変数から)
 const supabaseUrl = Deno.env.get("SUPABASE_URL");
 const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY");
 const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
-// const googleVisionApiKey = Deno.env.get("GOOGLE_VISION_API_KEY"); // ★ Google Vision API キーをコメントアウト
-const openaiApiKey = Deno.env.get("OPENAI_API_KEY"); // OpenAI APIキーを追加
+const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error("エラー: SUPABASE_URL または SUPABASE_ANON_KEY が環境変数に設定されていません。");
@@ -294,12 +168,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 if (!geminiApiKey) {
   console.error("エラー: GEMINI_API_KEY が環境変数に設定されていません。");
 }
-/* // ★ コメントアウト開始
-if (!googleVisionApiKey) {
-  console.warn("警告: GOOGLE_VISION_API_KEY が環境変数に設定されていません。OCR機能は無効になります。");
-}
-*/ // ★ コメントアウト終了
-if (!openaiApiKey) { // OpenAI APIキーのチェックを追加
+if (!openaiApiKey) {
   console.warn("警告: OPENAI_API_KEY が環境変数に設定されていません。OpenAIを使用する場合は設定してください。");
 }
 
@@ -313,10 +182,10 @@ if (geminiApiKey) {
     _embeddings = new OpenAIEmbeddings();
 }
 
-let _genAI: GoogleGenerativeAI; // ★ 追加
-if (geminiApiKey) { // ★ 追加
-    _genAI = new GoogleGenerativeAI(geminiApiKey); // ★ 追加
-} // ★ 追加
+let _genAI: GoogleGenerativeAI;
+if (geminiApiKey) {
+    _genAI = new GoogleGenerativeAI(geminiApiKey);
+}
 
 const BUCKET_NAME = 'manuals';
 const TMP_DIR_BASE = "/tmp";
@@ -366,10 +235,8 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
     throw new Error('Missing fileContentBase64 or mimeType for Document AI');
   }
 
-  console.log('[Auth] Obtaining access token for Document AI...');
   const client = await auth.getClient();
   const accessToken = (await client.getAccessToken()).token;
-  console.log('[Auth] Access token obtained for Document AI.');
 
   if (!accessToken) {
     throw new Error('Failed to obtain access token for Document AI');
@@ -377,21 +244,19 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
 
   const endpoint = `https://${DOC_AI_LOCATION}-documentai.googleapis.com/v1/projects/${GOOGLE_PROJECT_ID}/locations/${DOC_AI_LOCATION}/processors/${DOC_AI_PROCESSOR_ID}:process`;
 
-  console.log(`[DocumentAI] Processing document with imageless mode (30 pages limit). Endpoint: ${endpoint.substring(0,100)}...`); // URLが長いので一部表示
-
   const requestBody = {
     rawDocument: {
       content: fileContentBase64,
       mimeType: mimeType,
     },
-    // ★ imageless mode を指定して30ページ制限に対応
+    // imageless mode を指定して30ページ制限に対応
     processOptions: {
       ocrConfig: {
         enableNativePdfParsing: true,
         enableImageQualityScores: false,
         enableSymbol: false,
         computeStyleInfo: false,
-        disableCharacterBoxesDetection: true, // ★ imageless mode用設定
+        disableCharacterBoxesDetection: true,
       },
       layoutConfig: {
         chunkingConfig: {
@@ -399,7 +264,6 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
         }
       }
     },
-    // ★ imageless mode を明示的に指定
     imagelessMode: true,
     skipHumanReview: true,
   };
@@ -409,24 +273,19 @@ async function extractTextWithDocumentAI(fileContentBase64: string, mimeType: st
     headers: {
       'Authorization': `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
-      'Accept': 'application/json', // レスポンス形式を明示
+      'Accept': 'application/json',
     },
     body: JSON.stringify(requestBody),
   });
 
-  console.log(`[DocumentAI] Response status: ${response.status}`);
   const responseData = await response.json();
 
   if (!response.ok) {
-    console.error('[DocumentAI] Error response:', JSON.stringify(responseData, null, 2));
+    console.error('Document AI error:', responseData.error?.message || `Status ${response.status}`);
     throw new Error(responseData.error?.message || `Document AI API request failed with status ${response.status}`);
   }
 
   const extractedText = responseData.document?.text;
-  console.log('[DocumentAI] Extracted text length:', extractedText?.length || 0);
-  if (extractedText && extractedText.length > 0) {
-    console.log('[DocumentAI] Extracted text snippet:', extractedText.substring(0, 200) + "...");
-  }
 
   return extractedText || null;
 }
@@ -437,8 +296,6 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
   const randomSuffix = Math.random().toString(36).substring(2, 15);
   const uniqueFileName = `${Date.now()}_${randomSuffix}_${path.basename(fileName)}`;
   const fileExtension = path.extname(fileName).toLowerCase();
-
-  console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Starting for ${fileName}, ext: ${fileExtension}`); // ★ 追加
 
   console.log(`Supabase Storageからファイル ${fileName} をダウンロード開始...`);
   
@@ -475,72 +332,32 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     let numPages = 0;
     let textContent = '';
 
-    console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] Before parsing (${fileExtension}): ${actualTmpFilePath}`); // ★ 追加
     if (fileExtension === '.pdf') {
       console.log("\npdf-parseでドキュメントを読み込み開始...");
-      console.log(`[環境確認] GOOGLE_PROJECT_ID: ${GOOGLE_PROJECT_ID ? '設定済み' : '未設定'}`);
       try {
-        const pdfData = await pdf(fileBuffer); // ★ pdf-parseでテキスト抽出
-        console.log(`[PDF情報] ファイルサイズ: ${fileBuffer.length} bytes`);
+        const pdfData = await pdf(fileBuffer);
 
-        // pdfDataのnull/undefinedチェック ★
         if (!pdfData) {
           throw new Error("pdf-parse returned null/undefined data");
         }
         
-        // PDFメタデータの詳細ログ
-        console.log(`[PDF詳細情報]:`);
-        console.log(`  - ページ数: ${pdfData.numpages}`);
-        console.log(`  - バージョン: ${pdfData.version || 'N/A'}`);
-        console.log(`  - 作成者: ${pdfData.info?.Creator || 'N/A'}`);
-        console.log(`  - 作成日: ${pdfData.info?.CreationDate || 'N/A'}`);
-        console.log(`  - 変更日: ${pdfData.info?.ModDate || 'N/A'}`);
-        console.log(`  - セキュリティ: ${pdfData.info?.Security || 'N/A'}`);
-        console.log(`  - PDF Producer: ${pdfData.info?.Producer || 'N/A'}`);
-        console.log(`  - PDF Title: ${pdfData.info?.Title || 'N/A'}`);
-
-        // textプロパティの存在確認 ★
         const rawText = pdfData.text || '';
         numPages = pdfData.numpages || 0;
-        console.log(`[テキスト抽出結果]:`);
-        console.log(`  - 生テキスト長: ${rawText.length} 文字`);
-        console.log(`  - 最初の500文字: "${rawText.substring(0, 500)}"`);
-        console.log(`  - 最後の500文字: "${rawText.substring(Math.max(0, rawText.length - 500))}"`);
-        
-        // 文字の種類を分析
-        const unicodeRanges = {
-          ascii: /[\x00-\x7F]/g,
-          latin: /[\x80-\xFF]/g,
-          hiragana: /[\u3040-\u309F]/g,
-          katakana: /[\u30A0-\u30FF]/g,
-          kanji: /[\u4E00-\u9FAF]/g,
-          symbols: /[\u2000-\u2BFF]/g,
-          control: /[\x00-\x1F\x7F-\x9F]/g
-        };
-        
-        console.log(`[文字種別分析]:`);
-        Object.entries(unicodeRanges).forEach(([name, regex]) => {
-          const matches = rawText.match(regex);
-          const count = matches ? matches.length : 0;
-          const percentage = rawText.length > 0 ? (count / rawText.length * 100).toFixed(2) : '0.00';
-          console.log(`  - ${name}: ${count}文字 (${percentage}%)`);
-        });
-
         console.log(`PDF解析結果: テキスト長=${rawText.length}文字, ページ数=${numPages}`);
         textContent = rawText;
 
-        // ★ Document AI の30ページ制限とテキスト品質をチェック
+        // Document AI の30ページ制限とテキスト品質をチェック
         if (numPages > 30) {
           // 30ページ超過の場合、pdf-parseの品質をチェック
           if (isTextExtractionInsufficient(textContent, numPages)) {
             // pdf-parseが品質不十分かつ30ページ超過の場合は処理中断
             throw new Error(`テキストの抽出品質が不十分なため対応できません。より小さなファイルに分割してアップロードしてください。`);
           } else {
-            console.log(`[Process] PDF exceeds Document AI 30-page limit (${numPages} pages), but pdf-parse quality is sufficient. Using pdf-parse results only.`);
+            console.log(`30ページ超過ですが、pdf-parseの品質が十分なため処理を続行`);
             // pdf-parseが十分な品質の場合は30ページ超過でも処理続行
           }
         } else if (isTextExtractionInsufficient(textContent, numPages)) {
-          console.log(`[OCR] PDFテキスト抽出が不十分です。Document AI OCR処理を実行します...`);
+          console.log(`Document AI OCR処理を実行中...`);
 
           // Document AI OCR処理
           try {
@@ -551,31 +368,30 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
             if (ocrText && ocrText.length > 0) {
               const sanitizedOcrText = sanitizeText(ocrText);
               const ocrMeaningfulRatio = calculateMeaningfulTextRatio(sanitizedOcrText);
-              console.log(`[OCR] Document AI OCR完了: ${ocrText.length}文字, 意味のあるテキスト率: ${(ocrMeaningfulRatio * 100).toFixed(1)}%`);
+              console.log(`Document AI OCR完了: ${ocrText.length}文字`);
               
               // OCRの品質が良い場合は、文字化けした元テキストを破棄してOCRのみを使用
               if (ocrMeaningfulRatio > 0.8) { // OCRの品質が80%以上の場合
-                console.log(`[OCR] OCR品質が高いため、元テキストを破棄してOCRテキストのみを使用`);
+                console.log(`OCR品質が高いため、OCRテキストのみを使用`);
                 textContent = sanitizedOcrText;
               } else {
                 // OCRの品質が低い場合は統合
-                console.log(`[OCR] OCR品質が低いため、元テキストと統合`);
+                console.log(`元テキストとOCRテキストを統合`);
                 textContent = textContent.length > 0 ? 
                   `${textContent}\n\n[Document AI OCR抽出テキスト]\n${sanitizedOcrText}` : 
                   sanitizedOcrText;
               }
-              console.log(`[OCR] 最終テキスト長: ${textContent.length}文字`);
             } else {
-              console.warn(`[OCR] Document AI OCR処理に失敗したか、テキストが検出されませんでした`);
+              console.warn(`Document AI OCR処理に失敗またはテキストが検出されませんでした`);
             }
           } catch (ocrError) {
-            console.error(`[OCR] Document AI OCR処理中にエラーが発生しました:`, ocrError);
-            console.warn(`[OCR] OCRエラーのため、pdf-parseの結果のみを使用します`);
+            console.error(`Document AI OCR処理エラー:`, ocrError);
+            console.warn(`OCRエラーのため、pdf-parseの結果のみを使用します`);
           }
         }
 
         if (textContent.length === 0) {
-          throw new Error(`ファイル「${fileName}」からテキストを抽出できませんでした。AIが回答に使用できるコンテンツが含まれていません。`);
+          throw new Error(`テキストを抽出できませんでした。AIが回答に使用できるコンテンツが含まれていません。`);
         }
 
         docs = [{
@@ -591,22 +407,20 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
         }];
         console.log(`ドキュメントの読み込み完了。合計 ${numPages} ページ (テキストは結合)。`);
       } catch (pdfError) {
-        console.error(`PDF処理中にエラーが発生しました:`, pdfError);
+        // ログ出力は一度だけ行い、エラーメッセージは簡潔にする
         if (pdfError instanceof Error) {
-          console.error(`PDF Error: ${pdfError.message}`);
-          
           // Document AI失敗の理由をチェック
           if (pdfError.message.includes('pages exceed the limit') || pdfError.message.includes('PAGE_LIMIT_EXCEEDED')) {
-            throw new Error(`ファイル「${fileName}」はページ数が多すぎるため処理できません（30ページ制限）。ファイルを分割するか、より小さなファイルをアップロードしてください。`);
+            throw new Error(`ページ数が多すぎるため処理できません。ファイルを分割するか、より小さなファイルをアップロードしてください。`);
           } else if (pdfError.message.includes('invalid_grant') || pdfError.message.includes('account not found')) {
             throw new Error(`Document AI認証エラーが発生しました。システム管理者にお問い合わせください。`);
           } else if (pdfError.message.includes('AIが回答に使用できるコンテンツが含まれていません')) {
             throw pdfError; // 既に適切なメッセージなのでそのまま再投
           } else {
-            throw new Error(`ファイル「${fileName}」の処理中にエラーが発生しました: ${pdfError.message}`);
+            throw new Error(`PDF処理中にエラーが発生しました: ${pdfError.message}`);
           }
         } else {
-          throw new Error(`ファイル「${fileName}」の処理中に予期しないエラーが発生しました。`);
+          throw new Error(`PDF処理中に予期しないエラーが発生しました。`);
         }
       }
     } else if (['.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx'].includes(fileExtension)) {
@@ -662,15 +476,15 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
       console.warn(`未対応のファイル形式です: ${fileExtension}`);
       return null;
     }
-    console.log(`[${new Date().toISOString()}] [downloadAndProcessFile] After parsing. Doc count: ${docs.length}`); // ★ 追加
+
     
-    // docs の最終検証 ★
+    // docs の最終検証
     if (!docs || !Array.isArray(docs) || docs.length === 0) {
       console.error(`ドキュメント処理結果が無効です: docs=${docs}`);
       throw new Error("Document processing returned invalid or empty result");
     }
     
-    // 各docsのpageContentが有効であることを確認 ★
+    // 各docsのpageContentが有効であることを確認
     for (let i = 0; i < docs.length; i++) {
       if (!docs[i] || typeof docs[i].pageContent !== 'string') {
         console.warn(`Document ${i} has invalid pageContent, replacing with empty string`);
@@ -684,7 +498,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     console.log(`ファイル処理完了: ${docs.length}個のドキュメントを生成しました`);
     return { docs, tmpFilePath: actualTmpFilePath };
   } catch (error) {
-    console.error("\nファイル処理中にエラーが発生しました:", error);
+    // エラーを上位のhandlerに委譲（重複ログを避けるため）
     throw error;
   }
 }
@@ -1196,18 +1010,12 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
           });
         } else {
           console.error('Failed to process and store document, storeResult was:', storeResult);
-          throw new Error(`Failed to process ${fileName} during storage/embedding steps. Result from processAndStoreDocuments was not as expected.`);
+          throw new Error(`ファイル処理中にエラーが発生しました。ストレージまたは埋め込み処理でエラーが発生した可能性があります。`);
         }
       } catch (error: unknown) {
-        console.error(`Error in POST handler for file: ${fileNameForRollback || 'Unknown file'}:`, error);
-        
-        if (error instanceof Error) {
-            console.error(`Error Name: ${error.name}`);
-            console.error(`Error Message: ${error.message}`);
-            console.error(`Error Stack: ${error.stack}`);
-        } else {
-            console.error(`Unknown error type: ${typeof error}`, error);
-        }
+        // エラーの概要のみログ出力（詳細は不要）
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`ファイル処理エラー: ${errorMessage}`);
         
         // ファイルロールバック処理 (元のコードから持ってくる)
         if (fileNameForRollback && supabaseClient) {
@@ -1235,9 +1043,7 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         
         return new Response(JSON.stringify({ 
             error: message, 
-            detail: detail,
-            timestamp: new Date().toISOString(), 
-            file: fileNameForRollback || 'Unknown' 
+            timestamp: new Date().toISOString()
         }), { 
           status: 500, 
           headers: { ...corsHeaders, "Content-Type": "application/json" },
