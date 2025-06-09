@@ -175,7 +175,7 @@ function HomePageContent() {
           {/* ★ 開発用パネルを追加（共有モードでは非表示） */}
           {!shareId && process.env.NODE_ENV === 'development' && (
             <div className="p-4 border-t">
-              <DeveloperPanel onPremiumStatusChange={handlePremiumStatusChange} />
+              <DeveloperPanel onPremiumStatusChange={handlePremiumStatusChange}  />
             </div>
           )}
         </div>

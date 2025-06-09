@@ -1,5 +1,18 @@
 'use client';
 
+/**
+ * 開発用プラン切り替えパネル
+ * 
+ * 使用例:
+ * // 表示する場合（デフォルト）
+ * <DeveloperPanel onPremiumStatusChange={handleStatusChange} />
+ * 
+ * // 非表示にする場合
+ * <DeveloperPanel onPremiumStatusChange={handleStatusChange} hidden={true} />
+ * 
+ * // 本番環境では自動的に非表示になります
+ */
+
 import React, { useState, useEffect } from 'react';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,9 +27,13 @@ export interface PremiumStatus {
 
 interface DeveloperPanelProps {
   onPremiumStatusChange: (status: PremiumStatus) => void;
+  hidden?: boolean; // 開発用パネルを非表示にするオプション
 }
 
-export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ onPremiumStatusChange }) => {
+export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ 
+  onPremiumStatusChange, 
+  hidden = false 
+}) => {
   const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
@@ -28,8 +45,8 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({ onPremiumStatusC
     onPremiumStatusChange(premiumStatus);
   }, [isPremium, onPremiumStatusChange]);
 
-  // 本番環境では何も表示しない
-  if (process.env.NODE_ENV === 'production') {
+  // 本番環境または明示的に非表示設定されている場合は何も表示しない
+  if (process.env.NODE_ENV === 'production' || hidden) {
     return null;
   }
 

@@ -73,7 +73,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectAll, setSelectAll] = useState(false);
   
-  // ★ ソースデータ表示用のstate
+  // ★ 参照元データ表示用のstate
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [selectedFileForSource, setSelectedFileForSource] = useState<string>('');
   const [sourceTextData, setSourceTextData] = useState<string>('');
@@ -645,7 +645,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
     
   };
 
-  // ★ ソースデータ取得関数
+  // ★ 参照元データ取得関数
   const fetchSourceData = async (fileName: string) => {
     setLoadingSourceData(true);
     try {
@@ -722,7 +722,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
     } catch (err) {
       console.error('Unexpected error fetching source data:', err);
-      setMessageWithAutoHide({ type: 'error', text: 'ソースデータ取得中に予期せぬエラーが発生しました。' });
+      setMessageWithAutoHide({ type: 'error', text: '参照元データ取得中に予期せぬエラーが発生しました。' });
     } finally {
       setLoadingSourceData(false);
     }
@@ -738,7 +738,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       {/* ヘッダーセクション */}
       <div className="px-4 pt-4 pb-2 border-b">
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold">ソース管理</h2>
+          <h2 className="text-lg font-semibold">参照元の管理</h2>
           <Button onClick={handleFileTrigger} size="icon" variant="outline">
             <PlusIcon className="h-5 w-5" />
             <span className="sr-only">ファイル追加</span>
@@ -778,7 +778,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
               htmlFor="select-all-sources"
               className="text-base md:text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
             >
-              全てのソースを選択/解除
+              全ての参照元を選択/解除
             </label>
           </div>
         </div>
@@ -837,7 +837,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         {!loadingFiles && sourceFiles.length === 0 && (
           <div className="text-center text-muted-foreground py-8">
             <FileText className="mx-auto h-12 w-12 text-gray-400 mb-2" />
-            <p className="font-semibold">利用可能なソースファイルがありません。</p>
+            <p className="font-semibold">利用可能な参照元ファイルがありません。</p>
             <p className="text-sm">「ファイル追加」ボタンからアップロードしてください。</p>
           </div>
         )}
@@ -875,7 +875,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
                 <DropdownMenuLabel>操作</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => fetchSourceData(file.name)}>
-                  ソース元データを表示
+                  参照元元データを表示
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
                   名前を変更
@@ -892,11 +892,11 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         ))}
       </div>
 
-      {/* ソースデータ表示モーダル */}
+      {/* 参照元データ表示モーダル */}
       <Dialog open={isSourceModalOpen} onOpenChange={setIsSourceModalOpen}>
         <DialogContent className="max-w-4xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
-            <DialogTitle>ソース元データ - {selectedFileForSource}</DialogTitle>
+            <DialogTitle>参照元元データ - {selectedFileForSource}</DialogTitle>
             <DialogDescription>
               PDFから抽出されたテキストデータです。OCR抽出部分は [OCR抽出テキスト] マーカーで識別されます。
             </DialogDescription>

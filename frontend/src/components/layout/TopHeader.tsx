@@ -14,11 +14,7 @@ import { FeedbackModal } from '@/components/features/FeedbackModal';
 import { ShareModal } from '@/components/features/ShareModal'; // ShareModalを追加
 import { useMemoStore } from '@/store/memoStore'; // memoStoreを追加
 
-interface TopHeaderProps {
-  title: string;
-}
-
-const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
+const TopHeader: React.FC = () => {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false); // ShareModal用のstate追加
   const { isSignedIn } = useAuth();
@@ -53,13 +49,15 @@ const TopHeader: React.FC<TopHeaderProps> = ({ title }) => {
   return (
     <>
       <div className="flex items-center justify-between px-4 py-2 border-b h-16 bg-background">
-        {/* 左側: アイコンとタイトル */}
-        <div className="flex items-center flex-grow">
-          {/* アイコン用プレースホルダー */}
-          <div className="h-8 w-8 bg-slate-300 rounded mr-3 flex-shrink-0"></div>
-          
-          <div className="text-base sm:text-lg font-semibold text-foreground flex-grow mr-4 whitespace-nowrap truncate max-w-[80vw]">
-            <span>{title}</span>
+        {/* 左側: サービスロゴ */}
+        <div className="flex items-center">
+          {/* 270×60pxの画像表示領域 */}
+          <div className="h-[45px] flex-shrink-0">
+            <img 
+              src="/service_logo.png" 
+              alt="サービスロゴ" 
+              className="h-full w-auto max-w-[200px] object-contain"
+            />
           </div>
         </div>
 

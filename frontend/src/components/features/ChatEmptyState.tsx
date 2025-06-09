@@ -29,7 +29,7 @@ export const ChatEmptyState: React.FC = () => {
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-260px)] w-full text-center p-4">
       {/* メインメッセージ - モダンなグラデーション文字 */}
       <div className="mb-6">
-        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-blue-300 via-sky-300 to-slate-400 bg-clip-text text-transparent leading-tight">
+        <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold bg-gradient-to-r from-green-300 via-emerald-300 to-teal-400 bg-clip-text text-transparent leading-tight">
           下の入力欄から質問を送信して<br />会話を始めましょう
         </h1>
       </div>
