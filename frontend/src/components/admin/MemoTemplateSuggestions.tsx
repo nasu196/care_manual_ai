@@ -551,7 +551,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
             >
-              <h3 className="text-lg font-semibold mb-2">メモを生成しますか？</h3>
+              <h3 className="text-lg font-semibold text-green-700 mb-2">メモを生成しますか？</h3>
               <p className="text-sm mb-1">アイデア: 「{selectedIdeaForModal.title}」</p>
               {selectedIdeaForModal.source_files && selectedIdeaForModal.source_files.length > 0 && (
                 <p className="text-xs text-gray-600 mb-4">

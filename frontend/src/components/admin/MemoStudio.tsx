@@ -558,7 +558,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
   return (
     <div className="flex flex-col h-full">
       <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center flex-shrink-0">
-        <h2 className="text-lg font-semibold">メモ管理</h2>
+        <h2 className="text-lg font-semibold text-green-700">メモ管理</h2>
         {isSignedIn && hasEditPermission && !isEditingNewMemo && !selectedMemo && (
           <Button variant="outline" size="sm" onClick={() => {
             setIsEditingNewMemo(true);
@@ -601,7 +601,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
           {selectedMemo ? (
             isEditingSelectedMemo ? (
               <div className="h-full flex flex-col space-y-2 min-h-0">
-                <h3 className="text-xl font-semibold mb-2">メモを編集</h3>
+                <h3 className="text-xl font-semibold text-green-700 mb-2">メモを編集</h3>
                 <Input 
                   placeholder="タイトル" 
                   value={editingTitle} 
@@ -692,7 +692,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             )
           ) : isEditingNewMemo ? (
             <div className="h-full flex flex-col space-y-2 min-h-0">
-              <h3 className="text-md font-semibold flex-shrink-0">新しいメモを作成</h3>
+              <h3 className="text-md font-semibold text-green-700 flex-shrink-0">新しいメモを作成</h3>
               <Input 
                 placeholder="タイトル" 
                 value={newMemoTitle} 

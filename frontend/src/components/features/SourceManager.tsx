@@ -738,7 +738,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       {/* ヘッダーセクション */}
       <div className="px-4 pt-4 pb-2 border-b">
         <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold">参照元の管理</h2>
+          <h2 className="text-lg font-semibold text-green-700">参照元の管理</h2>
           <Button onClick={handleFileTrigger} size="icon" variant="outline">
             <PlusIcon className="h-5 w-5" />
             <span className="sr-only">ファイル追加</span>
@@ -807,7 +807,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       {/* アップロードキュー */}
       {uploadQueue.length > 0 && (
         <div className="px-4 mb-4 space-y-3">
-          <h3 className="text-md font-semibold text-gray-600">アップロード中のファイル:</h3>
+          <h3 className="text-md font-semibold text-green-700">アップロード中のファイル:</h3>
           {uploadQueue.map((item) => (
             <div key={item.id} className="p-3 rounded-md bg-gray-50">
               <div className="flex items-center justify-between text-sm">

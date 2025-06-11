@@ -250,7 +250,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   return (
     <div className="h-full flex flex-col">
       <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
-        <h2 className="text-lg font-semibold">AIチャット</h2>
+        <h2 className="text-lg font-semibold text-green-700">AIチャット</h2>
         
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
