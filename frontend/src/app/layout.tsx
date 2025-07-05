@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from '@clerk/nextjs';
 import { customJaJp } from '@/lib/clerk-custom-localization';
+import Analytics from '@/components/common/Analytics';
+import CookieConsent from '@/components/common/CookieConsent';
+import CookieConsentDebug from '@/components/common/CookieConsentDebug';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,6 +39,15 @@ export default function RootLayout({
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         >
+          <Analytics
+            gaMeasurementId={process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID}
+            clarityProjectId={process.env.NEXT_PUBLIC_CLARITY_PROJECT_ID}
+          />
+          <CookieConsent
+            domain={process.env.NEXT_PUBLIC_DOMAIN}
+            subdomains={process.env.NEXT_PUBLIC_SUBDOMAINS?.split(',') || []}
+          />
+          {process.env.NODE_ENV === 'development' && <CookieConsentDebug />}
           {children}
         </body>
       </html>
