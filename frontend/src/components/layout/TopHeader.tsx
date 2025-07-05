@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Settings, Share2, UserCircle } from 'lucide-react';
 import { UserButton, SignInButton, useAuth } from '@clerk/nextjs';
@@ -53,10 +54,13 @@ const TopHeader: React.FC = () => {
         <div className="flex items-center">
           {/* 270×60pxの画像表示領域 */}
           <div className="h-[45px] flex-shrink-0">
-            <img 
+            <Image 
               src="/service_logo.png" 
               alt="サービスロゴ" 
+              width={200}
+              height={45}
               className="h-full w-auto max-w-[200px] object-contain"
+              priority
             />
           </div>
         </div>

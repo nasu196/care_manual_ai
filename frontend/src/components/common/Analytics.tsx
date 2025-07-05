@@ -1,15 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
-// Window型を拡張
-declare global {
-  interface Window {
-    gtag: (...args: unknown[]) => void;
-    clarity: (...args: unknown[]) => void;
-    dataLayer: unknown[];
-  }
-}
+import { useEffect, useState, useCallback } from 'react';
 
 interface AnalyticsProps {
   gaMeasurementId?: string;
@@ -42,7 +33,7 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
   };
 
   // GA4スクリプトの動的追加
-  const loadGoogleAnalytics = () => {
+  const loadGoogleAnalytics = useCallback(() => {
     if (!gaMeasurementId) return;
 
     // GA4スクリプトの追加
@@ -54,11 +45,15 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
 
     // GA4初期化
     script.onload = () => {
-      window.dataLayer = window.dataLayer || [];
+      const w = window as unknown as {
+        dataLayer?: unknown[];
+        gtag?: (...args: unknown[]) => void;
+      };
+      w.dataLayer = w.dataLayer || [];
       function gtag(...args: unknown[]) {
-        window.dataLayer.push(args);
+        w.dataLayer?.push(args);
       }
-      window.gtag = gtag;
+      w.gtag = gtag;
       
       gtag('js', new Date());
       gtag('config', gaMeasurementId, {
@@ -66,10 +61,10 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
         page_location: window.location.href,
       });
     };
-  };
+  }, [gaMeasurementId]);
 
   // Clarityスクリプトの動的追加
-  const loadClarity = () => {
+  const loadClarity = useCallback(() => {
     if (!clarityProjectId) return;
 
     // Clarityスクリプトの追加
@@ -83,20 +78,20 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     `;
     script.id = 'clarity-script';
     document.head.appendChild(script);
-  };
+  }, [clarityProjectId]);
 
   // 分析ツールの有効化
-  const enableAnalytics = () => {
+  const enableAnalytics = useCallback(() => {
     if (!scriptsLoaded) {
       loadGoogleAnalytics();
       loadClarity();
       setScriptsLoaded(true);
     }
     setAnalyticsEnabled(true);
-  };
+  }, [scriptsLoaded, loadGoogleAnalytics, loadClarity]);
 
   // 分析ツールの無効化
-  const disableAnalytics = () => {
+  const disableAnalytics = useCallback(() => {
     setAnalyticsEnabled(false);
     
     // スクリプトの削除
@@ -112,13 +107,18 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     
     // グローバル変数の削除
     if (typeof window !== 'undefined') {
-      delete (window as any).gtag;
-      delete (window as any).clarity;
-      delete (window as any).dataLayer;
+      const w = window as unknown as {
+        gtag?: (...args: unknown[]) => void;
+        clarity?: (command: string, ...args: unknown[]) => void;
+        dataLayer?: unknown[];
+      };
+      delete w.gtag;
+      delete w.clarity;
+      delete w.dataLayer;
     }
     
     setScriptsLoaded(false);
-  };
+  }, []);
 
   // カスタムイベントリスナー
   useEffect(() => {
@@ -137,7 +137,7 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
       window.removeEventListener('enableAnalytics', handleEnableAnalytics);
       window.removeEventListener('disableAnalytics', handleDisableAnalytics);
     };
-  }, []);
+  }, [enableAnalytics, disableAnalytics]);
 
   // 初期化時にCookie同意状態を確認
   useEffect(() => {
@@ -145,7 +145,7 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     if (consentAccepted) {
       enableAnalytics();
     }
-  }, []);
+  }, [enableAnalytics]);
 
   // 静的スクリプトの代わりに動的制御を使用
   return (

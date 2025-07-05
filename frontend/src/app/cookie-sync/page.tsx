@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 function CookieSyncContent() {
   const searchParams = useSearchParams();

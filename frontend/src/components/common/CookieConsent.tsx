@@ -5,14 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { X } from 'lucide-react';
 
-// Window オブジェクトの型を拡張
-declare global {
-  interface Window {
-    gtag?: (...args: unknown[]) => void;
-    clarity?: (...args: unknown[]) => void;
-    dataLayer?: unknown[];
-  }
-}
+
 
 interface CookieConsentProps {
   domain?: string;
@@ -143,9 +136,14 @@ export default function CookieConsent({
       
       // グローバル変数の削除
       if (typeof window !== 'undefined') {
-        delete window.gtag;
-        delete window.clarity;
-        delete window.dataLayer;
+        const w = window as unknown as {
+          gtag?: (...args: unknown[]) => void;
+          clarity?: (command: string, ...args: unknown[]) => void;
+          dataLayer?: unknown[];
+        };
+        delete w.gtag;
+        delete w.clarity;
+        delete w.dataLayer;
       }
     }
   }, [deleteAnalyticsCookies]);
