@@ -69,9 +69,14 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
     // ★ ファイル選択チェックを追加
     if (!hasSelectedFiles) {
+      // 共有ページかどうかを判定
+      const isSharedPage = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('shareId');
+      
       const errorMessage: Message = {
         id: Date.now().toString(),
-        text: '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
+        text: isSharedPage 
+          ? '申し訳ございませんが、参照するマニュアルファイルが設定されていないため、回答ができません。\n\nこの共有ページの作成者に、必要なマニュアルファイルを選択してから共有リンクを再作成してもらってください。'
+          : '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
         isUser: false,
         timestamp: new Date(),
         isStreaming: false,
