@@ -1,14 +1,31 @@
-name: Deploy Supabase Edge Function
+# 将来的にSupabase CLI以外のCI/CD処理が必要になった場合に備えて保持
+# 現在はSupabase CLIで直接デプロイするため無効化中
+# 理由: GitHub Actionsでのデプロイ時に容量制限エラー（request entity too large）が発生
+# Supabase CLI直接デプロイでは同じファイルサイズでも正常にデプロイ可能
 
+name: Deploy Supabase Edge Function (DISABLED)
+
+# 自動トリガーを無効化
+# on:
+#   push:
+#     branches:
+#       - develop  # developブランチ -> 開発環境
+#       - main     # mainブランチ -> 本番環境
+
+# 手動実行のみ有効（通常は使用しない）
 on:
-  push:
-    branches:
-      - develop  # developブランチ -> 開発環境
-      - main     # mainブランチ -> 本番環境
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "CONFIRM" to proceed with manual deployment (normally use Supabase CLI instead)'
+        required: true
+        default: ''
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # 手動実行時も確認入力が必要
+    if: github.event.inputs.confirm == 'CONFIRM'
     environment:
       name: ${{ github.ref == 'refs/heads/main' && 'production' || 'development' }}
     env:
