@@ -96,7 +96,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       {editable && (
         <>
           {/* Mobile Toolbar (sm:hidden) */}
-          <div className="p-2 border-b flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden sm:hidden min-h-[3rem]">
+          <div className="p-2 border-b flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden [@media(hover:hover)]:hidden min-h-[3rem]">
             <Button
               variant="outline"
               size="sm"
@@ -229,7 +229,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
           </div>
 
           {/* Desktop Toolbar (hidden sm:flex) */}
-          <div className="hidden p-2 border-b sm:flex sm:flex-wrap items-center gap-1">
+          <div className="hidden p-2 border-b [@media(hover:hover)]:flex [@media(hover:hover)]:flex-wrap items-center gap-1">
             {/* H1, H2, H3 Buttons */}
             <Button variant="outline" size="sm" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} className={editor.isActive('heading', { level: 1 }) ? 'bg-accent text-accent-foreground' : ''} title="Heading 1"><Heading1 className="h-3.5 w-3.5" /></Button>
             <Button variant="outline" size="sm" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} className={editor.isActive('heading', { level: 2 }) ? 'bg-accent text-accent-foreground' : ''} title="Heading 2"><Heading2 className="h-3.5 w-3.5" /></Button>

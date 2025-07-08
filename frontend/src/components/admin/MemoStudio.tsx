@@ -776,7 +776,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                               </h4>
                             </div>
                             {!memo.isGenerating && (
-                              <div className="flex items-center gap-1 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                              <div className="flex items-center gap-1 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100">
                                 {isSignedIn && hasEditPermission && (
                                   <>
                                     <Button
