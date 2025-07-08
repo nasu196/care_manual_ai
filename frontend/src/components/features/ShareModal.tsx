@@ -125,6 +125,15 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
     setError(null);
     
     try {
+      // 現在のソース選択状態を取得
+      const selectedSources = localStorage.getItem('careManualAi_selectedSourceNames');
+      const selectedSourceNames = selectedSources ? JSON.parse(selectedSources) : [];
+
+      // マニュアルが選択されているかチェック
+      if (!selectedSourceNames || selectedSourceNames.length === 0) {
+        throw new Error('共有するマニュアルが選択されていません。\n「参照元の管理」からマニュアルにチェックを入れて、AIチャットで利用するマニュアルを選択してから共有してください。');
+      }
+
       const token = await getToken({ template: 'supabase' });
       if (!token) {
         throw new Error('認証トークンの取得に失敗しました。');
@@ -134,10 +143,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
       if (!supabaseUrl) {
         throw new Error('Supabase URLが設定されていません。');
       }
-
-      // 現在のソース選択状態を取得
-      const selectedSources = localStorage.getItem('careManualAi_selectedSourceNames');
-      const selectedSourceNames = selectedSources ? JSON.parse(selectedSources) : [];
 
       // 共有設定を保存するEdge Functionを呼び出し
       const response = await fetch(`${supabaseUrl}/functions/v1/create-share-config`, {
