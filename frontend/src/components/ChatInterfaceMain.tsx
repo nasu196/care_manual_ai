@@ -352,14 +352,15 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         </ScrollArea>
       </div>
 
-      <div className="p-4 md:p-6 border-t pb-6 md:pb-6" style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
+      <div className="p-3 md:p-6 border-t pb-4 md:pb-6" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
         <form onSubmit={handleSubmit} className="flex w-full space-x-2 items-center">
           <Input
             type="text"
             placeholder="質問を入力してください..."
             value={inputValue}
             onChange={(_) => setInputValue(_.target.value)}
-            className="flex-1 h-10 text-sm md:h-10 md:text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-gray-300 focus:shadow-none focus-visible:outline-none focus-visible:ring-0"
+            className="flex-1 h-10 md:text-sm focus:outline-none focus:ring-0 focus:ring-offset-0 focus:border-gray-300 focus:shadow-none focus-visible:outline-none focus-visible:ring-0"
+            style={{ fontSize: '16px' }}
             disabled={isLoading}
           />
           <Button 
