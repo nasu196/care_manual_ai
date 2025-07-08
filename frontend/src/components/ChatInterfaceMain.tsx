@@ -263,8 +263,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-green-700">AIチャット</h2>
+      <div className="px-3 md:px-4 pt-2 md:pt-4 pb-1.5 md:pb-2 border-b flex justify-between items-center">
+        <h2 className="text-base md:text-lg font-semibold text-green-700">AIチャット</h2>
         
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -352,7 +352,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
         </ScrollArea>
       </div>
 
-      <div className="p-4 md:p-6 border-t">
+      <div className="p-4 md:p-6 border-t pb-6 md:pb-6" style={{ paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}>
         <form onSubmit={handleSubmit} className="flex w-full space-x-2 items-center">
           <Input
             type="text"

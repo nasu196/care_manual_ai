@@ -66,6 +66,24 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
     return () => window.removeEventListener('resize', checkMobileView);
   }, [activeMobilePanel, currentPanels]);
 
+  // モバイルSafariのviewport height動的計算
+  useEffect(() => {
+    const setViewportHeight = () => {
+      const vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', `${vh}px`);
+      document.documentElement.style.setProperty('--full-height', `${window.innerHeight}px`);
+    };
+
+    setViewportHeight();
+    window.addEventListener('resize', setViewportHeight);
+    window.addEventListener('orientationchange', setViewportHeight);
+    
+    return () => {
+      window.removeEventListener('resize', setViewportHeight);
+      window.removeEventListener('orientationchange', setViewportHeight);
+    };
+  }, []);
+
   useEffect(() => {
     if (isMobileView) {
       if (currentPanelWidth > 0) { // currentPanelWidthが設定されてから計算
@@ -114,7 +132,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   if (isMobileView) {
     return (
-      <div className="flex flex-col h-screen bg-muted/40 overflow-hidden">
+      <div className="flex flex-col mobile-full-height bg-muted/40 overflow-hidden">
         <TopHeader />
         
         <Tabs 
@@ -122,12 +140,12 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
           onValueChange={(value) => setActiveMobilePanel(value as PanelType)} 
           className="w-full bg-white border-b"
         >
-          <TabsList className={`grid w-full h-12 rounded-none bg-white ${hasEditPermission ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          <TabsList className={`grid w-full h-9 md:h-12 rounded-none bg-white ${hasEditPermission ? 'grid-cols-3' : 'grid-cols-2'}`}>
             {currentPanels.map(panel => (
-              <TabsTrigger 
+                              <TabsTrigger 
                 key={panel} 
                 value={panel}
-                className="h-full text-base font-medium rounded-none border-transparent 
+                className="h-full text-sm md:text-base font-medium rounded-none border-transparent 
                            text-muted-foreground  
                            data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:shadow-none
                            hover:bg-accent hover:text-accent-foreground 
@@ -167,7 +185,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
 
   // PC表示 (既存のレイアウトをTailwindで少し調整)
   return (
-    <div className="flex flex-col h-screen max-h-screen bg-muted/40 overflow-hidden">
+    <div className="flex flex-col mobile-full-height max-h-screen bg-muted/40 overflow-hidden">
       <TopHeader />
       
       {/* 3カラムFlexエリア - 画面の高さを確実に制限 */}

@@ -87,3 +87,21 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/delete-file-function/deno.json"
 entrypoint = "./functions/delete-file-function/index.ts"
+
+[functions.list-share-configs]
+enabled = true
+verify_jwt = false
+import_map = "./functions/list-share-configs/deno.json"
+entrypoint = "./functions/list-share-configs/index.ts"
+
+[functions.delete-share-config]
+enabled = true
+verify_jwt = false
+import_map = "./functions/delete-share-config/deno.json"
+entrypoint = "./functions/delete-share-config/index.ts"
+
+[functions.create-share-config]
+enabled = true
+verify_jwt = false
+import_map = "./functions/create-share-config/deno.json"
+entrypoint = "./functions/create-share-config/index.ts"

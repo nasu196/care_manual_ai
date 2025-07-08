@@ -49,17 +49,17 @@ const TopHeader: React.FC = () => {
 
   return (
     <>
-      <div className="flex items-center justify-between px-4 py-2 border-b h-16 bg-background">
+      <div className="flex items-center justify-between px-3 md:px-4 py-1.5 md:py-2 border-b h-12 md:h-16 bg-background">
         {/* 左側: サービスロゴ */}
         <div className="flex items-center">
-          {/* 270×60pxの画像表示領域 */}
-          <div className="h-[45px] flex-shrink-0">
+          {/* モバイル版でコンパクトなロゴサイズ */}
+          <div className="h-[32px] md:h-[45px] flex-shrink-0">
             <Image 
               src="/service_logo.png" 
               alt="サービスロゴ" 
               width={200}
               height={45}
-              className="h-full w-auto max-w-[200px] object-contain"
+              className="h-full w-auto max-w-[140px] md:max-w-[200px] object-contain"
               priority
             />
           </div>

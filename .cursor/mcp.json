@@ -5,6 +5,18 @@
       "args": [
         "@playwright/mcp@latest"
       ]
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--read-only",
+        "--project-ref=komywhfdmjrmcamlgdnd"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "sbp_0121826ea0a160c468f982ef2fb154806d514b54"
+      }
     }
   }
 } 

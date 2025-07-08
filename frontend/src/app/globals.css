@@ -120,6 +120,24 @@
     @apply bg-background text-foreground;
   }
 
+  /* モバイルSafariのviewport問題を解決するための設定 */
+  :root {
+    --vh: 1vh;
+    --full-height: 100vh;
+  }
+  
+  .mobile-full-height {
+    height: calc(var(--full-height) - env(safe-area-inset-bottom));
+    min-height: calc(var(--full-height) - env(safe-area-inset-bottom));
+  }
+
+  @supports (height: 100dvh) {
+    .mobile-full-height {
+      height: 100dvh;
+      min-height: 100dvh;
+    }
+  }
+
   /* AIの回答メッセージのスタイル調整 */
   .prose {
     /* デフォルトのフォントサイズなどを維持しつつ、必要な部分を調整 */

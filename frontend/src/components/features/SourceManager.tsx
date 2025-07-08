@@ -736,9 +736,9 @@ const SourceManager: React.FC<SourceManagerProps> = ({
   return (
     <div className="flex flex-col h-full">
       {/* ヘッダーセクション */}
-      <div className="px-4 pt-4 pb-2 border-b">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-lg font-semibold text-green-700">参照元の管理</h2>
+      <div className="px-3 md:px-4 pt-2 md:pt-4 pb-1.5 md:pb-2 border-b">
+        <div className="flex justify-between items-center mb-1.5 md:mb-2">
+          <h2 className="text-base md:text-lg font-semibold text-green-700">参照元の管理</h2>
           <Button onClick={handleFileTrigger} size="icon" variant="outline">
             <PlusIcon className="h-5 w-5" />
             <span className="sr-only">ファイル追加</span>

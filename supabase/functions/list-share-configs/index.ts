@@ -7,7 +7,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from '../_shared/cors.ts'
 
-console.log("List Memos Function Initialized")
+console.log("List Share Configs Function Initialized")
 
 Deno.serve(async (req) => {
   // Handle OPTIONS request for CORS preflight
@@ -47,7 +47,36 @@ Deno.serve(async (req) => {
       )
     }
 
-    // Supabaseクライアントを作成（Clerk統合を活用）
+    // JWTからユーザーIDを取得（list-memosと同じ方式だが専用）
+    let userId;
+    try {
+      const token = authHeader.replace('Bearer ', '');
+      const parts = token.split('.');
+      if (parts.length !== 3) {
+        throw new Error('Invalid JWT format');
+      }
+      const payload = JSON.parse(atob(parts[1]));
+      console.log('[list-share-configs] Decoded Clerk JWT Payload:', payload);
+
+      userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+
+      if (!userId) {
+        console.error('[list-share-configs] User ID not found in Clerk JWT payload.');
+        return new Response(
+          JSON.stringify({ error: 'User ID not found in token' }),
+          { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`[list-share-configs] Authenticated user ID from Clerk JWT: ${userId}`);
+    } catch (e) {
+      console.error('[list-share-configs] Error decoding JWT:', e);
+      return new Response(
+        JSON.stringify({ error: 'Invalid token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Supabaseクライアントを作成（list-memosと同じ方式）
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
         headers: {
@@ -59,24 +88,30 @@ Deno.serve(async (req) => {
       },
     })
 
-    // memosテーブルからデータを取得（RLSポリシーがユーザー分離を処理）
-    const { data, error } = await supabase
-      .from('memos')
-      .select('*')
-      .order('created_at', { ascending: false }) // 作成日時の降順で取得 (新しいものが先頭)
+    // share_configsテーブルからデータを取得（RLSポリシーとAPI側でユーザー分離）
+    console.log(`Fetching share configs for user: ${userId}`);
+    
+    const { data: shareConfigs, error: shareError } = await supabase
+      .from('share_configs')
+      .select('id, selected_source_names, created_at, expires_at, is_active')
+      .eq('user_id', userId)  // 重要: このユーザーのもののみ
+      .eq('is_active', true)   // アクティブなもののみ
+      .order('created_at', { ascending: false })  // 新しい順
 
-    if (error) {
-      console.error('Error fetching memos:', error)
+    if (shareError) {
+      console.error('Error fetching share configs:', shareError)
       return new Response(
-        JSON.stringify({ error: error.message }),
+        JSON.stringify({ error: shareError.message }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }
 
-    console.log(`Found ${data?.length || 0} memos`)
+    console.log(`Found ${shareConfigs?.length || 0} share configs for user ${userId}`)
 
     return new Response(
-      JSON.stringify(data),
+      JSON.stringify({
+        shareConfigs: shareConfigs || []
+      }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (e) {
@@ -93,8 +128,8 @@ Deno.serve(async (req) => {
   1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
   2. Make an HTTP request:
 
-  curl -i --location --request GET 'http://127.0.0.1:54321/functions/v1/list-memos' \
+  curl -i --location --request GET 'http://127.0.0.1:54321/functions/v1/list-share-configs' \
     --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
     --header 'Content-Type: application/json'
 
-*/
+*/ 

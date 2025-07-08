@@ -557,8 +557,8 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2 border-b flex justify-between items-center flex-shrink-0">
-        <h2 className="text-lg font-semibold text-green-700">メモ管理</h2>
+      <div className="px-3 md:px-4 pt-2 md:pt-4 pb-1.5 md:pb-2 border-b flex justify-between items-center flex-shrink-0">
+        <h2 className="text-base md:text-lg font-semibold text-green-700">メモ管理</h2>
         {isSignedIn && hasEditPermission && !isEditingNewMemo && !selectedMemo && (
           <Button variant="outline" size="sm" onClick={() => {
             setIsEditingNewMemo(true);
@@ -601,7 +601,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
           {selectedMemo ? (
             isEditingSelectedMemo ? (
               <div className="h-full flex flex-col space-y-2 min-h-0">
-                <h3 className="text-xl font-semibold text-green-700 mb-2">メモを編集</h3>
+                <h3 className="text-base md:text-xl font-semibold text-green-700 mb-1.5 md:mb-2">メモを編集</h3>
                 <Input 
                   placeholder="タイトル" 
                   value={editingTitle} 
@@ -674,7 +674,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                   {selectedMemo.is_important && (
                     <Flag size={16} className="text-red-500 fill-red-500 animate-pulse" />
                   )}
-                  <h3 className={`text-base sm:text-xl font-semibold whitespace-nowrap truncate max-w-[90vw] ${
+                  <h3 className={`text-sm md:text-base lg:text-xl font-semibold whitespace-nowrap truncate max-w-[90vw] ${
                     selectedMemo.is_important ? 'text-red-900' : 'text-gray-900'
                   }`}>
                     {selectedMemo.title}
@@ -692,7 +692,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
             )
           ) : isEditingNewMemo ? (
             <div className="h-full flex flex-col space-y-2 min-h-0">
-              <h3 className="text-md font-semibold text-green-700 flex-shrink-0">新しいメモを作成</h3>
+              <h3 className="text-sm md:text-base font-semibold text-green-700 flex-shrink-0">新しいメモを作成</h3>
               <Input 
                 placeholder="タイトル" 
                 value={newMemoTitle} 
@@ -731,7 +731,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
               )}
               
               <div>
-                <h3 className="text-sm font-medium text-gray-500 mb-4">作成済みメモ</h3>
+                <h3 className="text-xs md:text-sm font-medium text-gray-500 mb-3 md:mb-4">作成済みメモ</h3>
                 {isLoading && <p className="text-center py-8 text-gray-500">メモを読み込み中...</p>}
                 {error && (
                   <div className="p-4 border border-red-200 rounded-lg bg-red-50 text-red-600 text-center">
