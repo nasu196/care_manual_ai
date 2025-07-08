@@ -96,7 +96,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({
       {editable && (
         <>
           {/* Mobile Toolbar (sm:hidden) */}
-          <div className="p-2 border-b flex flex-nowrap items-center gap-1 overflow-x-auto sm:hidden">
+          <div className="p-2 border-b flex flex-nowrap items-center gap-1 overflow-x-auto overflow-y-hidden sm:hidden min-h-[3rem]">
             <Button
               variant="outline"
               size="sm"

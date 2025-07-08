@@ -662,7 +662,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
                             }`} 
                           />
                         )}
-                        {selectedMemo.is_important ? '重要フラグを外す' : '重要フラグを立てる'}
+                        {selectedMemo.is_important ? '重要フラグ' : '重要フラグ'}
                       </Button>
                       <Button variant="default" size="sm" onClick={handleStartEdit}>
                         編集する
