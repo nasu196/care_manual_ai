@@ -4,7 +4,6 @@ import { ClerkProvider } from '@clerk/nextjs';
 import { customJaJp } from '@/lib/clerk-custom-localization';
 import Analytics from '@/components/common/Analytics';
 import CookieConsent from '@/components/common/CookieConsent';
-import CookieConsentDebug from '@/components/common/CookieConsentDebug';
 import "./globals.css";
 
 const geistSans = Geist({
@@ -47,7 +46,6 @@ export default function RootLayout({
             domain={process.env.NEXT_PUBLIC_DOMAIN}
             subdomains={process.env.NEXT_PUBLIC_SUBDOMAINS?.split(',') || []}
           />
-          {process.env.NODE_ENV === 'development' && <CookieConsentDebug />}
           {children}
         </body>
       </html>

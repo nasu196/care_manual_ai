@@ -67,8 +67,15 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     e.preventDefault();
     if (!inputValue.trim()) return;
 
+    // ★ デバッグログ追加
+    console.log('[DEBUG] selectedSourceNames:', selectedSourceNames);
+    console.log('[DEBUG] hasSelectedFiles:', hasSelectedFiles);
+    console.log('[DEBUG] selectedSourceNames.length:', selectedSourceNames.length);
+    console.log('[DEBUG] localStorage selectedSources:', localStorage.getItem('careManualAi_selectedSourceNames'));
+
     // ★ ファイル選択チェックを追加
     if (!hasSelectedFiles) {
+      console.log('[DEBUG] ファイル選択チェックでブロック');
       // 共有ページかどうかを判定
       const isSharedPage = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('shareId');
       
@@ -93,6 +100,8 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       setInputValue('');
       return;
     }
+
+    console.log('[DEBUG] ファイル選択チェック通過 - API呼び出し開始');
 
     const userMessage: Message = {
       id: Date.now().toString(),
