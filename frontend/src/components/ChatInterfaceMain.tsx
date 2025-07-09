@@ -135,9 +135,40 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       // Clerkから認証トークンを取得
       let authToken: string | null = null;
       if (!shareId) {
-        authToken = await getToken({ template: 'supabase' });
-        if (!authToken) {
-          throw new Error('認証情報の取得に失敗しました。');
+        try {
+          console.log('[DEBUG] getToken開始');
+          
+          // タイムアウト付きでgetTokenを実行
+          const tokenPromise = getToken({ template: 'supabase' });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('TIMEOUT')), 10000); // 10秒タイムアウト
+          });
+          
+          authToken = await Promise.race([tokenPromise, timeoutPromise]);
+          console.log('[DEBUG] getToken成功:', authToken ? 'トークン取得済み' : 'トークンなし');
+          
+          if (!authToken) {
+            throw new Error('認証情報の取得に失敗しました。');
+          }
+        } catch (tokenError) {
+          console.error('[DEBUG] getToken error:', tokenError);
+          console.error('[DEBUG] error type:', typeof tokenError);
+          console.error('[DEBUG] error name:', tokenError instanceof Error ? tokenError.name : 'Unknown');
+          console.error('[DEBUG] error message:', tokenError instanceof Error ? tokenError.message : 'Unknown');
+          
+          // ネットワークエラーの場合は日本語メッセージに変換
+          if (tokenError instanceof Error) {
+            if (tokenError.message === 'TIMEOUT') {
+              throw new Error('ネットワーク接続に問題があります。インターネット接続を確認してください。');
+            }
+            if (tokenError.message.includes('Failed to fetch') || 
+                tokenError.message.includes('NetworkError') || 
+                tokenError.message.includes('ClerkJS: Network error') ||
+                tokenError.name === 'TypeError') {
+              throw new Error('ネットワーク接続に問題があります。インターネット接続を確認してください。');
+            }
+          }
+          throw new Error('認証情報の取得に失敗しました。再度ログインしてください。');
         }
       }
 

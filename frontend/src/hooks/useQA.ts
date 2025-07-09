@@ -130,6 +130,17 @@ export function useQA() {
       };
     } catch (error) {
       console.error('QA APIエラー:', error);
+      
+      // ネットワークエラーのハンドリング
+      if (error instanceof Error) {
+        if (error.message.includes('Failed to fetch') || error.name === 'TypeError') {
+          throw new Error('ネットワーク接続に問題があります。インターネット接続を確認してください。');
+        }
+        if (error.message.includes('NetworkError') || error.message.includes('network error')) {
+          throw new Error('ネットワークエラーが発生しました。しばらく時間をおいてからお試しください。');
+        }
+      }
+      
       throw error;
     } finally {
       setIsLoading(false);
