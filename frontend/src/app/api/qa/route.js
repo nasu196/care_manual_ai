@@ -38,7 +38,7 @@ function initializeClientsAndChains() {
   if (!chatModelForPhase0) {
     chatModelForPhase0 = new ChatGoogleGenerativeAI({
         apiKey: geminiApiKey,
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         temperature: 0.2,
     });
   }
@@ -88,10 +88,10 @@ RAGが必要と判断した場合（ほとんどの場合）：
   if (!chatModelForAnalysis) {
     chatModelForAnalysis = new ChatGoogleGenerativeAI({
         apiKey: geminiApiKey,
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         temperature: 0.4,
     });
-    console.log("[API /api/qa] Gemini model for analysis initialized with gemini-2.0-flash.");
+    console.log("[API /api/qa] Gemini model for analysis initialized with gemini-2.5-flash.");
   }
 
   // --- 第1段階LLM用: 質問分析とクエリ生成 ---
@@ -161,7 +161,7 @@ RAGが必要と判断した場合（ほとんどの場合）：
   if (!geminiModelForAnswer) {
     const genAI = new GoogleGenerativeAI(geminiApiKey);
     geminiModelForAnswer = genAI.getGenerativeModel({
-      model: "gemini-2.0-flash",
+      model: "gemini-2.5-flash",
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
@@ -172,7 +172,7 @@ RAGが必要と判断した場合（ほとんどの場合）：
         temperature: 0.4,
       },
     });
-    console.log("[API /api/qa] Gemini model for answer generation initialized with gemini-2.0-flash.");
+    console.log("[API /api/qa] Gemini model for answer generation initialized with gemini-2.5-flash.");
   }
 }
 
@@ -579,7 +579,10 @@ export async function POST(request) {
 ` : '';
     
     const answerGenerationSystemPrompt = `
-あなたは提供されたマニュアル情報と会話履歴を基に、ユーザーの質問に正確に回答するAIアシスタントです。
+あなたは提供されたマニュアル情報を基に、ユーザーの質問に正確に回答するAIアシスタントです。
+
+**【重要】マニュアル情報の評価指針**
+会話履歴で過去に「情報不足」と判定された場合でも、現在提供されている背景情報を新鮮な視点で評価してください。参照元ファイルが変更されている可能性があるため、過去の判定に固執せず、現在の背景情報の充足度を正確に評価してください。
 
 分析指示:
 ${analysisSummaryForPrompt}
@@ -589,34 +592,26 @@ ${formattedChatHistory}
 
 ${noSourceGuidancePrompt}
 
-**回答ルール:**
+**【STEP 1: 内部評価プロセス - 内部処理のみ、出力しない】**
 
-1. **マニュアル優先**: 提供される背景情報に質問に関連する十分な内容が含まれている場合は、その情報を基に回答する
+**マニュアル情報充足度**: ○○% (分析指示で特定されたユーザーニーズに対して、背景情報のマニュアルチャンクがどの程度直接的な回答を提供できるかの割合。関連情報や周辺情報は含めない。過去の判定は無視し、現在の情報のみで評価。)
 
-2. **情報不足時の対応**: 以下の場合は情報不足として明確に伝える
-   - 背景情報が提供されていない、または空の場合
-   - 背景情報が質問内容と関連性が低い場合
+**判定根拠**: 
+- **ユーザーニーズ**: [分析指示から抽出されたユーザーの意図・求める情報レベル]
+- **マニュアル対応状況**: [背景情報でそのニーズにどの程度対応できるかを具体的に説明]
 
-   **情報不足時のメッセージ:**
-   「申し訳ございませんが、お尋ねの内容について、現在参照可能な資料からは適切な情報を見つけることができませんでした。
+**【選択した回答方針】**
+- 充足度80%以上 → マニュアル中心回答（一般知識最小限）
+- 充足度50-79% → マニュアル中心 + 一般知識20%以下の補完
+- 充足度49%未満 → 情報不足として伝える（マニュアルに十分な記載がないことを明示した上で、一般的な知識で補足できる範囲で情報を提供） 
 
-   より正確な回答をお提供するために：
-   - 質問内容に関連する適切な資料やマニュアルをご指定ください
-   - 質問内容をより具体的にお教えいただけると、より適切な回答をお提供できる可能性があります
+**【STEP 2: 回答生成】**
 
-   現在参照可能な資料では、ご質問にお答えすることができません。」
+自然で読みやすい回答を生成してください。一般知識で補完した場合は、最後に以下の形式で簡潔に明記：
 
-3. **一般知識補完**: 以下の条件を満たす場合のみ許可
-   - マニュアル情報が質問の主要部分をカバーしている
-   - 補完情報がマニュアル内容と矛盾しない
-   - 基本的・客観的な事実のみ
-   
-   補完時は「※マニュアルには記載されていませんが、関連する基本情報として補足します」と明記
-
-**回答作成**: 
-- 分析指示の「回答の基本方針」「期待される回答の詳細度」「強調すべき主要ポイント」に従う
-- 日本語で自然な文章で記述
-- 内部処理や分析結果への言及は禁止
+---
+**※一般的な知識による補完情報**
+・[どの部分を補完したかの要点のみ。詳細説明は記載しない]
 
 背景情報:
 ${contextForLLM}
