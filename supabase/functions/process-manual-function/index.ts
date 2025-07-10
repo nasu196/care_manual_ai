@@ -4,7 +4,6 @@
 
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
-import "npm:pdf-parse";
 
 console.log("Hello from Functions!")
 
@@ -14,7 +13,7 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 import { OpenAIEmbeddings } from "npm:@langchain/openai";
 import officeParser from "npm:officeparser";
-import pdf from "npm:pdf-parse";
+import { extractText, getDocumentProxy } from "npm:unpdf";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -333,28 +332,28 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     let textContent = '';
 
     if (fileExtension === '.pdf') {
-      console.log("\npdf-parseでドキュメントを読み込み開始...");
+      console.log("\nunpdfでドキュメントを読み込み開始...");
       try {
-        const pdfData = await pdf(fileBuffer);
+        const pdfDoc = await getDocumentProxy(new Uint8Array(fileBuffer));
+        const { text: rawText, totalPages: totalPagesFromExtraction } = await extractText(pdfDoc, { mergePages: true });
 
-        if (!pdfData) {
-          throw new Error("pdf-parse returned null/undefined data");
+        if (!rawText) {
+          throw new Error("unpdf returned null/undefined text");
         }
         
-        const rawText = pdfData.text || '';
-        numPages = pdfData.numpages || 0;
+        numPages = totalPagesFromExtraction || 0;
         console.log(`PDF解析結果: テキスト長=${rawText.length}文字, ページ数=${numPages}`);
         textContent = rawText;
 
         // Document AI の30ページ制限とテキスト品質をチェック
         if (numPages > 30) {
-          // 30ページ超過の場合、pdf-parseの品質をチェック
+          // 30ページ超過の場合、unpdfの品質をチェック
           if (isTextExtractionInsufficient(textContent, numPages)) {
-            // pdf-parseが品質不十分かつ30ページ超過の場合は処理中断
+            // unpdfが品質不十分かつ30ページ超過の場合は処理中断
             throw new Error(`テキストの抽出品質が不十分なため対応できません。より小さなファイルに分割してアップロードしてください。`);
           } else {
-            console.log(`30ページ超過ですが、pdf-parseの品質が十分なため処理を続行`);
-            // pdf-parseが十分な品質の場合は30ページ超過でも処理続行
+            console.log(`30ページ超過ですが、unpdfの品質が十分なため処理を続行`);
+            // unpdfが十分な品質の場合は30ページ超過でも処理続行
           }
         } else if (isTextExtractionInsufficient(textContent, numPages)) {
           console.log(`Document AI OCR処理を実行中...`);
@@ -386,7 +385,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
             }
           } catch (ocrError) {
             console.error(`Document AI OCR処理エラー:`, ocrError);
-            console.warn(`OCRエラーのため、pdf-parseの結果のみを使用します`);
+            console.warn(`OCRエラーのため、unpdfの結果のみを使用します`);
           }
         }
 
