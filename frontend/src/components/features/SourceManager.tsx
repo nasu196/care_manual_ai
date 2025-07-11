@@ -27,6 +27,7 @@ interface SourceFile {
   id: string; // Supabase Storage オブジェクトは id を持たないため、name を id として使うか、別途定義が必要
   name: string;
   originalName: string;
+  recordId: string; // データベースレコードのID追加
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
@@ -145,7 +146,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         throw new Error("Supabase URL or Anon Key is not configured.");
       }
 
-      const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=file_name,original_file_name&order=file_name.asc`;
+      const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=id,file_name,original_file_name&order=file_name.asc`;
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -163,12 +164,20 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
       const data = await response.json();
 
+      // 重複を排除：同じfile_nameの場合は最新のレコード（最大id）を使用
+      const uniqueManuals = new Map();
+      (data as Array<{id: string, file_name: string, original_file_name: string}>)?.forEach((item) => {
+        const key = item.file_name;
+        if (!uniqueManuals.has(key) || parseInt(item.id) > parseInt(uniqueManuals.get(key).id)) {
+          uniqueManuals.set(key, item);
+        }
+      });
 
-
-      const files = (data as Array<{file_name: string, original_file_name: string}>)?.map((item) => ({ 
+      const files = Array.from(uniqueManuals.values()).map((item) => ({ 
         name: item.original_file_name || item.file_name, 
         originalName: item.original_file_name || item.file_name,
-        id: item.file_name 
+        id: item.file_name,
+        recordId: item.id // データベースレコードのID追加
       })) || [];
       setSourceFiles(files);
 
@@ -313,18 +322,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         console.error('[DEBUG] Failed to parse JWT for debugging:', debugError);
       }
 
-      // ★ Edge Function経由でアップロード
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (!supabaseUrl) {
-        console.error("Supabase URL is not defined.");
-        updateUploadStatus(uploadId, {
-          status: 'error',
-          error: 'Supabase URLが設定されていません。',
-          message: 'エラー: 設定不備'
-        });
-        return;
-      }
-      const uploadFunctionUrl = `${supabaseUrl}/functions/v1/upload-manual-function`;
+      // ★ Vercel Functions APIでアップロード
+      const uploadFunctionUrl = '/api/upload-manual';
       const formData = new FormData();
       formData.append('file', file);
       formData.append('originalFileName', originalFileName);
@@ -336,16 +335,14 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         body: formData,
       });
 
-
-
       if (!uploadResponse.ok) {
         const errorText = await uploadResponse.text();
         console.error('[handleUpload] Storage upload error:', errorText);
         let errorMessage = `ストレージアップロードに失敗しました (status: ${uploadResponse.status})`;
         try {
           const errorJson = JSON.parse(errorText);
-          if (errorJson.message) {
-            errorMessage = errorJson.message;
+          if (errorJson.error) {
+            errorMessage = errorJson.error;
           }
         } catch {
           // JSON解析に失敗した場合はそのままテキストを使用
@@ -361,12 +358,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         return;
       }
 
-      // upload-manual-functionからのレスポンスをパース
+      // Vercel Functions APIからのレスポンスをパース
       const uploadResult = await uploadResponse.json();
-      const storagePath = uploadResult.storagePath; // `userId/encodedFileName` 形式のパス
+      const storagePath = uploadResult.fileName; // `userId/encodedFileName` 形式のパス
 
       if (!storagePath) {
-        console.error('[handleUpload] storagePath not found in upload-manual-function response:', uploadResult);
+        console.error('[handleUpload] fileName not found in upload-manual API response:', uploadResult);
         updateUploadStatus(uploadId, {
           status: 'error',
           error: 'アップロード処理は成功しましたが、サーバーからの応答が不正です。',
@@ -381,13 +378,13 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       });
 
       try {
-        // ★ process-manual-function Edge Functionを呼び出し
-        const requestUrl = `${supabaseUrl}/functions/v1/process-manual-function`;
+        // ★ Vercel Functions PDF処理APIを呼び出し
+        const requestUrl = '/api/process-pdf';
         const headers = {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         };
-        // process-manual-function には storagePath を fileNameとして渡す
+        // process-pdf には storagePath を fileNameとして渡す
         const body = JSON.stringify({ fileName: storagePath, originalFileName });
 
         const response = await fetch(requestUrl, {
@@ -403,16 +400,16 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           if (responseText.trim()) {
             responseData = JSON.parse(responseText);
           } else {
-            responseData = { error: 'Edge Functionからの空のレスポンス' };
+            responseData = { error: 'PDF処理APIからの空のレスポンス' };
           }
         } catch (parseError) {
-          console.error(`[handleUpload] Failed to parse Edge Function response:`, parseError);
-          throw new Error(`Edge Functionのレスポンス解析に失敗: ${parseError instanceof Error ? parseError.message : '不明なエラー'}`);
+          console.error(`[handleUpload] Failed to parse PDF processing API response:`, parseError);
+          throw new Error(`PDF処理APIのレスポンス解析に失敗: ${parseError instanceof Error ? parseError.message : '不明なエラー'}`);
         }
 
         if (!response.ok) {
-          console.error('[handleUpload] Edge Function call failed:', response.status, responseData);
-          const errorMessage = responseData?.error || responseData?.message || `Edge Functionの実行に失敗 (status: ${response.status})`;
+          console.error('[handleUpload] PDF processing API call failed:', response.status, responseData);
+          const errorMessage = responseData?.error || responseData?.message || `PDF処理APIの実行に失敗 (status: ${response.status})`;
           throw new Error(errorMessage);
         }
 
@@ -435,8 +432,8 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         }, 3000);
 
       } catch (funcError: unknown) {
-        console.error('Error calling Edge Function:', funcError);
-        let errorMessage = 'サーバー処理中に不明なエラーが発生しました。';
+        console.error('Error calling PDF processing API:', funcError);
+        let errorMessage = 'PDF処理中に不明なエラーが発生しました。';
         if (funcError instanceof Error) {
           errorMessage = funcError.message;
         }
@@ -667,35 +664,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         return;
       }
       const storageFileName = targetFile.id; // エンコードされたファイル名
+      const recordId = targetFile.recordId; // データベースレコードのID
 
-      // manualsテーブルからmanual_idを取得
-      const manualApiUrl = `${supabaseUrl}/rest/v1/manuals?select=id&file_name=eq.${storageFileName}`;
-      const manualResponse = await fetch(manualApiUrl, {
-        method: 'GET',
-        headers: {
-          'apikey': supabaseAnonKey,
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.pgrst.object+json', // .single() に相当
-        },
-      });
-
-      if (!manualResponse.ok) {
-        const errorData = await manualResponse.json().catch(() => ({ message: manualResponse.statusText }));
-        console.error('Manual not found error:', errorData);
-        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のデータが見つかりません: ${errorData.message || manualResponse.statusText}` });
-        setLoadingSourceData(false); // ★ ローディング解除
-        return;
-      }
-      const manualData = await manualResponse.json();
-      if (!manualData || !manualData.id) { // manualData自体がnull/undefined、またはidがない場合
-        console.error('Manual data or ID is missing after successful fetch');
-        setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」のID取得に失敗しました。` });
-        setLoadingSourceData(false); // ★ ローディング解除
-        return;
-      }
-
-      // manual_chunksからテキストデータを取得
-      const chunksApiUrl = `${supabaseUrl}/rest/v1/manual_chunks?select=chunk_text,chunk_order&manual_id=eq.${manualData.id}&order=chunk_order.asc`;
+      // manual_chunksからテキストデータを直接取得（recordIdを使用）
+      const chunksApiUrl = `${supabaseUrl}/rest/v1/manual_chunks?select=chunk_text,chunk_order&manual_id=eq.${recordId}&order=chunk_order.asc`;
       const chunksResponse = await fetch(chunksApiUrl, {
         method: 'GET',
         headers: {
@@ -843,7 +815,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         )}
         {!loadingFiles && sourceFiles.map((file) => (
           <div
-            key={file.id || file.name}
+            key={file.recordId}
             className={`flex items-center justify-between p-3 rounded-md transition-colors
                         ${selectedSourceNames.includes(file.name) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100"}
                         `}

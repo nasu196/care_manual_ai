@@ -10,8 +10,12 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 import { OpenAIEmbeddings } from "npm:@langchain/openai";
+// DOMMatrixポリフィル - pdf-parse2のDOMMatrix依存問題を解決 ★
+import DOMMatrix from "npm:@thednp/dommatrix";
+(globalThis as any).DOMMatrix = DOMMatrix;
+
 import officeParser from "npm:officeparser";
-import { getDocument } from "https://esm.sh/pdfjs-serverless@1.0.1";
+import pdf from "npm:pdf-parse";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -330,30 +334,31 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     let textContent = '';
 
     if (fileExtension === '.pdf') {
-      console.log("\npdfjs-serverlessでドキュメントを読み込み開始...");
+      console.log("\npdf-parseでドキュメントを読み込み開始...");
       try {
-        const doc = await getDocument({
-          data: new Uint8Array(fileBuffer),
-          useSystemFonts: true,
-        }).promise;
+        // pdf-parseの正しい関数ベース使用法 ★
+        const pdfResult = await Promise.race([
+          pdf(fileBuffer),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("PDF processing timeout")), 30000)
+          )
+        ]);
 
-        if (!doc) {
-          throw new Error("pdfjs-serverless returned null/undefined document");
+        const pdfData = pdfResult as any;
+        if (!pdfData) {
+          throw new Error("pdf-parse returned null/undefined document");
         }
         
-        numPages = doc.numPages || 0;
+        // pdf-parseの結果から情報を取得 ★
+        numPages = (typeof pdfData.numpages === 'number' && pdfData.numpages > 0) ? pdfData.numpages : 0;
+        const rawText = pdfData.text || '';
         
-        // 全ページのテキストを抽出
-        let rawText = '';
-        for (let i = 1; i <= numPages; i++) {
-          const page = await doc.getPage(i);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items.map((item: any) => item.str).join(' ');
-          rawText += pageText + '\n';
+        if (numPages === 0) {
+          throw new Error("PDF has no pages or invalid page count");
         }
 
         if (!rawText.trim()) {
-          throw new Error("pdfjs-serverless returned null/undefined text");
+          throw new Error("pdf-parse returned null/undefined text");
         }
         
         console.log(`PDF解析結果: テキスト長=${rawText.length}文字, ページ数=${numPages}`);
@@ -361,13 +366,13 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
 
         // Document AI の30ページ制限とテキスト品質をチェック
         if (numPages > 30) {
-          // 30ページ超過の場合、unpdfの品質をチェック
+          // 30ページ超過の場合、pdf-parse2の品質をチェック
           if (isTextExtractionInsufficient(textContent, numPages)) {
-            // unpdfが品質不十分かつ30ページ超過の場合は処理中断
+            // pdf-parse2が品質不十分かつ30ページ超過の場合は処理中断
             throw new Error(`テキストの抽出品質が不十分なため対応できません。より小さなファイルに分割してアップロードしてください。`);
           } else {
-            console.log(`30ページ超過ですが、unpdfの品質が十分なため処理を続行`);
-            // unpdfが十分な品質の場合は30ページ超過でも処理続行
+            console.log(`30ページ超過ですが、pdf-parse2の品質が十分なため処理を続行`);
+            // pdf-parse2が十分な品質の場合は30ページ超過でも処理続行
           }
         } else if (isTextExtractionInsufficient(textContent, numPages)) {
           console.log(`Document AI OCR処理を実行中...`);
@@ -399,7 +404,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
             }
           } catch (ocrError) {
             console.error(`Document AI OCR処理エラー:`, ocrError);
-            console.warn(`OCRエラーのため、unpdfの結果のみを使用します`);
+            console.warn(`OCRエラーのため、pdf-parse2の結果のみを使用します`);
           }
         }
 
@@ -810,32 +815,105 @@ async function processAndStoreDocuments(
     
     let chunkEmbeddings: number[][];
     try {
+        // embeddingsClientの厳密なチェック ★
         if (!embeddingsClient) {
             throw new Error("Embeddings client is not initialized");
         }
-        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Calling embedDocuments for ${chunkTextsForEmbedding.length} texts...`); // ★ タイムスタンプ追加
-        chunkEmbeddings = await embeddingsClient.embedDocuments(chunkTextsForEmbedding);
-        if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) { 
-            console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Embeddings generation returned invalid result:`, chunkEmbeddings); // ★ タイムスタンプ追加
-            throw new Error("Embeddings generation returned invalid result");
+        
+        // chunkTextsForEmbeddingの検証 ★
+        if (!chunkTextsForEmbedding || !Array.isArray(chunkTextsForEmbedding) || chunkTextsForEmbedding.length === 0) {
+            throw new Error("No valid chunks available for embedding");
         }
-        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Embeddings generated for ${chunkEmbeddings.length} chunks.`); // ★ タイムスタンプ追加
+        
+        // 各チャンクテキストの検証 ★
+        const validTexts = chunkTextsForEmbedding.filter((text, index) => {
+            if (text === null || text === undefined || typeof text !== 'string') {
+                console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Invalid chunk text at index ${index}, filtering out`);
+                return false;
+            }
+            return text.trim().length > 0;
+        });
+        
+        if (validTexts.length === 0) {
+            throw new Error("No valid text chunks found after filtering");
+        }
+        
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Calling embedDocuments for ${validTexts.length} valid texts...`);
+        
+        // embedding呼び出しの前にnullチェック ★
+        const embeddingResult = await embeddingsClient.embedDocuments(validTexts);
+        
+        // 結果のnull/undefinedチェック強化 ★
+        if (embeddingResult === null || embeddingResult === undefined) {
+            throw new Error("Embeddings API returned null or undefined");
+        }
+        
+        if (!Array.isArray(embeddingResult)) {
+            throw new Error(`Embeddings API returned non-array result: ${typeof embeddingResult}`);
+        }
+        
+        if (embeddingResult.length !== validTexts.length) {
+            throw new Error(`Embeddings count mismatch: expected ${validTexts.length}, got ${embeddingResult.length}`);
+        }
+        
+        // 各embeddingの検証 ★
+        const validEmbeddings = embeddingResult.map((embedding, index) => {
+            if (embedding === null || embedding === undefined || !Array.isArray(embedding)) {
+                console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Invalid embedding at index ${index}, using empty array`);
+                return [];
+            }
+            return embedding;
+        });
+        
+        chunkEmbeddings = validEmbeddings;
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Embeddings generated for ${chunkEmbeddings.length} chunks.`);
     } catch (embeddingError) {
-        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error during embedding generation:`, embeddingError); // ★ タイムスタンプ追加
-        throw new Error(`Embedding generation failed: ${embeddingError instanceof Error ? embeddingError.message : 'Unknown error'}`);
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error during embedding generation:`, embeddingError);
+        
+        // エラーの詳細をログに出力 ★
+        if (embeddingError instanceof Error) {
+            console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error stack:`, embeddingError.stack);
+        }
+        
+        // nullやundefinedエラーの特別処理 ★
+        const errorMessage = embeddingError instanceof Error ? embeddingError.message : String(embeddingError || 'Unknown error');
+        throw new Error(`Embedding generation failed: ${errorMessage}`);
     }
 
+    // chunksとchunkEmbeddingsの整合性チェック ★
+    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+        throw new Error("No valid chunks available for database insertion");
+    }
+    
+    if (!chunkEmbeddings || !Array.isArray(chunkEmbeddings)) {
+        throw new Error("No valid embeddings available for database insertion");
+    }
+    
     const chunksToInsert: ChunkObject[] = chunks.map((chunk, i) => {
-        if (!chunkEmbeddings[i] || !Array.isArray(chunkEmbeddings[i])) { 
-            console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Warning: Invalid embedding for chunk ${i}, using empty array. Embedding data:`, chunkEmbeddings[i]); // ★ タイムスタンプ追加
+        // chunkのnullチェック ★
+        if (!chunk || typeof chunk !== 'object') {
+            console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] Invalid chunk at index ${i}, creating minimal chunk`);
             return {
-                ...chunk,
-                embedding: [], 
+                manual_id: manualId!,
+                chunk_text: '',
+                chunk_order: i + 1,
+                embedding: [],
             };
         }
+        
+        // embeddingの範囲チェック ★
+        let embedding: number[] = [];
+        if (i < chunkEmbeddings.length && chunkEmbeddings[i] && Array.isArray(chunkEmbeddings[i])) {
+            embedding = chunkEmbeddings[i];
+        } else {
+            console.warn(`[${new Date().toISOString()}] [processAndStoreDocuments] No embedding available for chunk ${i}, using empty array`);
+        }
+        
         return {
-            ...chunk,
-            embedding: chunkEmbeddings[i],
+            manual_id: chunk.manual_id || manualId!,
+            chunk_text: chunk.chunk_text || '',
+            chunk_order: chunk.chunk_order || (i + 1),
+            embedding: embedding,
         };
     });
 
@@ -870,7 +948,20 @@ async function processAndStoreDocuments(
     }
     
     console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully completed.`); // ★ タイムスタンプ追加
-    return { manualId: manualId!, summary: summaryText, chunksCount: chunksToInsert.length }; // ★ 成功時の返り値
+    
+    // 返り値の安全性チェック ★
+    if (!manualId) {
+        console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] manualId is null/undefined at completion`);
+        throw new Error("Manual ID is not available after successful processing");
+    }
+    
+    const finalChunksCount = chunksToInsert ? chunksToInsert.length : 0;
+    
+    return { 
+        manualId: manualId, 
+        summary: summaryText || null, 
+        chunksCount: finalChunksCount 
+    }; // ★ 成功時の返り値（null安全）
   } catch (error) {
     console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Error processing/storing documents for ${sourceFileName}:`, error); // ★ タイムスタンプ追加
     if (error instanceof Error) {
@@ -1194,13 +1285,22 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
           status: 500, 
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
-      } finally {
+              } finally {
+        // 一時ファイル削除の強化（null安全 + 非同期安全） ★
         if (tmpFilePathToDelete) {
             try {
-                await fs.unlink(tmpFilePathToDelete);
-                console.log(`一時ファイル ${tmpFilePathToDelete} を削除しました。`);
+                // ファイル存在確認 + 削除の組み合わせ
+                const fileExists = await fs.access(tmpFilePathToDelete).then(() => true).catch(() => false);
+                if (fileExists) {
+                    await fs.unlink(tmpFilePathToDelete);
+                    console.log(`一時ファイル ${tmpFilePathToDelete} を削除しました。`);
+                } else {
+                    console.log(`一時ファイル ${tmpFilePathToDelete} は既に存在しないか、アクセスできません。`);
+                }
             } catch (unlinkError) {
-                console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました:`, unlinkError);
+                // null安全なエラーハンドリング ★
+                const errorMsg = unlinkError instanceof Error ? unlinkError.message : String(unlinkError || 'Unknown error');
+                console.error(`一時ファイル ${tmpFilePathToDelete} の削除に失敗しました: ${errorMsg}`);
             }
         }
       }
@@ -1218,6 +1318,42 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
     });
   }
 }
+
+// グローバル未処理Promise rejectionハンドラー（null安全強化） ★
+globalThis.addEventListener("unhandledrejection", (event) => {
+  console.error("[CRITICAL] Unhandled Promise Rejection caught:", event.reason);
+  
+  // nullやundefinedの場合の特別処理
+  if (event.reason === null) {
+    console.error("[CRITICAL] Promise rejected with null value");
+  } else if (event.reason === undefined) {
+    console.error("[CRITICAL] Promise rejected with undefined value");
+  } else if (event.reason instanceof Error) {
+    console.error("[CRITICAL] Promise rejected with Error:", event.reason.message);
+    console.error("[CRITICAL] Error stack:", event.reason.stack);
+  } else {
+    console.error("[CRITICAL] Promise rejected with value:", typeof event.reason, event.reason);
+  }
+  
+  // Event を preventDefault して、更なるエラーの伝播を防ぐ
+  event.preventDefault();
+});
+
+// グローバルエラーハンドラー ★
+globalThis.addEventListener("error", (event) => {
+  console.error("[CRITICAL] Unhandled error caught:", event.error);
+  
+  if (event.error === null) {
+    console.error("[CRITICAL] Global error with null value");
+  } else if (event.error === undefined) {
+    console.error("[CRITICAL] Global error with undefined value");
+  } else if (event.error instanceof Error) {
+    console.error("[CRITICAL] Global error:", event.error.message);
+    console.error("[CRITICAL] Error stack:", event.error.stack);
+  } else {
+    console.error("[CRITICAL] Global error with value:", typeof event.error, event.error);
+  }
+});
 
 serve(handler);
 
