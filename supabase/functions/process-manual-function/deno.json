@@ -5,7 +5,6 @@
     "@langchain/openai": "npm:/@langchain/openai@^0.2.1/",
     "openai": "npm:/openai@^4.52.0/",
     "@supabase/supabase-js": "npm:/@supabase/supabase-js@^2.43.5/",
-    "unpdf": "npm:/unpdf@^1.0.6/",
     "langchain/": "npm:/langchain@^0.2.5/"
   }
 }

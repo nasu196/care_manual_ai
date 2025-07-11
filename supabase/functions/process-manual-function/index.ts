@@ -5,8 +5,6 @@
 // Setup type definitions for built-in Supabase Runtime APIs
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
-console.log("Hello from Functions!")
-
 import { serve, ConnInfo } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 
@@ -162,10 +160,10 @@ const geminiApiKey = Deno.env.get("GEMINI_API_KEY");
 const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("エラー: SUPABASE_URL または SUPABASE_ANON_KEY が環境変数に設定されていません。");
+  console.warn("警告: SUPABASE_URL または SUPABASE_ANON_KEY が環境変数に設定されていません。");
 }
 if (!geminiApiKey) {
-  console.error("エラー: GEMINI_API_KEY が環境変数に設定されていません。");
+  console.warn("警告: GEMINI_API_KEY が環境変数に設定されていません。");
 }
 if (!openaiApiKey) {
   console.warn("警告: OPENAI_API_KEY が環境変数に設定されていません。OpenAIを使用する場合は設定してください。");
