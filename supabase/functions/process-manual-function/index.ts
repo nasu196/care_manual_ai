@@ -13,7 +13,7 @@ import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { RecursiveCharacterTextSplitter } from "npm:langchain/text_splitter";
 import { OpenAIEmbeddings } from "npm:@langchain/openai";
 import officeParser from "npm:officeparser";
-import { extractText, getDocumentProxy } from "npm:unpdf";
+import { getDocument } from "https://esm.sh/pdfjs-serverless@1.0.1";
 import * as path from "node:path";
 import * as fs from "node:fs/promises";
 import { Buffer } from "node:buffer";
@@ -332,16 +332,32 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
     let textContent = '';
 
     if (fileExtension === '.pdf') {
-      console.log("\nunpdfでドキュメントを読み込み開始...");
+      console.log("\npdfjs-serverlessでドキュメントを読み込み開始...");
       try {
-        const pdfDoc = await getDocumentProxy(new Uint8Array(fileBuffer));
-        const { text: rawText, totalPages: totalPagesFromExtraction } = await extractText(pdfDoc, { mergePages: true });
+        const doc = await getDocument({
+          data: new Uint8Array(fileBuffer),
+          useSystemFonts: true,
+        }).promise;
 
-        if (!rawText) {
-          throw new Error("unpdf returned null/undefined text");
+        if (!doc) {
+          throw new Error("pdfjs-serverless returned null/undefined document");
         }
         
-        numPages = totalPagesFromExtraction || 0;
+        numPages = doc.numPages || 0;
+        
+        // 全ページのテキストを抽出
+        let rawText = '';
+        for (let i = 1; i <= numPages; i++) {
+          const page = await doc.getPage(i);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item: any) => item.str).join(' ');
+          rawText += pageText + '\n';
+        }
+
+        if (!rawText.trim()) {
+          throw new Error("pdfjs-serverless returned null/undefined text");
+        }
+        
         console.log(`PDF解析結果: テキスト長=${rawText.length}文字, ページ数=${numPages}`);
         textContent = rawText;
 
@@ -869,7 +885,7 @@ async function processAndStoreDocuments(
     if (manualId && !existingManual) {
       console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] EXECUTING CLEANUP for newly created manual (ID: ${manualId}) due to error`);
       try {
-        // まずチャンクを削除
+        // Step 1: チャンクを削除
         console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 1: Deleting chunks for manual_id=${manualId}`);
         const { error: deleteChunksError } = await supabaseClient
           .from('manual_chunks')
@@ -882,8 +898,25 @@ async function processAndStoreDocuments(
           console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully deleted chunks for manual_id=${manualId}`);
         }
 
-        // 次にmanualレコードを削除
-        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 2: Deleting manual record with id=${manualId}`);
+        // Step 2: Storageファイルを削除
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 2: Deleting storage file: ${sourceFileName}`);
+        try {
+          // sourceFileName が既に userId/encodedFileName 形式
+          const { error: deleteStorageError } = await supabaseClient.storage
+            .from(BUCKET_NAME)
+            .remove([sourceFileName]);
+          
+          if (deleteStorageError && !deleteStorageError.message?.includes("Not Found")) {
+            console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] ERROR deleting storage file during cleanup:`, deleteStorageError);
+          } else {
+            console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Successfully deleted storage file: ${sourceFileName}`);
+          }
+        } catch (storageError) {
+          console.error(`[${new Date().toISOString()}] [processAndStoreDocuments] Exception deleting storage file:`, storageError);
+        }
+
+        // Step 3: manualレコードを削除
+        console.log(`[${new Date().toISOString()}] [processAndStoreDocuments] Step 3: Deleting manual record with id=${manualId}`);
         const { error: deleteManualError } = await supabaseClient
           .from('manuals')
           .delete()
@@ -1066,21 +1099,27 @@ async function handler(req: Request, _connInfo?: ConnInfo): Promise<Response> { 
         
         // エラー時のクリーンアップ処理
         
-        // 1. Storageファイル削除
-        if (fileNameForRollback && supabaseClient) {
+        // 1. Storageファイル削除（userId/encodedFileName形式）
+        if (fileNameForRollback && supabaseClient && userId) {
           try {
+            // ファイル名がuserId/encodedFileNameの形式かチェック
+            const storagePath = fileNameForRollback.includes('/') ? fileNameForRollback : `${userId}/${fileNameForRollback}`;
+            console.log(`[Cleanup] Attempting to delete storage file: ${storagePath}`);
+            
             const { error: deleteError } = await supabaseClient.storage
               .from(BUCKET_NAME)
-              .remove([fileNameForRollback]); 
+              .remove([storagePath]); 
             if (deleteError) {
               if (!deleteError.message?.includes("Not Found") && (deleteError as { statusCode?: number }).statusCode !== 404) {
-                console.error(`Storageファイル削除エラー:`, deleteError);
+                console.error(`[Cleanup] Storageファイル削除エラー:`, deleteError);
+              } else {
+                console.log(`[Cleanup] Storage file not found (already deleted or doesn't exist): ${storagePath}`);
               }
             } else {
-              console.log(`エラー発生のため、アップロードファイルを削除しました`);
+              console.log(`[Cleanup] エラー発生のため、アップロードファイルを削除しました: ${storagePath}`);
             }
           } catch (storageDeleteError) {
-            console.error(`Storageファイル削除中にエラー:`, storageDeleteError);
+            console.error(`[Cleanup] Storageファイル削除中にエラー:`, storageDeleteError);
           }
         }
 
