@@ -91,9 +91,17 @@ Deno.serve(async (req) => {
     // share_configsテーブルからデータを取得（RLSポリシーとAPI側でユーザー分離）
     console.log(`Fetching share configs for user: ${userId}`);
     
+    // デバッグ: テーブル構造を確認
+    const { data: tableInfo, error: tableError } = await supabase
+      .from('share_configs')
+      .select('*')
+      .limit(1);
+    
+    console.log('[DEBUG] Table info query result:', { tableInfo, tableError });
+    
     const { data: shareConfigs, error: shareError } = await supabase
       .from('share_configs')
-      .select('id, selected_source_names, created_at, expires_at, is_active')
+      .select('id, selected_record_ids, created_at, expires_at, is_active')
       .eq('user_id', userId)  // 重要: このユーザーのもののみ
       .eq('is_active', true)   // アクティブなもののみ
       .order('created_at', { ascending: false })  // 新しい順

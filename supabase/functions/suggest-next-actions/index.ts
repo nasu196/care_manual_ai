@@ -53,6 +53,7 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
 
     let userId: string | null = null;
     let authHeader: string | null = null;
+    let payload: any = null;
     
     try {
         authHeader = req.headers.get('Authorization');
@@ -75,10 +76,11 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             });
         }
-        const payload = JSON.parse(atob(parts[1]));
+        payload = JSON.parse(atob(parts[1]));
         console.log('[suggest-next-actions][Auth] Decoded Clerk JWT Payload:', payload);
 
-        userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
+        // Clerk統合では user_metadata.user_id を優先
+        userId = payload.user_metadata?.user_id || payload.sub;
 
         if (!userId) {
             console.error('[suggest-next-actions][Auth] User ID not found in Clerk JWT payload.');
@@ -111,28 +113,42 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         });
 
         const body = await req.json();
-        const selectedFileNames = body?.selectedFileNames as string[] | undefined;
-        console.log("Received selectedFileNames:", selectedFileNames);
+        const selectedRecordIds = body?.selectedRecordIds as string[] | undefined;
+        console.log("Received selectedRecordIds:", selectedRecordIds);
 
-        if (!selectedFileNames || selectedFileNames.length === 0) {
-            console.log("No specific files selected. Returning empty suggestions.");
+        if (!selectedRecordIds || selectedRecordIds.length === 0) {
+            console.log("No specific records selected. Returning empty suggestions.");
             return new Response("```json\n[]\n```", {
                 headers: { ...corsHeaders, 'Content-Type': 'text/plain' },
                 status: 200,
             });
         }
 
-        console.log("Fetching summaries for selected files from 'manuals' table for user:", userId);
-        // RLSポリシーがユーザー分離を処理するため、user_idでのフィルタリングは不要
-        let query = supabase
+        console.log("Fetching summaries for selected record IDs from 'manuals' table for user:", userId);
+        console.log("Selected record IDs:", selectedRecordIds);
+        
+        // デバッグ: JWT payload情報を確認
+        console.log("JWT payload sub:", payload.sub);
+        console.log("JWT payload user_metadata:", payload.user_metadata);
+        console.log("Selected userId:", userId);
+        
+        // まず、選択されたrecordIdがどのようなデータを持っているか確認
+        const { data: recordDebugData, error: recordDebugError } = await supabase
             .from('manuals')
-            .select('file_name, original_file_name, summary')
+            .select('id, user_id, file_name, original_file_name, summary, created_at')
+            .in('id', selectedRecordIds);
+        
+        console.log("Record debug data:", { recordDebugData, recordDebugError });
+        
+        // RLSポリシーがユーザー分離を処理するため、user_idでのフィルタリングは不要
+        const { data: summariesData, error: fetchError } = await supabase
+            .from('manuals')
+            .select('file_name, original_file_name, summary, user_id')
             .not('summary', 'is', null)
-            .filter('summary', 'not.eq', '');
-        
-        query = query.in('original_file_name', selectedFileNames);
-        
-        const { data: summariesData, error: fetchError } = await query;
+            .filter('summary', 'not.eq', '')
+            .in('id', selectedRecordIds);
+
+        console.log("Query result:", { summariesData, fetchError });
 
         if (fetchError) {
             console.error("Error fetching summaries for user " + userId + ":", fetchError);
@@ -140,7 +156,16 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         }
 
         if (!summariesData || summariesData.length === 0) {
-            console.log("No summaries found for user " + userId + " with selected files.");
+            console.log("No summaries found for user " + userId + " with selected record IDs.");
+            
+            // デバッグ: ユーザーの全manualsレコードを確認
+            const { data: allManuals, error: allError } = await supabase
+                .from('manuals')
+                .select('id, file_name, original_file_name, user_id, summary')
+                .limit(10);
+            
+            console.log("Sample manuals accessible to user:", { allManuals, allError });
+            
             return new Response(JSON.stringify({ suggestions: [], message: "提案の元となるサマリーがありません。" }), {
                 headers: { ...corsHeaders, 'Content-Type': 'application/json' },
                 status: 200,

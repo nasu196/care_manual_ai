@@ -175,20 +175,22 @@ export async function POST(request: NextRequest) {
 
     console.log('[upload-manual] File uploaded to storage successfully');
 
-    // 2. Insert record to manuals table (with user isolation via Clerk JWT)
+    // Insert record to manuals table (with user isolation via Clerk JWT)
     console.log('[upload-manual] Creating database record...');
-    const { error: dbError } = await supabase
+    const { data: newRecord, error: dbError } = await supabase
       .from('manuals')
       .insert({
         file_name: encodedFileName,
-        original_file_name: originalFileName,
+        original_file_name: originalFileName, // 新しいファイル名をそのまま使用
         user_id: userId,
         summary: null,
         storage_path: `manuals/${storagePath}` // Full path with bucket name
         // uploaded_at, updated_at will use DB defaults
-      });
+      })
+      .select('id')
+      .single();
 
-    if (dbError) {
+    if (dbError || !newRecord || !newRecord.id) {
       console.error('[upload-manual] Database insert error:', dbError);
       
       // Try to clean up uploaded file if database insert fails
@@ -202,19 +204,20 @@ export async function POST(request: NextRequest) {
       }
 
       return NextResponse.json(
-        { error: `Database error: ${dbError.message}` },
+        { error: `Database error: ${dbError?.message || 'Failed to create record'}` },
         { status: 500, headers: corsHeaders }
       );
     }
 
-    console.log('[upload-manual] Database record created successfully');
+    console.log(`[upload-manual] Database record created successfully with ID: ${newRecord.id}`);
 
     // Return success response
     return NextResponse.json({
       message: 'File uploaded successfully',
       fileName: storagePath,
-      originalFileName: originalFileName,
+      originalFileName: originalFileName, // 新しいファイル名をそのまま返す
       encodedFileName: encodedFileName,
+      recordId: newRecord.id, // 作成されたレコードのIDを追加
       fileSize: file.size,
       fileType: file.type
     }, {

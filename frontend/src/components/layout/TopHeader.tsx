@@ -15,7 +15,11 @@ import { FeedbackModal } from '@/components/features/FeedbackModal';
 import { ShareModal } from '@/components/features/ShareModal'; // ShareModalを追加
 import { useMemoStore } from '@/store/memoStore'; // memoStoreを追加
 
-const TopHeader: React.FC = () => {
+interface TopHeaderProps {
+  selectedRecordIds?: string[];
+}
+
+const TopHeader: React.FC<TopHeaderProps> = ({ selectedRecordIds = [] }) => {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false); // ShareModal用のstate追加
   const { isSignedIn } = useAuth();
@@ -23,6 +27,12 @@ const TopHeader: React.FC = () => {
   // ★ 編集権限を取得
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
+
+  // ★ デバッグログを追加
+  useEffect(() => {
+    console.log('[TopHeader] selectedRecordIds changed:', selectedRecordIds);
+    console.log('[TopHeader] selectedRecordIds length:', selectedRecordIds?.length);
+  }, [selectedRecordIds]);
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -126,6 +136,7 @@ const TopHeader: React.FC = () => {
       <ShareModal 
         isOpen={isShareModalOpen} 
         onOpenChange={setIsShareModalOpen}
+        selectedRecordIds={selectedRecordIds}
       />
     </>
   );

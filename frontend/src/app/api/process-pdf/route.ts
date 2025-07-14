@@ -427,7 +427,8 @@ async function processAndStoreDocuments(
   userId: string,
   supabaseClient: any,
   embeddingsClient: OpenAIEmbeddings,
-  generativeAiClient: GoogleGenerativeAI
+  generativeAiClient: GoogleGenerativeAI,
+  recordId: string
 ): Promise<{ manualId: string; summary: string | null; chunksCount: number } | null> {
   console.log(`[processAndStoreDocuments] Processing file: ${sourceFileName}, user: ${userId}`);
   
@@ -437,23 +438,10 @@ async function processAndStoreDocuments(
   }
 
   const parsedDocs = processedFile.docs;
-  let manualId: string | undefined;
+  let manualId: string = recordId; // Use the provided recordId
 
   try {
-    // Check for existing manual
-    const expectedStoragePath = `manuals/${sourceFileName}`;
-    console.log(`Checking for existing manual: ${expectedStoragePath}`);
-
-    const { data: existingManual, error: selectError } = await supabaseClient
-      .from('manuals')
-      .select('id')
-      .eq('storage_path', expectedStoragePath)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (selectError) {
-      console.error("Error checking existing manual:", selectError);
-    }
+    console.log(`Using provided recordId: ${recordId}`);
 
     // Generate summary
     const firstDoc = parsedDocs[0];
@@ -467,67 +455,30 @@ async function processAndStoreDocuments(
       }
     }
 
-    if (existingManual && existingManual.id) {
-      // Update existing manual
-      manualId = existingManual.id;
-      console.log(`Updating existing manual: ${manualId}`);
-      
-      const updateData: Record<string, unknown> = {
-        original_file_name: originalFileName || sourceFileName.split('/').pop() || sourceFileName,
-        metadata: { 
-          totalPages: firstDoc?.metadata?.totalPages || 1,
-          sourceType: firstDoc?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown',
-          lastProcessed: new Date().toISOString() 
-        },
-      };
-      
-      if (summaryText !== null) {
-        updateData.summary = summaryText;
-      }
+    // Update the existing manual record (no longer create new records)
+    console.log(`Updating manual: ${manualId}`);
+    
+    const updateData: Record<string, unknown> = {
+      original_file_name: originalFileName || sourceFileName.split('/').pop() || sourceFileName,
+      metadata: { 
+        totalPages: firstDoc?.metadata?.totalPages || 1,
+        sourceType: firstDoc?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown',
+        lastProcessed: new Date().toISOString() 
+      },
+    };
+    
+    if (summaryText !== null) {
+      updateData.summary = summaryText;
+    }
 
-      const { error: updateError } = await supabaseClient
-        .from('manuals')
-        .update(updateData)
-        .eq('id', manualId);
-        
-      if (updateError) {
-        console.error("Error updating existing manual:", updateError);
-      }
-    } else {
-      // Create new manual
-      console.log("Creating new manual record...");
+    const { error: updateError } = await supabaseClient
+      .from('manuals')
+      .update(updateData)
+      .eq('id', manualId);
       
-      const encodedNameOnly = sourceFileName.includes('/') ? 
-        sourceFileName.substring(sourceFileName.lastIndexOf('/') + 1) : sourceFileName;
-
-      const insertData: Record<string, unknown> = {
-        file_name: encodedNameOnly,
-        original_file_name: originalFileName || encodedNameOnly,
-        storage_path: expectedStoragePath,
-        user_id: userId,
-        metadata: { 
-          totalPages: firstDoc?.metadata?.totalPages || 1,
-          sourceType: firstDoc?.metadata?.type || path.extname(sourceFileName).substring(1) || 'unknown'
-        },
-      };
-      
-      if (summaryText !== null) {
-        insertData.summary = summaryText;
-      }
-
-      const { data: newManual, error: insertError } = await supabaseClient
-        .from('manuals')
-        .insert(insertData)
-        .select('id')
-        .single();
-        
-      if (insertError || !newManual || !newManual.id) { 
-        console.error("Error inserting new manual:", insertError);
-        throw insertError || new Error("Failed to insert new manual and retrieve ID.");
-      }
-      
-      manualId = newManual.id;
-      console.log(`Created new manual: ${manualId}`);
+    if (updateError) {
+      console.error("Error updating manual:", updateError);
+      throw updateError;
     }
 
     // Process chunks
@@ -569,7 +520,7 @@ async function processAndStoreDocuments(
 
     if (chunks.length === 0) {
       console.log("No chunks generated, finishing process");
-      return { manualId: manualId!, summary: summaryText, chunksCount: 0 };
+      return { manualId: manualId, summary: summaryText, chunksCount: 0 };
     }
 
     console.log(`Generating embeddings for ${chunks.length} chunks...`);
@@ -615,7 +566,7 @@ async function processAndStoreDocuments(
 
       console.log(`Successfully processed ${chunks.length} chunks`);
       return { 
-        manualId: manualId!, 
+        manualId: manualId, 
         summary: summaryText, 
         chunksCount: chunks.length 
       };
@@ -706,10 +657,18 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const fileName = body.fileName as string | null;
     const originalFileName = body.originalFileName as string | null;
+    const recordId = body.recordId as string | null;
 
     if (!fileName) {
       return NextResponse.json(
         { error: "fileName is required" },
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (!recordId) {
+      return NextResponse.json(
+        { error: "recordId is required" },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -735,7 +694,8 @@ export async function POST(request: NextRequest) {
       userId,
       supabaseClient,
       embeddings,
-      genAI
+      genAI,
+      recordId
     );
 
     if (storeResult && storeResult.manualId) {

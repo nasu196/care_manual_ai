@@ -132,7 +132,7 @@ serve(async (req: Request) => {
       // デフォルト: 一覧取得
       const { data: shareConfigs, error: shareError } = await supabase
         .from('share_configs')
-        .select('id, selected_source_names, created_at, expires_at, is_active')
+        .select('id, selected_record_ids, created_at, expires_at, is_active')
         .eq('user_id', userId)
         .eq('is_active', true)
         .order('created_at', { ascending: false });
@@ -158,8 +158,26 @@ serve(async (req: Request) => {
     // *** POSTメソッド: 新規作成（既存のロジック） ***
     if (req.method === 'POST') {
       // リクエストボディを解析
-      const { selectedSourceNames } = await req.json()
-      console.log('Selected sources:', selectedSourceNames)
+      const requestText = await req.text()
+      console.log('Raw request body:', requestText)
+      
+      let requestData
+      try {
+        requestData = JSON.parse(requestText)
+        console.log('Parsed request data:', requestData)
+        console.log('selectedRecordIds from request:', requestData.selectedRecordIds)
+        console.log('selectedRecordIds type:', typeof requestData.selectedRecordIds)
+        console.log('selectedRecordIds Array.isArray:', Array.isArray(requestData.selectedRecordIds))
+      } catch (parseError) {
+        console.error('JSON parse error:', parseError)
+        return new Response(
+          JSON.stringify({ error: 'Invalid JSON in request body' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const { selectedRecordIds } = requestData
+      console.log('Selected record IDs:', selectedRecordIds)
 
       // 共有IDを生成（UUID v4）
       const shareId = crypto.randomUUID()
@@ -170,7 +188,7 @@ serve(async (req: Request) => {
         .insert({
           id: shareId,
           user_id: userId,
-          selected_source_names: selectedSourceNames,
+          selected_record_ids: selectedRecordIds,
           created_at: new Date().toISOString(),
         })
 

@@ -11,6 +11,7 @@ interface AppLayoutProps {
   sourceSlot?: ReactNode;
   chatSlot: ReactNode; // 中央のチャットは必須とする
   memoSlot?: ReactNode;
+  selectedRecordIds?: string[]; // ★ 追加: recordIdベースの選択状態
 }
 
 const MOBILE_BREAKPOINT = 768; // Tailwindのmdブレークポイント (768px)
@@ -18,7 +19,7 @@ const PANELS = ['source', 'chat', 'memo'] as const; // ★ パネルの順番を
 const PANELS_NO_EDIT = ['chat', 'memo'] as const; // ★ 編集権限なしの場合のパネル
 type PanelType = 'source' | 'chat' | 'memo';
 
-const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
+const AppLayout = ({ sourceSlot, chatSlot, memoSlot, selectedRecordIds = [] }: AppLayoutProps) => {
   // タイトルは不要になったため削除
 
   // ★ メモ表示状態を取得
@@ -133,7 +134,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   if (isMobileView) {
     return (
       <div className="flex flex-col mobile-full-height bg-muted/40 overflow-hidden">
-        <TopHeader />
+        <TopHeader selectedRecordIds={selectedRecordIds} />
         
         <Tabs 
           value={activeMobilePanel} 
@@ -186,7 +187,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot }: AppLayoutProps) => {
   // PC表示 (既存のレイアウトをTailwindで少し調整)
   return (
     <div className="flex flex-col mobile-full-height max-h-screen bg-muted/40 overflow-hidden">
-      <TopHeader />
+      <TopHeader selectedRecordIds={selectedRecordIds} />
       
       {/* 3カラムFlexエリア - 画面の高さを確実に制限 */}
       <div className="flex-grow flex gap-x-2 p-2 min-h-0 max-h-full overflow-hidden">

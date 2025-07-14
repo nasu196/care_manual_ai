@@ -16,18 +16,20 @@ import { useAuth } from '@clerk/nextjs';
 
 interface ShareConfig {
   id: string;
-  selected_source_names: string[];
+  selected_record_ids: string[];
   created_at: string;
   expires_at: string | null;
   is_active: boolean;
+  file_names?: string[]; // ファイル名情報を追加
 }
 
 interface ShareModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  selectedRecordIds: string[]; // ★ 追加: recordIdベースの選択状態
 }
 
-export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) => {
+export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, selectedRecordIds }) => {
   const [shareUrl, setShareUrl] = useState('');
   const [isCopied, setIsCopied] = useState(false);
   const [showQR, setShowQR] = useState(false);
@@ -38,6 +40,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   const { getToken, userId } = useAuth();
+
+  // ★ デバッグ用：selectedRecordIdsの変更を監視
+  useEffect(() => {
+    console.log('[ShareModal] selectedRecordIds prop changed:', selectedRecordIds);
+    console.log('[ShareModal] selectedRecordIds length:', selectedRecordIds?.length);
+  }, [selectedRecordIds]);
 
   // 既存の共有URL一覧を取得
   const loadExistingShares = useCallback(async () => {
@@ -69,7 +77,73 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
 
       const responseData = await response.json();
       const shareConfigs = responseData.shareConfigs || responseData || [];
-      setExistingShares(shareConfigs);
+      
+      // 各共有設定のファイル名を取得
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      const shareConfigsWithFileNames = await Promise.all(
+        shareConfigs.map(async (share: ShareConfig) => {
+          if (share.selected_record_ids && share.selected_record_ids.length > 0 && supabaseAnonKey) {
+            try {
+              console.log('[ShareModal] Fetching file names for share:', share.id, 'record IDs:', share.selected_record_ids);
+              
+              // manualsテーブルからファイル名を取得（正しいSupabase REST API記法）
+              const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=original_file_name&id=in.(${share.selected_record_ids.join(',')})`;
+              console.log('[ShareModal] API URL:', apiUrl);
+              
+              const fileResponse = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                  'apikey': supabaseAnonKey,
+                  'Authorization': `Bearer ${token}`,
+                },
+              });
+              
+              console.log('[ShareModal] File response status:', fileResponse.status);
+              
+              if (fileResponse.ok) {
+                const fileData = await fileResponse.json();
+                console.log('[ShareModal] File data received:', fileData);
+                
+                const fileNames = fileData.map((file: any) => file.original_file_name).filter(Boolean);
+                console.log('[ShareModal] Extracted file names:', fileNames);
+                
+                // 取得できなかったファイルがある場合は「削除されたファイル」を追加
+                const missingFileCount = share.selected_record_ids.length - fileNames.length;
+                if (missingFileCount > 0) {
+                  console.log('[ShareModal] Missing files detected:', missingFileCount);
+                  for (let i = 0; i < missingFileCount; i++) {
+                    fileNames.push('ファイルが見つかりません');
+                  }
+                }
+                
+                return { ...share, file_names: fileNames };
+              } else {
+                console.error('[ShareModal] File response not OK:', fileResponse.status, fileResponse.statusText);
+                const errorData = await fileResponse.json().catch(() => ({ error: 'Unknown error' }));
+                console.error('[ShareModal] File response error data:', errorData);
+              }
+            } catch (error) {
+              console.error('[ShareModal] Error fetching file names for share:', share.id, error);
+            }
+          }
+          
+          // ファイル名取得に失敗した場合の処理
+          if (share.selected_record_ids && share.selected_record_ids.length > 0) {
+            console.log('[ShareModal] Falling back to error message for share:', share.id);
+            // record IDの数だけ「ファイル名を取得できません」を生成
+            const fallbackFileNames = share.selected_record_ids.map((_, index) => 
+              `ファイル名を取得できません (${index + 1})`
+            );
+            return { ...share, file_names: fallbackFileNames };
+          } else {
+            // selected_record_idsが空の場合
+            console.log('[ShareModal] Empty selected_record_ids for share:', share.id);
+            return { ...share, file_names: ['共有ファイルが設定されていません'] };
+          }
+        })
+      );
+      
+      setExistingShares(shareConfigsWithFileNames);
     } catch (err) {
       console.error('Error loading existing shares:', err);
       // 既存URL読み込みエラーは表示しない（新規作成は可能なため）
@@ -125,12 +199,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
     setError(null);
     
     try {
-      // 現在のソース選択状態を取得
-      const selectedSources = localStorage.getItem('careManualAi_selectedSourceNames');
-      const selectedSourceNames = selectedSources ? JSON.parse(selectedSources) : [];
-
-      // マニュアルが選択されているかチェック
-      if (!selectedSourceNames || selectedSourceNames.length === 0) {
+      // ★ デバッグログを追加
+      console.log('[ShareModal] generateShareUrl called');
+      console.log('[ShareModal] selectedRecordIds:', selectedRecordIds);
+      console.log('[ShareModal] selectedRecordIds length:', selectedRecordIds?.length);
+      
+      // マニュアルが選択されているかチェック（recordIdベース）
+      if (!selectedRecordIds || selectedRecordIds.length === 0) {
+        console.error('[ShareModal] No record IDs selected');
         throw new Error('共有するマニュアルが選択されていません。\n「参照元の管理」からマニュアルにチェックを入れて、AIチャットで利用するマニュアルを選択してから共有してください。');
       }
 
@@ -140,28 +216,29 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
       }
 
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      
       if (!supabaseUrl) {
         throw new Error('Supabase URLが設定されていません。');
       }
 
       // 共有設定を保存するEdge Functionを呼び出し
-      const response = await fetch(`${supabaseUrl}/functions/v1/create-share-config`, {
+      const createResponse = await fetch(`${supabaseUrl}/functions/v1/create-share-config`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          selectedSourceNames,
+          selectedRecordIds,
         }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'サーバーエラーが発生しました。' }));
+      if (!createResponse.ok) {
+        const errorData = await createResponse.json().catch(() => ({ error: 'サーバーエラーが発生しました。' }));
         throw new Error(errorData.error || '共有設定の作成に失敗しました。');
       }
 
-      const { shareId } = await response.json();
+      const { shareId } = await createResponse.json();
       
       // 共有URLを生成
       const currentUrl = new URL(window.location.origin);
@@ -181,7 +258,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
     } finally {
       setIsGenerating(false);
     }
-  }, [getToken, loadExistingShares]);
+  }, [getToken, loadExistingShares, selectedRecordIds]);
 
   useEffect(() => {
     if (isOpen && userId) {
@@ -333,9 +410,27 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange }) 
                         作成日時: {formatDate(share.created_at)}
                       </div>
                       <div className="text-xs text-muted-foreground mb-2">
-                        対象ソース: {share.selected_source_names.length > 0 
-                          ? share.selected_source_names.join(', ') 
-                          : '全てのソース'}
+                        対象ソース: {share.file_names && share.file_names.length > 0 
+                          ? (
+                            <div className="max-w-xs">
+                              {share.file_names.map((fileName, index) => (
+                                <div key={index} className="truncate" title={fileName}>
+                                  • {fileName}
+                                </div>
+                              ))}
+                            </div>
+                          )
+                          : share.selected_record_ids.length > 0 
+                            ? (
+                              <div className="text-gray-500 italic">
+                                ファイル名を取得中... ({share.selected_record_ids.length}個のファイル)
+                              </div>
+                            ) 
+                            : (
+                              <div className="text-gray-500 italic">
+                                ファイル情報がありません
+                              </div>
+                            )}
                       </div>
                       <div className="flex gap-2">
                         <Button

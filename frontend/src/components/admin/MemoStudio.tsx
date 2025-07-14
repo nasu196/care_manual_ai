@@ -32,10 +32,10 @@ interface Memo {
 
 // Propsの型定義を追加
 interface MemoStudioProps {
-  selectedSourceNames: string[];
+  selectedRecordIds: string[];
 }
 
-const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
+const MemoStudio: React.FC<MemoStudioProps> = ({ selectedRecordIds }) => {
   const { getToken, userId, isSignedIn } = useAuth();
   
   const [memos, setMemos] = useState<Memo[]>([]);
@@ -114,7 +114,18 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
       
       if (shareId) {
         // 共有ページの場合は get-share-config から取得
-        response = await fetch(`${supabaseUrl}/functions/v1/get-share-config?id=${shareId}`);
+        const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+        if (!supabaseAnonKey) {
+          throw new Error('Supabase Anon Key is not configured');
+        }
+
+        response = await fetch(`${supabaseUrl}/functions/v1/get-share-config?id=${shareId}`, {
+          headers: {
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+            'Content-Type': 'application/json',
+          },
+        });
         
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({ error: 'Failed to fetch share data' }));
@@ -725,7 +736,7 @@ const MemoStudio: React.FC<MemoStudioProps> = ({ selectedSourceNames }) => {
               {isSignedIn && hasEditPermission && (
                 <div>
                   <MemoTemplateSuggestions 
-                    selectedSourceNames={selectedSourceNames} 
+                    selectedRecordIds={selectedRecordIds} 
                   />
                 </div>
               )}

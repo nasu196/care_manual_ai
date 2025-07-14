@@ -218,8 +218,36 @@ export async function POST(request) {
         return NextResponse.json({ error: '共有設定が見つかりません。' }, { status: 404 });
       }
 
-      // 共有設定のソースファイル名を使用（リクエストのsource_filenamesは無視）
-      sourceFilenames = shareConfig.selected_source_names;
+      // 共有設定のレコードIDからファイル名を取得
+      const selectedRecordIds = shareConfig.selected_record_ids;
+      console.log('[API /api/qa] Retrieved selected_record_ids:', selectedRecordIds);
+      if (!selectedRecordIds || selectedRecordIds.length === 0) {
+        console.error('[API /api/qa] No records selected in share config');
+        return NextResponse.json({ error: '共有設定にファイルが選択されていません。' }, { status: 400 });
+      }
+
+      // レコードIDからファイル名を取得
+      console.log('[API /api/qa] Fetching manuals for user_id:', shareConfig.user_id, 'with record IDs:', selectedRecordIds);
+      const { data: manuals, error: manualsError } = await authenticatedSupabase
+        .from('manuals')
+        .select('original_file_name')
+        .eq('user_id', shareConfig.user_id)
+        .in('id', selectedRecordIds);
+
+      console.log('[API /api/qa] Manuals query result:', { manuals, manualsError });
+      if (manualsError || !manuals || manuals.length === 0) {
+        console.error('[API /api/qa] Failed to fetch manuals from record IDs:', manualsError);
+        console.error('[API /api/qa] Query details:', {
+          user_id: shareConfig.user_id,
+          selectedRecordIds,
+          manuals,
+          manualsError
+        });
+        return NextResponse.json({ error: '共有設定のファイルが見つかりません。' }, { status: 404 });
+      }
+
+      // ファイル名を抽出
+      sourceFilenames = manuals.map(manual => manual.original_file_name);
       console.log('[API /api/qa] Using source filenames from share config:', sourceFilenames);
     } else {
       // 通常のページの場合は認証が必要

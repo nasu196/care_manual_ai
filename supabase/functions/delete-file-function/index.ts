@@ -12,7 +12,8 @@ const corsHeaders = {
 };
 
 interface DeleteFileRequest {
-  fileName: string; // エンコードされたファイル名 (例: xxx.pdf, yyy.docx)
+  recordId?: string; // 削除対象のレコードID（新方式）
+  fileName: string; // エンコードされたファイル名 (例: xxx.pdf, yyy.docx) - 互換性のため残す
 }
 
 interface ClerkJwtPayload {
@@ -83,11 +84,13 @@ Deno.serve(async (req: Request) => {
     // console.log(`[delete-file-function] Authenticated user ID: ${userId}`); // userIdはログ出力済み
 
     const requestData: DeleteFileRequest = await req.json();
-    const { fileName } = requestData;
+    const { recordId } = requestData;
+    let { fileName } = requestData;
 
-    if (!fileName) {
+    // recordIdがある場合は新方式、ない場合は旧方式（互換性）
+    if (!recordId && !fileName) {
       return new Response(
-        JSON.stringify({ error: 'fileName is required in request body' }),
+        JSON.stringify({ error: 'recordId or fileName is required in request body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -104,33 +107,114 @@ Deno.serve(async (req: Request) => {
       auth: { persistSession: false },
     });
 
-    console.log(`[delete-file-function] User [${userId}] attempting to delete file: ${fileName}`);
+    if (recordId) {
+      console.log(`[delete-file-function] User [${userId}] attempting to delete record: ${recordId}`);
 
-    // Step 1: manualsテーブルからレコードを削除 (user_id と file_name で絞り込み)
-    const { count: deletedManualsCount, error: dbError } = await supabase
-      .from('manuals')
-      .delete({ count: 'exact' }) // 削除された行数を取得
-      .eq('file_name', fileName)
-      .eq('user_id', userId);    // ★ ユーザーIDで絞り込み
+      // 新方式: recordIdベースで削除
+      // まず、削除対象レコードの情報を取得
+      const { data: targetRecord, error: selectError } = await supabase
+        .from('manuals')
+        .select('id, file_name, user_id')
+        .eq('id', recordId)
+        .eq('user_id', userId) // セキュリティのため、ユーザーIDも確認
+        .single();
 
-    if (dbError) {
-      console.error(`[delete-file-function] Database delete error for user [${userId}], file [${fileName}]:`, dbError);
-      return new Response(
-        JSON.stringify({ error: `Database delete failed: ${dbError.message}` }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      if (selectError || !targetRecord) {
+        console.warn(`[delete-file-function] Record not found: ${recordId} for user [${userId}]`);
+        return new Response(
+          JSON.stringify({ message: 'Record not found for this user or already deleted.' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const targetFileName = targetRecord.file_name;
+
+      // Step 1: 特定のレコードを削除
+      const { count: deletedManualsCount, error: dbError } = await supabase
+        .from('manuals')
+        .delete({ count: 'exact' })
+        .eq('id', recordId)
+        .eq('user_id', userId);
+
+      if (dbError) {
+        console.error(`[delete-file-function] Database delete error for record [${recordId}]:`, dbError);
+        return new Response(
+          JSON.stringify({ error: `Database delete failed: ${dbError.message}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (deletedManualsCount === 0) {
+        console.warn(`[delete-file-function] No record found: ${recordId} for user [${userId}]`);
+        return new Response(
+          JSON.stringify({ message: 'Record not found for this user or already deleted from database.' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      console.log(`[delete-file-function] Successfully deleted record [${recordId}] from 'manuals' table for user [${userId}]`);
+
+      // Step 2: 同じfile_nameを持つ他のレコードがあるかチェック
+      const { count: remainingCount, error: countError } = await supabase
+        .from('manuals')
+        .select('id', { count: 'exact', head: true })
+        .eq('file_name', targetFileName)
+        .eq('user_id', userId);
+
+      if (countError) {
+        console.error(`[delete-file-function] Error checking remaining records:`, countError);
+        // DBでの削除は成功したが、ストレージ削除の判定でエラー
+        return new Response(
+          JSON.stringify({ 
+            message: 'Database record deleted, but failed to check remaining files for storage cleanup.',
+            error: countError.message 
+          }),
+          { status: 207, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (remainingCount > 0) {
+        console.log(`[delete-file-function] ${remainingCount} other record(s) still reference file [${targetFileName}]. Skipping storage deletion.`);
+        return new Response(
+          JSON.stringify({ 
+            message: 'Database record deleted successfully. Storage file preserved as other records reference it.' 
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      // 他にレコードがない場合のみストレージ削除を実行
+      console.log(`[delete-file-function] No other records reference file [${targetFileName}]. Proceeding with storage deletion.`);
+      fileName = targetFileName; // ストレージ削除のため
+
+    } else {
+      console.log(`[delete-file-function] User [${userId}] attempting to delete file: ${fileName} (legacy mode)`);
+
+      // 旧方式: file_nameベースで削除（互換性のため残す）
+      const { count: deletedManualsCount, error: dbError } = await supabase
+        .from('manuals')
+        .delete({ count: 'exact' })
+        .eq('file_name', fileName)
+        .eq('user_id', userId);
+
+      if (dbError) {
+        console.error(`[delete-file-function] Database delete error for user [${userId}], file [${fileName}]:`, dbError);
+        return new Response(
+          JSON.stringify({ error: `Database delete failed: ${dbError.message}` }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (deletedManualsCount === 0) {
+        console.warn(`[delete-file-function] No manual record found in DB for user [${userId}], file [${fileName}].`);
+        return new Response(
+          JSON.stringify({ message: 'File not found for this user or already deleted from database.' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      console.log(`[delete-file-function] Successfully deleted ${deletedManualsCount} record(s) from 'manuals' table for user [${userId}], file [${fileName}] (legacy mode)`);
     }
-
-    if (deletedManualsCount === 0) {
-      console.warn(`[delete-file-function] No manual record found in DB for user [${userId}], file [${fileName}].`);
-      // ファイルがDBに存在しない場合、ユーザーに404を返す
-      return new Response(
-        JSON.stringify({ message: 'File not found for this user or already deleted from database.' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-    
-    console.log(`[delete-file-function] Successfully deleted ${deletedManualsCount} record(s) from 'manuals' table for user [${userId}], file [${fileName}]`);
 
     // Step 2: Storageからファイルを削除
     // 注意: Storageのパス構造がユーザーごとに分離されていない場合（例: 'manuals/some-file.pdf'）、

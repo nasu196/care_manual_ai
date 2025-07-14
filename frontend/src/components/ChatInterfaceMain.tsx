@@ -53,7 +53,13 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   const [isAtBottom, setIsAtBottom] = useState(true);
 
   // ★ ファイル選択状態のチェック
-  const hasSelectedFiles = selectedSourceNames.length > 0;
+  const hasSelectedFiles = selectedSourceNames && selectedSourceNames.length > 0;
+  
+  // デバッグログ追加
+  useEffect(() => {
+    console.log('[DEBUG ChatInterface] selectedSourceNames:', selectedSourceNames);
+    console.log('[DEBUG ChatInterface] hasSelectedFiles:', hasSelectedFiles);
+  }, [selectedSourceNames, hasSelectedFiles]);
 
   // localStorageからaiVerbosity設定を読み込む
   useEffect(() => {
@@ -73,17 +79,16 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     console.log('[DEBUG] selectedSourceNames.length:', selectedSourceNames.length);
     console.log('[DEBUG] localStorage selectedSources:', localStorage.getItem('careManualAi_selectedSourceNames'));
 
-    // ★ ファイル選択チェックを追加
-    if (!hasSelectedFiles) {
-      console.log('[DEBUG] ファイル選択チェックでブロック');
-      // 共有ページかどうかを判定
-      const isSharedPage = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('shareId');
-      
+    // ★ 共有ページかどうかを判定
+    const isSharedPage = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('shareId');
+    console.log('[DEBUG] isSharedPage:', isSharedPage);
+
+    // ★ ファイル選択チェックを追加（共有ページの場合はスキップ）
+    if (!hasSelectedFiles && !isSharedPage) {
+      console.log('[DEBUG] ファイル選択チェックでブロック（通常ページ）');
       const errorMessage: Message = {
         id: Date.now().toString(),
-        text: isSharedPage 
-          ? '申し訳ございませんが、参照するマニュアルファイルが設定されていないため、回答ができません。\n\nこの共有ページの作成者に、必要なマニュアルファイルを選択してから共有リンクを再作成してもらってください。'
-          : '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
+        text: '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
         isUser: false,
         timestamp: new Date(),
         isStreaming: false,
@@ -101,7 +106,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       return;
     }
 
-    console.log('[DEBUG] ファイル選択チェック通過 - API呼び出し開始');
+    if (isSharedPage) {
+      console.log('[DEBUG] 共有ページのため、ファイル選択チェックをスキップしてAPI呼び出しへ');
+    } else {
+      console.log('[DEBUG] ファイル選択チェック通過 - API呼び出し開始');
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),

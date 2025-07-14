@@ -11,13 +11,14 @@ import { useMemoStore } from '@/store/memoStore'; // 編集権限管理用
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 
-const LOCAL_STORAGE_KEY_SELECTED_SOURCES = 'careManualAi_selectedSourceNames'; // ★ localStorageのキー
+// ★ localStorage キー定義
+const LOCAL_STORAGE_KEY_SELECTED_SOURCES = 'careManualAi_selectedSourceNames';
 
 // 共有データの型定義
 interface ShareData {
   shareConfig: {
     id: string;
-    selectedSourceNames: string[];
+    selectedRecordIds: string[];
     createdAt: string;
     expiresAt: string;
   };
@@ -33,6 +34,7 @@ interface ShareData {
     id: string;
     file_name: string;
     original_file_name: string;
+    is_deleted?: boolean;
   }>;
 }
 
@@ -42,6 +44,7 @@ function HomePageContent() {
   const shareId = searchParams.get('shareId');
   
   const [selectedSourceNames, setSelectedSourceNames] = useState<string[]>([]); // ★ 初期値は空配列
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>([]);
   const [isClient, setIsClient] = useState(false); // クライアントサイドかどうかの判定用
   const [shareData, setShareData] = useState<ShareData | null>(null); // eslint-disable-line @typescript-eslint/no-unused-vars
   const [isLoadingShare, setIsLoadingShare] = useState(false);
@@ -53,6 +56,26 @@ function HomePageContent() {
   });
   
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
+
+  // ★ クライアントサイドでlocalStorageから選択状態を復元
+  useEffect(() => {
+    setIsClient(true);
+    
+    // 共有ページでなければlocalStorageから選択状態を復元
+    if (!shareId) {
+      const savedSources = localStorage.getItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES);
+      if (savedSources) {
+        try {
+          const parsedSources = JSON.parse(savedSources);
+          console.log('[page.tsx] localStorageから復元:', parsedSources);
+          setSelectedSourceNames(parsedSources);
+        } catch (error) {
+          console.error('[page.tsx] localStorage解析エラー:', error);
+          localStorage.removeItem(LOCAL_STORAGE_KEY_SELECTED_SOURCES); // 不正な値は削除
+        }
+      }
+    }
+  }, [shareId]);
 
   // ★ プレミアム状態変更ハンドラー
   const handlePremiumStatusChange = useCallback((status: PremiumStatus) => {
@@ -70,7 +93,18 @@ function HomePageContent() {
         throw new Error('Supabase URL is not configured');
       }
 
-      const response = await fetch(`${supabaseUrl}/functions/v1/get-share-config?id=${id}`);
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseAnonKey) {
+        throw new Error('Supabase Anon Key is not configured');
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/get-share-config?id=${id}`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ error: 'Failed to fetch share data' }));
@@ -78,10 +112,50 @@ function HomePageContent() {
       }
 
       const data: ShareData = await response.json();
+      console.log('[DEBUG] Received share data:', JSON.stringify(data, null, 2));
+      console.log('[DEBUG] Raw manuals data:', data.manuals);
+      console.log('[DEBUG] Manuals count:', data.manuals?.length);
+      
       setShareData(data);
       
       // 共有データのソース選択状態を適用
-      setSelectedSourceNames(data.shareConfig.selectedSourceNames);
+      if (!data.manuals || data.manuals.length === 0) {
+        console.warn('[DEBUG] No manuals found in share data');
+        setSelectedSourceNames([]);
+        setSelectedRecordIds(data.shareConfig.selectedRecordIds || []);
+        setEditPermission(false);
+        return;
+      }
+
+      const allFileNames = data.manuals.map(manual => {
+        console.log('[DEBUG] Processing manual:', manual);
+        return {
+          id: manual.id,
+          fileName: manual.file_name,
+          originalFileName: manual.original_file_name,
+          isDeleted: manual.is_deleted
+        };
+      });
+      console.log('[DEBUG] All processed manuals:', allFileNames);
+      
+      const fileNames = data.manuals
+        .filter(manual => {
+          console.log('[DEBUG] Filtering manual:', manual, 'is_deleted:', manual.is_deleted);
+          return !manual.is_deleted;
+        }) // 削除されていないファイルのみ
+        .map(manual => {
+          const fileName = manual.original_file_name || manual.file_name;
+          console.log('[DEBUG] Mapped file name:', fileName, 'from manual:', manual);
+          return fileName;
+        })
+        .filter(fileName => fileName && fileName !== ''); // 空のファイル名を除外
+      
+      console.log('[DEBUG] Generated file names:', fileNames);
+      console.log('[DEBUG] Selected record IDs:', data.shareConfig.selectedRecordIds);
+      console.log('[DEBUG] All manuals:', data.manuals);
+      
+      setSelectedSourceNames(fileNames);
+      setSelectedRecordIds(data.shareConfig.selectedRecordIds);
       
       // 閲覧専用モードに設定
       setEditPermission(false);
@@ -135,6 +209,14 @@ function HomePageContent() {
     setSelectedSourceNames(newSelectedSourceNames);
   };
 
+  // ★ SourceManager側でレコードID選択状態が変更されたときに呼び出される関数
+  const handleRecordSelectionChange = (newSelectedRecordIds: string[]) => {
+    console.log('[page.tsx] handleRecordSelectionChange called with:', newSelectedRecordIds);
+    console.log('[page.tsx] Previous selectedRecordIds:', selectedRecordIds);
+    setSelectedRecordIds(newSelectedRecordIds);
+    console.log('[page.tsx] selectedRecordIds updated to:', newSelectedRecordIds);
+  };
+
   // 共有データ読み込み中
   if (shareId && isLoadingShare) {
     return (
@@ -165,11 +247,14 @@ function HomePageContent() {
 
   return (
     <AppLayout
+      selectedRecordIds={selectedRecordIds} // ★ 追加: recordIdベースの選択状態
       sourceSlot={ // ★ sourceSlot に SourceManager を明示的に指定
         <div className="h-full flex flex-col">
           <SourceManager 
             selectedSourceNames={selectedSourceNames} 
             onSelectionChange={handleSourceSelectionChange} // ★ props名をSourceManagerの実装に合わせる
+            onRecordSelectionChange={handleRecordSelectionChange} // ★ recordId選択変更ハンドラーを追加
+            selectedRecordIds={selectedRecordIds} // ★ 追加: recordId選択状態を渡す
             premiumStatus={premiumStatus} // ★ プレミアム状態を渡す
           />
           {/* ★ 開発用パネルを追加（共有モードでは非表示） */}
@@ -185,8 +270,8 @@ function HomePageContent() {
           selectedSourceNames={selectedSourceNames} 
         />
       } // ★ ChatInterfaceMain に選択ソースを渡す
-      memoSlot={ // ★ memoSlot に MemoStudio を配置し、selectedSourceNames を渡す
-        <MemoStudio selectedSourceNames={selectedSourceNames} />
+      memoSlot={ // ★ memoSlot に MemoStudio を配置し、selectedRecordIds を渡す
+        <MemoStudio selectedRecordIds={selectedRecordIds} />
       } 
     />
   );

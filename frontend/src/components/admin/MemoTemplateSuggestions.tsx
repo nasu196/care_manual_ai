@@ -44,15 +44,20 @@ interface Suggestion {
 
 // Propsの型定義を修正
 interface MemoTemplateSuggestionsProps {
-  selectedSourceNames: string[];
+  selectedRecordIds: string[];
 }
 
-const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedSourceNames }) => {
+const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selectedRecordIds }) => {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false); // 提案取得時のローディング
   const [error, setError] = useState<string | null>(null); // 提案取得時のエラー
   const [hasFetchedOnce, setHasFetchedOnce] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+
+  // デバッグログ
+  useEffect(() => {
+    console.log('[MemoTemplateSuggestions] selectedRecordIds:', selectedRecordIds);
+  }, [selectedRecordIds]);
 
   // メモ生成モーダル関連のstate
   const [isGenerateMemoModalOpen, setIsGenerateMemoModalOpen] = useState(false);
@@ -130,12 +135,15 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     setMessage(null); 
     setHasFetchedOnce(true);
 
-    if (!selectedSourceNames || selectedSourceNames.length === 0) {
+    if (!selectedRecordIds || selectedRecordIds.length === 0) {
+      console.log('[MemoTemplateSuggestions] No selectedRecordIds, showing message');
       setMessage({ type: 'info', text: '提案を生成するには、まずソースを選択してください。' });
       setSuggestions([]);
       setIsLoading(false);
       return;
     }
+    
+    console.log('[MemoTemplateSuggestions] Fetching suggestions for recordIds:', selectedRecordIds);
     
     // Clerkトークンを取得 (ここ！ getToken は useAuth から取得済みのはず)
     let token;
@@ -164,7 +172,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ selectedFileNames: selectedSourceNames }),
+        body: JSON.stringify({ selectedRecordIds: selectedRecordIds }),
       });
 
       if (!response.ok) {
@@ -269,7 +277,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
     } finally {
       setIsLoading(false);
     }
-  }, [selectedSourceNames, getToken, clerkUserId]);
+  }, [selectedRecordIds, getToken, clerkUserId]);
 
   // アイデアカードクリック時のハンドラ
   const handleSuggestionItemClick = (suggestion: Suggestion) => {
@@ -475,7 +483,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
       {isLoading && (
         <div className="flex justify-center items-center h-32">
           <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
-          <p className="ml-2 text-gray-500">提案を読み込んでいます...</p>
+                          <p className="ml-2 text-gray-500">提案を考えています...</p>
         </div>
       )}
 

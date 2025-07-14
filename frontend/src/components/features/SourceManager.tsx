@@ -28,6 +28,7 @@ interface SourceFile {
   name: string;
   originalName: string;
   recordId: string; // データベースレコードのID追加
+  uploadedAt: string; // アップロード日時を追加
   //必要に応じて他のプロパティ (type, size, etc.) を追加
 }
 
@@ -45,6 +46,8 @@ interface UploadStatus {
 interface SourceManagerProps {
   selectedSourceNames: string[];
   onSelectionChange: (selectedNames: string[]) => void;
+  onRecordSelectionChange?: (selectedRecordIds: string[]) => void;
+  selectedRecordIds?: string[]; // ★ 追加: 親からのrecordId選択状態
   isMobileView?: boolean;
   premiumStatus?: PremiumStatus; // ★ 追加: プレミアムプランの状態
 }
@@ -52,6 +55,8 @@ interface SourceManagerProps {
 const SourceManager: React.FC<SourceManagerProps> = ({ 
   selectedSourceNames, 
   onSelectionChange, 
+  onRecordSelectionChange,
+  selectedRecordIds: propSelectedRecordIds = [], // ★ プロパティから受け取る
   isMobileView,
   premiumStatus = { isPremium: false, fileLimit: 3, fileSizeLimit: 30 } // ★ デフォルト値
 }) => {
@@ -73,6 +78,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({
   const [uploadQueue, setUploadQueue] = useState<UploadStatus[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
   const [selectAll, setSelectAll] = useState(false);
+  
+  // recordIdベースの選択状態を内部で管理（親の状態と同期）
+  const [selectedRecordIds, setSelectedRecordIds] = useState<string[]>(propSelectedRecordIds);
+  const [isInitialized, setIsInitialized] = useState(false); // 初期化フラグ
   
   // ★ 参照元データ表示用のstate
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
@@ -107,6 +116,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       }
     };
   }, []);
+
+  // ★ 親からのselectedRecordIdsと内部状態を同期
+  useEffect(() => {
+    console.log('[SourceManager] propSelectedRecordIds changed:', propSelectedRecordIds);
+    setSelectedRecordIds(propSelectedRecordIds);
+  }, [propSelectedRecordIds]);
 
   // 並行アップロード用のヘルパー関数
   const updateUploadStatus = (id: string, updates: Partial<UploadStatus>) => {
@@ -146,7 +161,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         throw new Error("Supabase URL or Anon Key is not configured.");
       }
 
-      const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=id,file_name,original_file_name&order=file_name.asc`;
+      const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=id,file_name,original_file_name,uploaded_at&order=uploaded_at.desc`;
 
       const response = await fetch(apiUrl, {
         method: 'GET',
@@ -164,22 +179,18 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
       const data = await response.json();
 
-      // 重複を排除：同じfile_nameの場合は最新のレコード（最大id）を使用
-      const uniqueManuals = new Map();
-      (data as Array<{id: string, file_name: string, original_file_name: string}>)?.forEach((item) => {
-        const key = item.file_name;
-        if (!uniqueManuals.has(key) || parseInt(item.id) > parseInt(uniqueManuals.get(key).id)) {
-          uniqueManuals.set(key, item);
-        }
-      });
-
-      const files = Array.from(uniqueManuals.values()).map((item) => ({ 
+      const files = (data as Array<{id: string, file_name: string, original_file_name: string, uploaded_at: string}>)?.map((item) => ({ 
         name: item.original_file_name || item.file_name, 
         originalName: item.original_file_name || item.file_name,
         id: item.file_name,
-        recordId: item.id // データベースレコードのID追加
+        recordId: item.id, // データベースレコードのID追加
+        uploadedAt: item.uploaded_at // アップロード日時を追加
       })) || [];
       setSourceFiles(files);
+
+      // ファイルリスト更新時に、存在しないrecordIdを選択状態から除去
+      const validRecordIds = files.map(file => file.recordId);
+      setSelectedRecordIds(prev => prev.filter(id => validRecordIds.includes(id)));
 
     } catch (err) {
       console.error('[SourceManager] Unexpected error fetching files:', err);
@@ -199,11 +210,58 @@ const SourceManager: React.FC<SourceManagerProps> = ({
     }
   }, [isSignedIn, getToken, fetchUploadedFiles]); // fetchUploadedFiles を依存配列に残したままにします（useCallbackでメモ化されたため）
 
+  // 初回のみ親コンポーネントのselectedSourceNamesをselectedRecordIdsに変換
+  useEffect(() => {
+    console.log('[SourceManager] 初期化チェック:', {
+      isInitialized,
+      sourceFilesLength: sourceFiles.length,
+      selectedSourceNames,
+      selectedRecordIds
+    });
+    
+    if (!isInitialized && sourceFiles.length > 0) {
+      console.log('[SourceManager] 初期化開始');
+      // 初回のみ親からの選択状態を反映（重複排除）
+      const uniqueSelectedNames = [...new Set(selectedSourceNames)];
+      console.log('[SourceManager] uniqueSelectedNames:', uniqueSelectedNames);
+      
+      const recordIds: string[] = [];
+      
+      // 各ファイル名について、最初に見つかったレコードのみを選択
+      uniqueSelectedNames.forEach(fileName => {
+        const file = sourceFiles.find(f => f.name === fileName);
+        console.log('[SourceManager] fileName:', fileName, 'found file:', file);
+        if (file) {
+          recordIds.push(file.recordId);
+        }
+      });
+      
+      console.log('[SourceManager] 初期化で設定するrecordIds:', recordIds);
+      setSelectedRecordIds(recordIds);
+      setIsInitialized(true);
+      
+      // 親コンポーネントにも通知
+      if (recordIds.length > 0) {
+        console.log('[SourceManager] 初期化時に親コンポーネントに通知');
+        onRecordSelectionChange?.(recordIds);
+      }
+    }
+  }, [selectedSourceNames, sourceFiles, isInitialized, onRecordSelectionChange]);
+
+  // selectedRecordIdsから親コンポーネントに返すファイル名を生成（重複除去）
+  const getSelectedFileNames = useCallback(() => {
+    const selectedNames = sourceFiles
+      .filter(file => selectedRecordIds.includes(file.recordId))
+      .map(file => file.name);
+    // 重複除去
+    return [...new Set(selectedNames)];
+  }, [sourceFiles, selectedRecordIds]);
+
   // 選択状態を親コンポーネントと同期
   useEffect(() => {
-    const allFilesSelected = sourceFiles.length > 0 && sourceFiles.every(file => selectedSourceNames.includes(file.name));
+    const allFilesSelected = sourceFiles.length > 0 && sourceFiles.every(file => selectedRecordIds.includes(file.recordId));
     setSelectAll(allFilesSelected);
-  }, [selectedSourceNames, sourceFiles]);
+  }, [selectedRecordIds, sourceFiles]);
 
   const handleFileTrigger = () => {
     fileInputRef.current?.click();
@@ -361,9 +419,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       // Vercel Functions APIからのレスポンスをパース
       const uploadResult = await uploadResponse.json();
       const storagePath = uploadResult.fileName; // `userId/encodedFileName` 形式のパス
+      const recordId = uploadResult.recordId; // 作成されたレコードID
 
-      if (!storagePath) {
-        console.error('[handleUpload] fileName not found in upload-manual API response:', uploadResult);
+      if (!storagePath || !recordId) {
+        console.error('[handleUpload] fileName or recordId not found in upload-manual API response:', uploadResult);
         updateUploadStatus(uploadId, {
           status: 'error',
           error: 'アップロード処理は成功しましたが、サーバーからの応答が不正です。',
@@ -384,8 +443,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         };
-        // process-pdf には storagePath を fileNameとして渡す
-        const body = JSON.stringify({ fileName: storagePath, originalFileName });
+        // process-pdf には storagePath と recordId を渡す
+        const body = JSON.stringify({ 
+          fileName: storagePath, 
+          originalFileName, 
+          recordId // 特定のレコードを更新するため
+        });
 
         const response = await fetch(requestUrl, {
           method: 'POST',
@@ -419,12 +482,32 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           message: `完了`
         });
 
-        // アップロード成功後、そのファイルを選択状態にする（元のファイル名で）
-        if (!selectedSourceNames.includes(originalFileName)) {
-          onSelectionChange([...selectedSourceNames, originalFileName]);
+        // デバッグログ追加
+        console.log('[DEBUG] Upload result:', uploadResult);
+
+        // アップロード成功通知を表示
+        setMessageWithAutoHide({ 
+          type: 'success', 
+          text: `「${uploadResult.originalFileName}」をアップロードしました。` 
+        }, 10000); // 10秒間表示
+
+        // アップロード成功後、そのファイルを選択状態にする（重複チェック）
+        const uniqueSelectedNames = [...new Set(selectedSourceNames)];
+        if (!uniqueSelectedNames.includes(uploadResult.originalFileName)) {
+          onSelectionChange([...uniqueSelectedNames, uploadResult.originalFileName]);
         }
-        // ★ プロセス完了後にのみファイルリストを更新
+        
+        // recordIdも選択状態に追加
+        const uniqueSelectedRecordIds = [...new Set(selectedRecordIds)];
+        if (!uniqueSelectedRecordIds.includes(recordId)) {
+          onRecordSelectionChange?.([...uniqueSelectedRecordIds, recordId]);
+        }
+
+        // ★ まずファイルリストを更新
         await fetchUploadedFiles();
+        
+        // 更新フラグは削除され、アップロード後にファイルリストを再取得するのみ
+        console.log('[DEBUG] Upload completed, refreshing file list');
 
         // 3秒後にキューから削除
         setTimeout(() => {
@@ -464,21 +547,56 @@ const SourceManager: React.FC<SourceManagerProps> = ({
   const handleSelectAllChange = (checked: boolean) => {
     setSelectAll(checked);
     if (checked) {
-      onSelectionChange(sourceFiles.map(file => file.name));
+      const allRecordIds = sourceFiles.map(file => file.recordId);
+      setSelectedRecordIds(allRecordIds);
+      // 全選択時もファイル名の重複を除去
+      const allFileNames = sourceFiles.map(file => file.name);
+      const uniqueFileNames = [...new Set(allFileNames)];
+      onSelectionChange(uniqueFileNames);
+      onRecordSelectionChange?.(allRecordIds);
     } else {
+      setSelectedRecordIds([]);
       onSelectionChange([]);
+      onRecordSelectionChange?.([]);
     }
   };
 
-  const handleSourceSelectionChange = (fileName: string, checked: boolean) => {
+  const handleSourceSelectionChange = (recordId: string, checked: boolean) => {
+    console.log('[SourceManager] handleSourceSelectionChange called:', { recordId, checked });
+    console.log('[SourceManager] current selectedRecordIds:', selectedRecordIds);
+    
+    let newSelectedIds: string[];
     if (checked) {
-      onSelectionChange([...selectedSourceNames, fileName]);
+      newSelectedIds = [...selectedRecordIds, recordId];
     } else {
-      onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
+      newSelectedIds = selectedRecordIds.filter(id => id !== recordId);
     }
+    setSelectedRecordIds(newSelectedIds);
+    
+    console.log('[SourceManager] new selectedRecordIds:', newSelectedIds);
+    console.log('[SourceManager] calling onRecordSelectionChange with:', newSelectedIds);
+    
+    // 親コンポーネントに新しい選択状態を通知（重複除去）
+    const newSelectedNames = sourceFiles
+      .filter(file => newSelectedIds.includes(file.recordId))
+      .map(file => file.name);
+    // 重複除去して通知
+    const uniqueSelectedNames = [...new Set(newSelectedNames)];
+    onSelectionChange(uniqueSelectedNames);
+    onRecordSelectionChange?.(newSelectedIds);
   };
   
-  const handleDeleteFile = async (fileName: string) => {
+  const handleDeleteFile = async (recordId: string) => {
+    // レコードIDからファイル情報を取得
+    const targetFile = sourceFiles.find(file => file.recordId === recordId);
+    if (!targetFile) {
+      setMessageWithAutoHide({ type: 'error', text: `ファイルが見つかりません。` });
+      return;
+    }
+    
+    const fileName = targetFile.name;
+    const storageFileName = targetFile.id; // エンコードされたファイル名
+
     // アップロード中のファイルは削除できない
     const uploadingFile = uploadQueue.find(item => item.originalFileName === fileName);
     if (uploadingFile) {
@@ -489,14 +607,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
     if (!window.confirm(`ファイル「${fileName}」を本当に削除しますか？`)) {
       return;
     }
-    
-    // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
-    const targetFile = sourceFiles.find(file => file.name === fileName);
-    if (!targetFile) {
-      setMessageWithAutoHide({ type: 'error', text: `ファイル「${fileName}」が見つかりません。` });
-      return;
-    }
-    const storageFileName = targetFile.id; // エンコードされたファイル名
 
     
     setMessageWithAutoHide({ type: 'info', text: `ファイル「${fileName}」を削除中です...` });
@@ -512,7 +622,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
 
       
-            // ★ Edge Function経由でファイル削除
+            // ★ Edge Function経由でファイル削除（recordIDベース）
       const deleteFunctionUrl = `${supabaseUrl}/functions/v1/delete-file-function`;
       const deleteResponse = await fetch(deleteFunctionUrl, {
         method: 'POST',
@@ -520,7 +630,10 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ fileName: storageFileName }),
+        body: JSON.stringify({ 
+          recordId: recordId,        // 削除対象のレコードID
+          fileName: storageFileName  // ストレージファイル名（互換性のため残す）
+        }),
       });
 
       if (!deleteResponse.ok) {
@@ -533,7 +646,19 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
       // Fetch updated list and update UI
       await fetchUploadedFiles();
-      onSelectionChange(selectedSourceNames.filter(name => name !== fileName));
+      
+      // 選択状態から削除されたファイルを除外
+      const updatedSelectedIds = selectedRecordIds.filter(id => id !== recordId);
+      setSelectedRecordIds(updatedSelectedIds);
+      
+      // 親コンポーネントに新しい選択状態を通知（重複除去）
+      const newSelectedNames = sourceFiles
+        .filter(file => updatedSelectedIds.includes(file.recordId))
+        .map(file => file.name);
+      const uniqueSelectedNames = [...new Set(newSelectedNames)];
+      onSelectionChange(uniqueSelectedNames);
+      onRecordSelectionChange?.(updatedSelectedIds);
+      
       setMessageWithAutoHide({ type: 'success', text: `ファイル「${fileName}」を完全に削除しました。` });
 
     } catch (err: unknown) {
@@ -546,100 +671,73 @@ const SourceManager: React.FC<SourceManagerProps> = ({
     }
   };
 
-  const handleRenameFile = async (oldName: string) => {
-    // アップロード中のファイルは名前変更できない
-    const uploadingFile = uploadQueue.find(item => item.originalFileName === oldName);
-    if (uploadingFile) {
-      setMessageWithAutoHide({ type: 'error', text: `ファイル「${oldName}」はアップロード中のため名前変更できません。` });
-      return;
-    }
-
-    const newNamePromptResult = window.prompt(`ファイル「${oldName}」の新しい名前を入力してください。`, oldName);
-
-
-    if (newNamePromptResult === null) {
-      setMessageWithAutoHide({ type: 'info', text: 'ファイル名の変更がキャンセルされました。' });
-      return;
-    }
-
-    const trimmedNewName = newNamePromptResult.trim();
-    if (trimmedNewName === '') {
-      setMessageWithAutoHide({ type: 'error', text: '新しいファイル名を入力してください。' });
-      return;
-    }
-
-    if (trimmedNewName === oldName) {
-      setMessageWithAutoHide({ type: 'info', text: 'ファイル名に変更はありませんでした。' });
-      return;
-    }
-
-    // 重複チェック（同じ名前のファイルが既に存在するか）
-    if (sourceFiles.some(file => file.name === trimmedNewName)) {
-      setMessageWithAutoHide({ type: 'error', text: `ファイル名「${trimmedNewName}」は既に存在します。` });
-      return;
-    }
-
-    // UIで表示されているファイル名から、実際のStorageファイル名（エンコードされた名前）を取得
-    const targetFile = sourceFiles.find(file => file.name === oldName);
+  // リネーム機能
+  const handleRenameFile = async (recordId: string, newName: string) => {
+    const targetFile = sourceFiles.find(file => file.recordId === recordId);
     if (!targetFile) {
-      setMessageWithAutoHide({ type: 'error', text: `ファイル「${oldName}」が見つかりません。` });
+      setMessageWithAutoHide({ type: 'error', text: `ファイルが見つかりません。` });
       return;
     }
-    const storageFileName = targetFile.id; // エンコードされたファイル名
 
-    setMessageWithAutoHide({ type: 'info', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しています...` });
+    const oldName = targetFile.originalName;
     
-    
+    if (newName.trim() === '') {
+      setMessageWithAutoHide({ type: 'error', text: 'ファイル名を空にすることはできません。' });
+      return;
+    }
+
+    if (newName === oldName) {
+      return; // 変更なし
+    }
+
     try {
       const token = await getToken({ template: 'supabase' });
       if (!token) {
         throw new Error("Failed to get auth token for renaming file.");
       }
+
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
       const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
       if (!supabaseUrl || !supabaseAnonKey) {
         throw new Error("Supabase URL or Anon Key is not configured.");
       }
 
-      // Storageファイル名は変更せず、manualsテーブルのoriginal_file_nameのみ更新
-      const apiUrl = `${supabaseUrl}/rest/v1/manuals?file_name=eq.${storageFileName}`;
-      const response = await fetch(apiUrl, {
+      // original_file_nameを更新
+      const response = await fetch(`${supabaseUrl}/rest/v1/manuals?id=eq.${recordId}`, {
         method: 'PATCH',
         headers: {
           'apikey': supabaseAnonKey,
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
-          'Prefer': 'return=minimal', // 更新後のデータを返さない場合
         },
-        body: JSON.stringify({ original_file_name: trimmedNewName }),
+        body: JSON.stringify({
+          original_file_name: newName,
+        }),
       });
-        
 
-      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        console.error('[handleRenameFile] Database update error:', errorData);
-        setMessageWithAutoHide({ type: 'error', text: `ファイル名の変更に失敗しました: ${errorData.message || response.statusText}` });
-      } else {
-        setMessageWithAutoHide({ type: 'success', text: `ファイル「${oldName}」を「${trimmedNewName}」に変更しました。` });
-        await fetchUploadedFiles();
-        
-        // 選択状態の更新ロジック
-        const newSelectedNames = selectedSourceNames.map(name => 
-          name === oldName ? trimmedNewName : name
-        );
-        if (JSON.stringify(newSelectedNames) !== JSON.stringify(selectedSourceNames)) {
-          onSelectionChange(newSelectedNames);
-        }
+        console.error('Rename error:', errorData);
+        throw new Error(errorData.message || 'ファイル名の変更に失敗しました。');
       }
+
+      // ファイルリストを更新
+      await fetchUploadedFiles();
+
+      setMessageWithAutoHide({ 
+        type: 'success', 
+        text: `ファイル名を「${oldName}」から「${newName}」に変更しました。` 
+      });
+
     } catch (err: unknown) {
-      let renameErrorMessage = 'ファイル名変更中に予期せぬエラーが発生しました。';
+      console.error('Error renaming file:', err);
+      let errorMessage = 'ファイル名の変更中に予期せぬエラーが発生しました。';
       if (err instanceof Error) {
-        renameErrorMessage = err.message;
+        errorMessage = err.message;
       }
-      setMessageWithAutoHide({ type: 'error', text: renameErrorMessage });
+      setMessageWithAutoHide({ type: 'error', text: errorMessage });
     }
-    
   };
 
   // ★ 参照元データ取得関数
@@ -817,24 +915,37 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           <div
             key={file.recordId}
             className={`flex items-center justify-between p-3 rounded-md transition-colors
-                        ${selectedSourceNames.includes(file.name) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100"}
+                        ${selectedRecordIds.includes(file.recordId) ? "bg-primary/10" : "bg-gray-50 hover:bg-gray-100"}
                         `}
           >
             <div className="flex items-center space-x-3 flex-grow min-w-0">
               <Checkbox
-                id={`source-${file.name}`}
-                checked={selectedSourceNames.includes(file.name)}
-                onCheckedChange={(checked) => handleSourceSelectionChange(file.name, !!checked)}
-                className={isMobileView && selectedSourceNames.includes(file.name) ? "text-primary focus:ring-primary" : ""}
+                id={`source-${file.recordId}`}
+                checked={selectedRecordIds.includes(file.recordId)}
+                onCheckedChange={(checked) => handleSourceSelectionChange(file.recordId, !!checked)}
+                className={isMobileView && selectedRecordIds.includes(file.recordId) ? "text-primary focus:ring-primary" : ""}
               />
-              <FileText className={`h-5 w-5 ${selectedSourceNames.includes(file.name) ? "text-primary" : "text-gray-500"}`} />
-              <label 
-                htmlFor={`source-${file.name}`} 
-                className="text-base md:text-sm font-medium truncate cursor-pointer flex-grow"
-                title={file.originalName || file.name}
-              >
-                {file.originalName || file.name}
-              </label>
+              <FileText className={`h-5 w-5 ${selectedRecordIds.includes(file.recordId) ? "text-primary" : "text-gray-500"}`} />
+              <div className="flex items-center gap-2 flex-grow min-w-0">
+                <div className="flex flex-col min-w-0 flex-grow">
+                  <label 
+                    htmlFor={`source-${file.recordId}`} 
+                    className="text-base md:text-sm font-medium truncate cursor-pointer"
+                    title={file.originalName || file.name}
+                  >
+                    {file.originalName || file.name}
+                  </label>
+                  <span className="text-xs text-gray-500 truncate">
+                    {new Date(file.uploadedAt).toLocaleDateString('ja-JP', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </span>
+                </div>
+              </div>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -849,11 +960,18 @@ const SourceManager: React.FC<SourceManagerProps> = ({
                 <DropdownMenuItem onClick={() => fetchSourceData(file.name)}>
                   参照元元データを表示
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleRenameFile(file.name)}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    const newName = prompt('新しいファイル名を入力してください:', file.originalName || file.name);
+                    if (newName !== null) {
+                      handleRenameFile(file.recordId, newName);
+                    }
+                  }}
+                >
                   名前を変更
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => handleDeleteFile(file.name)}
+                  onClick={() => handleDeleteFile(file.recordId)}
                   className="text-red-600 hover:!bg-red-50 hover:!text-red-700"
                 >
                   削除
