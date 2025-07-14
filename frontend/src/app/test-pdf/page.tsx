@@ -5,6 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
+interface WindowWithClerk extends Window {
+  Clerk?: {
+    session?: {
+      getToken: () => Promise<string>;
+    };
+  };
+}
+
 interface ProcessingResult {
   manual_id: string;
   summary: string | null;
@@ -57,7 +65,7 @@ export default function TestPDFPage() {
 
     try {
       // Get auth token (assuming user is logged in via Clerk)
-      const token = await (window as any)?.Clerk?.session?.getToken();
+      const token = await (window as WindowWithClerk)?.Clerk?.session?.getToken();
       if (!token) {
         throw new Error('Not authenticated. Please log in first.');
       }
@@ -105,7 +113,7 @@ export default function TestPDFPage() {
 
     try {
       // Get auth token
-      const token = await (window as any)?.Clerk?.session?.getToken();
+      const token = await (window as WindowWithClerk)?.Clerk?.session?.getToken();
       if (!token) {
         throw new Error('Not authenticated. Please log in first.');
       }

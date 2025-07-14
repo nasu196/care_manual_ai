@@ -55,11 +55,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
   // ★ ファイル選択状態のチェック
   const hasSelectedFiles = selectedSourceNames && selectedSourceNames.length > 0;
   
-  // デバッグログ追加
-  useEffect(() => {
-    console.log('[DEBUG ChatInterface] selectedSourceNames:', selectedSourceNames);
-    console.log('[DEBUG ChatInterface] hasSelectedFiles:', hasSelectedFiles);
-  }, [selectedSourceNames, hasSelectedFiles]);
+
 
   // localStorageからaiVerbosity設定を読み込む
   useEffect(() => {
@@ -73,19 +69,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     e.preventDefault();
     if (!inputValue.trim()) return;
 
-    // ★ デバッグログ追加
-    console.log('[DEBUG] selectedSourceNames:', selectedSourceNames);
-    console.log('[DEBUG] hasSelectedFiles:', hasSelectedFiles);
-    console.log('[DEBUG] selectedSourceNames.length:', selectedSourceNames.length);
-    console.log('[DEBUG] localStorage selectedSources:', localStorage.getItem('careManualAi_selectedSourceNames'));
-
     // ★ 共有ページかどうかを判定
     const isSharedPage = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('shareId');
-    console.log('[DEBUG] isSharedPage:', isSharedPage);
 
     // ★ ファイル選択チェックを追加（共有ページの場合はスキップ）
     if (!hasSelectedFiles && !isSharedPage) {
-      console.log('[DEBUG] ファイル選択チェックでブロック（通常ページ）');
       const errorMessage: Message = {
         id: Date.now().toString(),
         text: '申し訳ございませんが、ソースファイルが選択されていないため、マニュアルに基づいた回答ができません。\n\n左側のソース管理パネルで参照したいマニュアルファイルにチェックを入れてから、再度質問してください。',
@@ -106,11 +94,7 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       return;
     }
 
-    if (isSharedPage) {
-      console.log('[DEBUG] 共有ページのため、ファイル選択チェックをスキップしてAPI呼び出しへ');
-    } else {
-      console.log('[DEBUG] ファイル選択チェック通過 - API呼び出し開始');
-    }
+
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -145,8 +129,6 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
       let authToken: string | null = null;
       if (!shareId) {
         try {
-          console.log('[DEBUG] getToken開始');
-          
           // タイムアウト付きでgetTokenを実行
           const tokenPromise = getToken({ template: 'supabase' });
           const timeoutPromise = new Promise<never>((_, reject) => {
@@ -154,17 +136,11 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
           });
           
           authToken = await Promise.race([tokenPromise, timeoutPromise]);
-          console.log('[DEBUG] getToken成功:', authToken ? 'トークン取得済み' : 'トークンなし');
           
           if (!authToken) {
             throw new Error('認証情報の取得に失敗しました。');
           }
         } catch (tokenError) {
-          console.error('[DEBUG] getToken error:', tokenError);
-          console.error('[DEBUG] error type:', typeof tokenError);
-          console.error('[DEBUG] error name:', tokenError instanceof Error ? tokenError.name : 'Unknown');
-          console.error('[DEBUG] error message:', tokenError instanceof Error ? tokenError.message : 'Unknown');
-          
           // ネットワークエラーの場合は日本語メッセージに変換
           if (tokenError instanceof Error) {
             if (tokenError.message === 'TIMEOUT') {

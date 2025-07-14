@@ -112,47 +112,21 @@ function HomePageContent() {
       }
 
       const data: ShareData = await response.json();
-      console.log('[DEBUG] Received share data:', JSON.stringify(data, null, 2));
-      console.log('[DEBUG] Raw manuals data:', data.manuals);
-      console.log('[DEBUG] Manuals count:', data.manuals?.length);
       
       setShareData(data);
       
       // 共有データのソース選択状態を適用
       if (!data.manuals || data.manuals.length === 0) {
-        console.warn('[DEBUG] No manuals found in share data');
         setSelectedSourceNames([]);
         setSelectedRecordIds(data.shareConfig.selectedRecordIds || []);
         setEditPermission(false);
         return;
       }
 
-      const allFileNames = data.manuals.map(manual => {
-        console.log('[DEBUG] Processing manual:', manual);
-        return {
-          id: manual.id,
-          fileName: manual.file_name,
-          originalFileName: manual.original_file_name,
-          isDeleted: manual.is_deleted
-        };
-      });
-      console.log('[DEBUG] All processed manuals:', allFileNames);
-      
       const fileNames = data.manuals
-        .filter(manual => {
-          console.log('[DEBUG] Filtering manual:', manual, 'is_deleted:', manual.is_deleted);
-          return !manual.is_deleted;
-        }) // 削除されていないファイルのみ
-        .map(manual => {
-          const fileName = manual.original_file_name || manual.file_name;
-          console.log('[DEBUG] Mapped file name:', fileName, 'from manual:', manual);
-          return fileName;
-        })
+        .filter(manual => !manual.is_deleted) // 削除されていないファイルのみ
+        .map(manual => manual.original_file_name || manual.file_name)
         .filter(fileName => fileName && fileName !== ''); // 空のファイル名を除外
-      
-      console.log('[DEBUG] Generated file names:', fileNames);
-      console.log('[DEBUG] Selected record IDs:', data.shareConfig.selectedRecordIds);
-      console.log('[DEBUG] All manuals:', data.manuals);
       
       setSelectedSourceNames(fileNames);
       setSelectedRecordIds(data.shareConfig.selectedRecordIds);

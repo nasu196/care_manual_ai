@@ -252,10 +252,18 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
           let text = '';
           let pages = 0;
           
-          const reader = new (PdfReader.PdfReader as unknown as new () => any)();
+          interface PdfReaderItem {
+            text?: string;
+            page?: number;
+            [key: string]: unknown;
+          }
+          
+          const reader = new (PdfReader.PdfReader as unknown as new () => {
+            parseBuffer: (buffer: Buffer, callback: (err: Error | null, item: PdfReaderItem | null) => void) => void;
+          })();
           
           // テキスト抽出のイベントハンドラ
-          reader.parseBuffer(fileBuffer, (err: Error | null, item: any) => {
+          reader.parseBuffer(fileBuffer, (err: Error | null, item: PdfReaderItem | null) => {
             if (err) {
               console.error("pdfreader parsing error:", err);
               reject(err);

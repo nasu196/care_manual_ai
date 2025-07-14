@@ -56,20 +56,16 @@ Deno.serve(async (req) => {
         throw new Error('Invalid JWT format');
       }
       const payload = JSON.parse(atob(parts[1]));
-      console.log('[list-share-configs] Decoded Clerk JWT Payload:', payload);
 
       userId = payload.user_metadata?.user_id || payload.sub || payload.user_id;
 
       if (!userId) {
-        console.error('[list-share-configs] User ID not found in Clerk JWT payload.');
         return new Response(
           JSON.stringify({ error: 'User ID not found in token' }),
           { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      console.log(`[list-share-configs] Authenticated user ID from Clerk JWT: ${userId}`);
     } catch (e) {
-      console.error('[list-share-configs] Error decoding JWT:', e);
       return new Response(
         JSON.stringify({ error: 'Invalid token' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -89,15 +85,6 @@ Deno.serve(async (req) => {
     })
 
     // share_configsテーブルからデータを取得（RLSポリシーとAPI側でユーザー分離）
-    console.log(`Fetching share configs for user: ${userId}`);
-    
-    // デバッグ: テーブル構造を確認
-    const { data: tableInfo, error: tableError } = await supabase
-      .from('share_configs')
-      .select('*')
-      .limit(1);
-    
-    console.log('[DEBUG] Table info query result:', { tableInfo, tableError });
     
     const { data: shareConfigs, error: shareError } = await supabase
       .from('share_configs')

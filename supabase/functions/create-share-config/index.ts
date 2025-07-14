@@ -159,17 +159,11 @@ serve(async (req: Request) => {
     if (req.method === 'POST') {
       // リクエストボディを解析
       const requestText = await req.text()
-      console.log('Raw request body:', requestText)
       
       let requestData
       try {
         requestData = JSON.parse(requestText)
-        console.log('Parsed request data:', requestData)
-        console.log('selectedRecordIds from request:', requestData.selectedRecordIds)
-        console.log('selectedRecordIds type:', typeof requestData.selectedRecordIds)
-        console.log('selectedRecordIds Array.isArray:', Array.isArray(requestData.selectedRecordIds))
       } catch (parseError) {
-        console.error('JSON parse error:', parseError)
         return new Response(
           JSON.stringify({ error: 'Invalid JSON in request body' }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -177,7 +171,6 @@ serve(async (req: Request) => {
       }
 
       const { selectedRecordIds } = requestData
-      console.log('Selected record IDs:', selectedRecordIds)
 
       // 共有IDを生成（UUID v4）
       const shareId = crypto.randomUUID()
@@ -193,14 +186,12 @@ serve(async (req: Request) => {
         })
 
       if (insertError) {
-        console.error('Error inserting share config:', insertError)
         return new Response(
           JSON.stringify({ error: 'Failed to create share configuration' }),
           { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
       }
 
-      console.log('Share config created successfully:', shareId)
       return new Response(
         JSON.stringify({ shareId }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -26,7 +26,7 @@ interface ShareConfig {
 interface FileData {
   id: string;
   original_file_name: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 interface ShareModalProps {
@@ -47,11 +47,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
   
   const { getToken, userId } = useAuth();
 
-  // ★ デバッグ用：selectedRecordIdsの変更を監視
-  useEffect(() => {
-    console.log('[ShareModal] selectedRecordIds prop changed:', selectedRecordIds);
-    console.log('[ShareModal] selectedRecordIds length:', selectedRecordIds?.length);
-  }, [selectedRecordIds]);
+
 
   // 既存の共有URL一覧を取得
   const loadExistingShares = useCallback(async () => {
@@ -90,11 +86,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
         shareConfigs.map(async (share: ShareConfig) => {
           if (share.selected_record_ids && share.selected_record_ids.length > 0 && supabaseAnonKey) {
             try {
-              console.log('[ShareModal] Fetching file names for share:', share.id, 'record IDs:', share.selected_record_ids);
-              
               // manualsテーブルからファイル名を取得（正しいSupabase REST API記法）
               const apiUrl = `${supabaseUrl}/rest/v1/manuals?select=original_file_name&id=in.(${share.selected_record_ids.join(',')})`;
-              console.log('[ShareModal] API URL:', apiUrl);
               
               const fileResponse = await fetch(apiUrl, {
                 method: 'GET',
@@ -104,38 +97,28 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
                 },
               });
               
-              console.log('[ShareModal] File response status:', fileResponse.status);
-              
               if (fileResponse.ok) {
                 const fileData = await fileResponse.json();
-                console.log('[ShareModal] File data received:', fileData);
                 
                 const fileNames = fileData.map((file: FileData) => file.original_file_name).filter(Boolean);
-                console.log('[ShareModal] Extracted file names:', fileNames);
                 
                 // 取得できなかったファイルがある場合は「削除されたファイル」を追加
                 const missingFileCount = share.selected_record_ids.length - fileNames.length;
                 if (missingFileCount > 0) {
-                  console.log('[ShareModal] Missing files detected:', missingFileCount);
                   for (let i = 0; i < missingFileCount; i++) {
                     fileNames.push('ファイルが見つかりません');
                   }
                 }
                 
                 return { ...share, file_names: fileNames };
-              } else {
-                console.error('[ShareModal] File response not OK:', fileResponse.status, fileResponse.statusText);
-                const errorData = await fileResponse.json().catch(() => ({ error: 'Unknown error' }));
-                console.error('[ShareModal] File response error data:', errorData);
               }
             } catch (error) {
-              console.error('[ShareModal] Error fetching file names for share:', share.id, error);
+              // ファイル名取得エラーは内部的に処理
             }
           }
           
           // ファイル名取得に失敗した場合の処理
           if (share.selected_record_ids && share.selected_record_ids.length > 0) {
-            console.log('[ShareModal] Falling back to error message for share:', share.id);
             // record IDの数だけ「ファイル名を取得できません」を生成
             const fallbackFileNames = share.selected_record_ids.map((_, index) => 
               `ファイル名を取得できません (${index + 1})`
@@ -143,7 +126,6 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
             return { ...share, file_names: fallbackFileNames };
           } else {
             // selected_record_idsが空の場合
-            console.log('[ShareModal] Empty selected_record_ids for share:', share.id);
             return { ...share, file_names: ['共有ファイルが設定されていません'] };
           }
         })
@@ -205,14 +187,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
     setError(null);
     
     try {
-      // ★ デバッグログを追加
-      console.log('[ShareModal] generateShareUrl called');
-      console.log('[ShareModal] selectedRecordIds:', selectedRecordIds);
-      console.log('[ShareModal] selectedRecordIds length:', selectedRecordIds?.length);
-      
       // マニュアルが選択されているかチェック（recordIdベース）
       if (!selectedRecordIds || selectedRecordIds.length === 0) {
-        console.error('[ShareModal] No record IDs selected');
         throw new Error('共有するマニュアルが選択されていません。\n「参照元の管理」からマニュアルにチェックを入れて、AIチャットで利用するマニュアルを選択してから共有してください。');
       }
 

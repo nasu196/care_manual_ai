@@ -54,10 +54,7 @@ const MemoTemplateSuggestions: React.FC<MemoTemplateSuggestionsProps> = ({ selec
   const [hasFetchedOnce, setHasFetchedOnce] = useState<boolean>(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
-  // デバッグログ
-  useEffect(() => {
-    console.log('[MemoTemplateSuggestions] selectedRecordIds:', selectedRecordIds);
-  }, [selectedRecordIds]);
+
 
   // メモ生成モーダル関連のstate
   const [isGenerateMemoModalOpen, setIsGenerateMemoModalOpen] = useState(false);
