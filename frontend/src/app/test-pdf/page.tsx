@@ -57,7 +57,7 @@ export default function TestPDFPage() {
 
     try {
       // Get auth token (assuming user is logged in via Clerk)
-      const token = await (window as any).Clerk?.session?.getToken();
+      const token = await (window as any)?.Clerk?.session?.getToken();
       if (!token) {
         throw new Error('Not authenticated. Please log in first.');
       }
@@ -105,7 +105,7 @@ export default function TestPDFPage() {
 
     try {
       // Get auth token
-      const token = await (window as any).Clerk?.session?.getToken();
+      const token = await (window as any)?.Clerk?.session?.getToken();
       if (!token) {
         throw new Error('Not authenticated. Please log in first.');
       }
@@ -231,7 +231,7 @@ export default function TestPDFPage() {
             </div>
             
             <p className="text-sm text-gray-600">
-              Note: Processing large PDF files may take several minutes due to Vercel's 5-minute function timeout.
+              Note: Processing large PDF files may take several minutes due to Vercel&apos;s 5-minute function timeout.
             </p>
           </CardContent>
         </Card>

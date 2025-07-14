@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { OpenAIEmbeddings } from '@langchain/openai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAuth } from 'google-auth-library';
@@ -29,7 +29,7 @@ function sanitizeText(text: string): string {
     return '';
   }
   
-  let cleaned = text
+  const cleaned = text
     // NULL文字と制御文字を除去
     .replace(/[\u0000-\u001F\u007F-\u009F]/g, '')
     // OCRで頻繁に出現する意味のない記号・文字を除去
@@ -219,7 +219,7 @@ ${text.substring(0, 8000)}`;
 }
 
 // ファイルダウンロードと処理
-async function downloadAndProcessFile(fileName: string, supabaseClient: any) {
+async function downloadAndProcessFile(fileName: string, supabaseClient: SupabaseClient) {
   const fileExtension = path.extname(fileName).toLowerCase();
   console.log(`Processing file: ${fileName}`);
 
@@ -252,10 +252,10 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: any) {
           let text = '';
           let pages = 0;
           
-          const reader = new (PdfReader.PdfReader as any)();
+          const reader = new (PdfReader.PdfReader as unknown as new () => any)();
           
           // テキスト抽出のイベントハンドラ
-          reader.parseBuffer(fileBuffer, (err: any, item: any) => {
+          reader.parseBuffer(fileBuffer, (err: Error | null, item: any) => {
             if (err) {
               console.error("pdfreader parsing error:", err);
               reject(err);
@@ -360,7 +360,7 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: any) {
         await fs.writeFile(tmpFilePath, fileBuffer);
         
         // 動的にofficeparserをインポート
-        const officeParser = require('officeparser');
+        const officeParser = await import('officeparser');
         
         const data = await new Promise<string>((resolve, reject) => {
           officeParser.parseOffice(tmpFilePath, (content: string, err: Error | null) => {
@@ -425,7 +425,7 @@ async function processAndStoreDocuments(
   sourceFileName: string,
   originalFileName: string | null,
   userId: string,
-  supabaseClient: any,
+  supabaseClient: SupabaseClient,
   embeddingsClient: OpenAIEmbeddings,
   generativeAiClient: GoogleGenerativeAI,
   recordId: string
@@ -438,7 +438,7 @@ async function processAndStoreDocuments(
   }
 
   const parsedDocs = processedFile.docs;
-  let manualId: string = recordId; // Use the provided recordId
+  const manualId: string = recordId; // Use the provided recordId
 
   try {
     console.log(`Using provided recordId: ${recordId}`);

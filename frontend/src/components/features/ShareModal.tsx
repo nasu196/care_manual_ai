@@ -23,6 +23,12 @@ interface ShareConfig {
   file_names?: string[]; // ファイル名情報を追加
 }
 
+interface FileData {
+  id: string;
+  original_file_name: string;
+  [key: string]: any;
+}
+
 interface ShareModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -104,7 +110,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
                 const fileData = await fileResponse.json();
                 console.log('[ShareModal] File data received:', fileData);
                 
-                const fileNames = fileData.map((file: any) => file.original_file_name).filter(Boolean);
+                const fileNames = fileData.map((file: FileData) => file.original_file_name).filter(Boolean);
                 console.log('[ShareModal] Extracted file names:', fileNames);
                 
                 // 取得できなかったファイルがある場合は「削除されたファイル」を追加

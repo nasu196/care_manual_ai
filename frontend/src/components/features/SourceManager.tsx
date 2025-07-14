@@ -246,16 +246,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         onRecordSelectionChange?.(recordIds);
       }
     }
-  }, [selectedSourceNames, sourceFiles, isInitialized, onRecordSelectionChange]);
-
-  // selectedRecordIdsから親コンポーネントに返すファイル名を生成（重複除去）
-  const getSelectedFileNames = useCallback(() => {
-    const selectedNames = sourceFiles
-      .filter(file => selectedRecordIds.includes(file.recordId))
-      .map(file => file.name);
-    // 重複除去
-    return [...new Set(selectedNames)];
-  }, [sourceFiles, selectedRecordIds]);
+  }, [selectedSourceNames, sourceFiles, isInitialized, onRecordSelectionChange, selectedRecordIds]);
 
   // 選択状態を親コンポーネントと同期
   useEffect(() => {
@@ -761,7 +752,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         setLoadingSourceData(false); // ★ ローディング解除
         return;
       }
-      const storageFileName = targetFile.id; // エンコードされたファイル名
       const recordId = targetFile.recordId; // データベースレコードのID
 
       // manual_chunksからテキストデータを直接取得（recordIdを使用）
