@@ -112,7 +112,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
                 
                 return { ...share, file_names: fileNames };
               }
-            } catch (error) {
+            } catch {
               // ファイル名取得エラーは内部的に処理
             }
           }

@@ -176,7 +176,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot, selectedRecordIds = [] }: A
               {chatSlot}
             </div>
             <div className={`${hasEditPermission ? 'w-1/3' : 'w-1/2'} h-full overflow-auto bg-white`}> {/* ★ p-3 を削除 (メモパネルも統一) */}
-              {memoSlot || <MemoStudio selectedSourceNames={[]} />}
+              {memoSlot || <MemoStudio selectedRecordIds={selectedRecordIds} />}
             </div>
           </div>
         </div>
@@ -220,7 +220,7 @@ const AppLayout = ({ sourceSlot, chatSlot, memoSlot, selectedRecordIds = [] }: A
                         : (isMemoViewExpanded ? 'w-3/5' : 'w-2/5')
                       }`}
         >
-          {memoSlot || <MemoStudio selectedSourceNames={[]} />}
+          {memoSlot || <MemoStudio selectedRecordIds={selectedRecordIds} />}
         </div>
       </div>
     </div>
