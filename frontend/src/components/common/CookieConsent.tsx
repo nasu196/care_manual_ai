@@ -5,8 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { X } from 'lucide-react';
 
-
-
 interface CookieConsentProps {
   domain?: string;
   subdomains?: string[];
@@ -43,6 +41,7 @@ export default function CookieConsent({
   // 親ドメインCookieから同意状態を確認
   const checkCookieConsentFromParent = useCallback((): string | null => {
     try {
+      if (typeof document === 'undefined') return null;
       const cookies = document.cookie.split(';');
       for (const cookie of cookies) {
         const [name, value] = cookie.trim().split('=');
@@ -60,6 +59,7 @@ export default function CookieConsent({
   // LocalStorageから同意状態を確認
   const checkCookieConsentFromLocal = useCallback((): string | null => {
     try {
+      if (typeof window === 'undefined') return null;
       return localStorage.getItem('cookieConsent');
     } catch (error) {
       console.error('Error checking local storage:', error);
@@ -82,6 +82,8 @@ export default function CookieConsent({
 
   // Cookie削除関数
   const deleteCookie = useCallback((name: string) => {
+    if (typeof document === 'undefined') return;
+    
     const domains = isLocalhost
       ? ['', 'localhost', '.localhost']
       : [
@@ -105,6 +107,8 @@ export default function CookieConsent({
 
   // 分析ツールのCookie削除
   const deleteAnalyticsCookies = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    
     // Google Analytics Cookies
     const gaCookies = ['_ga', '_gid', '_gat', '_gat_gtag_UA', '_gat_gtag_G'];
     gaCookies.forEach(deleteCookie);
@@ -122,34 +126,32 @@ export default function CookieConsent({
     });
   }, [deleteCookie]);
 
-  // 分析ツールの有効化/無効化
-  const toggleAnalytics = useCallback((enabled: boolean) => {
-    if (enabled) {
-      // 分析ツールを有効化（Analytics.tsxで処理）
+  // 分析ツールの制御（改善版）
+  const toggleAnalytics = useCallback((accepted: boolean) => {
+    if (typeof window === 'undefined') return;
+    
+    // グローバル状態を更新
+    (window as any).cookieConsentAccepted = accepted;
+    
+    // カスタムイベントを発火
+    window.dispatchEvent(new CustomEvent('cookieConsentChanged', {
+      detail: { accepted: accepted }
+    }));
+
+    if (accepted) {
+      // 分析許可時は有効化
       window.dispatchEvent(new CustomEvent('enableAnalytics'));
     } else {
-      // 分析ツールを無効化
+      // 分析拒否時は無効化とCookie削除
       window.dispatchEvent(new CustomEvent('disableAnalytics'));
-      
-      // Cookieを削除
       deleteAnalyticsCookies();
-      
-      // グローバル変数の削除
-      if (typeof window !== 'undefined') {
-        const w = window as unknown as {
-          gtag?: (...args: unknown[]) => void;
-          clarity?: (command: string, ...args: unknown[]) => void;
-          dataLayer?: unknown[];
-        };
-        delete w.gtag;
-        delete w.clarity;
-        delete w.dataLayer;
-      }
     }
   }, [deleteAnalyticsCookies]);
 
-  // 同意状態の保存
-  const saveCookieConsent = async (accepted: boolean) => {
+  // 同意状態の保存（改善版）
+  const saveCookieConsent = useCallback((accepted: boolean) => {
+    if (typeof window === 'undefined') return;
+    
     setIsLoading(true);
     
     try {
@@ -158,24 +160,34 @@ export default function CookieConsent({
       // 1. LocalStorageに保存
       localStorage.setItem('cookieConsent', consentValue);
       
-      // 2. 親ドメインCookieに保存
-      const expires = new Date();
-      expires.setFullYear(expires.getFullYear() + 1); // 1年後
+      // 2. 同意履歴を保存
+      const history = JSON.parse(localStorage.getItem('consentHistory') || '[]');
+      history.push({
+        action: consentValue,
+        timestamp: new Date().toISOString(),
+        origin: window.location.origin
+      });
+      localStorage.setItem('consentHistory', JSON.stringify(history));
+      
+      // 3. 親ドメインCookieに保存
+      const hostname = window.location.hostname;
+      const cookieDomain = hostname.includes('.') 
+        ? '.' + hostname.split('.').slice(-2).join('.')
+        : hostname;
       
       if (isLocalhost) {
-        // localhost環境ではドメイン指定なしでCookieを設定
-        document.cookie = `cookieConsent=${consentValue}; expires=${expires.toUTCString()}; path=/`;
+        document.cookie = `cookieConsent=${consentValue}; path=/; max-age=31536000; SameSite=Lax`;
       } else {
-        // 本番環境では親ドメインを指定
-        document.cookie = `cookieConsent=${consentValue}; expires=${expires.toUTCString()}; path=/; domain=.${actualDomain}`;
+        document.cookie = `cookieConsent=${consentValue}; path=/; domain=${cookieDomain}; max-age=31536000; SameSite=Lax`;
       }
       
-      // 3. 分析ツールの制御
+      // 4. サブドメインに同期
+      syncToSubdomains(consentValue);
+      
+      // 5. 分析ツールの制御
       toggleAnalytics(accepted);
       
-      // 4. クロスドメイン同期
-      await syncConsentAcrossDomains(consentValue);
-      
+      // 6. バナーを非表示
       setShowBanner(false);
       
     } catch (error) {
@@ -183,36 +195,71 @@ export default function CookieConsent({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [isLocalhost, toggleAnalytics]);
 
-  // クロスドメイン同期
-  const syncConsentAcrossDomains = async (consent: string) => {
-    const promises = subdomains.map(async (subdomain) => {
-      try {
-        const targetOrigin = `https://${subdomain}.${domain}`;
-        
-        // iframeを使った同期
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = `${targetOrigin}/cookie-sync?consent=${consent}&source=${window.location.hostname}`;
-        
-        document.body.appendChild(iframe);
-        
-        // 3秒後にiframeを削除
-        setTimeout(() => {
-          document.body.removeChild(iframe);
-        }, 3000);
-        
-      } catch (error) {
-        console.error(`Error syncing with ${subdomain}:`, error);
-      }
-    });
+  // サブドメインに同期（改善版）
+  const syncToSubdomains = useCallback((consentValue: string) => {
+    if (typeof window === 'undefined') return;
     
-    await Promise.allSettled(promises);
-  };
+    // 現在のホスト名を取得
+    const currentHostname = window.location.hostname;
+    const baseDomain = currentHostname.includes('.') 
+      ? currentHostname.split('.').slice(-2).join('.')
+      : currentHostname;
+    
+    // 同期すべきドメインを定義（自分自身は除外）
+    const domainsToSync = [];
+    
+    if (currentHostname === `app.${baseDomain}`) {
+      // app.care-manual-ai.comからcare-manual-ai.comに同期
+      domainsToSync.push(baseDomain);
+    } else if (currentHostname === baseDomain) {
+      // care-manual-ai.comからapp.care-manual-ai.comに同期
+      domainsToSync.push(`app.${baseDomain}`);
+    }
+    
+    // 同期実行
+    domainsToSync.forEach(targetDomain => {
+      const syncUrl = `https://${targetDomain}/cookie-sync?consent=${consentValue}&from=${currentHostname}`;
+      
+      console.log(`Syncing cookie consent to: ${targetDomain}`);
+      
+      // 隠しiframeで同期
+      const iframe = document.createElement('iframe');
+      iframe.src = syncUrl;
+      iframe.style.display = 'none';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = 'none';
+      
+      // エラーハンドリング
+      iframe.onload = () => {
+        console.log(`Cookie sync completed for: ${targetDomain}`);
+      };
+      
+      iframe.onerror = () => {
+        console.error(`Cookie sync failed for: ${targetDomain}`);
+      };
+      
+      document.body.appendChild(iframe);
+      
+      // 5秒後に安全に削除
+      setTimeout(() => {
+        try {
+          if (iframe.parentNode) {
+            document.body.removeChild(iframe);
+          }
+        } catch (error) {
+          console.error('Error removing sync iframe:', error);
+        }
+      }, 5000);
+    });
+  }, []);
 
-  // クロスドメイン通信のリスナー
+  // クロスドメイン通信のリスナー（改善版）
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
     const handleMessage = (event: MessageEvent) => {
       // オリジン検証
       if (!finalAllowedOrigins.includes(event.origin)) {
@@ -238,6 +285,8 @@ export default function CookieConsent({
 
   // 初期化
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
     const consentStatus = getCookieConsentStatus();
     
     if (consentStatus === 'accepted') {
