@@ -105,7 +105,7 @@ serve(async (req: Request) => {
     }
 
     // 2. manualsテーブルにレコードを挿入（Clerk JWTでユーザー分離）
-    const { error: dbError } = await supabase
+    const { data: newRecord, error: dbError } = await supabase
       .from('manuals')
       .insert({
         file_name: encodedFileName,
@@ -114,18 +114,28 @@ serve(async (req: Request) => {
         summary: null,
         storage_path: `manuals/${storagePath}` // バケット名を含めたフルパス
         // uploaded_at, updated_atはDBのデフォルト値に任せる
-      });
+      })
+      .select('id')
+      .single();
 
-    if (dbError) {
+    if (dbError || !newRecord || !newRecord.id) {
       console.error('[upload-manual-function] Database insert error:', dbError);
       // ストレージからファイルを削除（ロールバック）
       await storageClient.storage.from('manuals').remove([storagePath]);
-      return new Response(JSON.stringify({ error: `Database insert failed: ${dbError.message}` }), { status: 500, headers: corsHeaders })
+      return new Response(JSON.stringify({ error: `Database insert failed: ${dbError?.message || 'Failed to create record'}` }), { status: 500, headers: corsHeaders })
     }
 
-    console.log(`[upload-manual-function] Successfully uploaded and registered: ${storagePath}`);
+    console.log(`[upload-manual-function] Successfully uploaded and registered: ${storagePath}, recordId: ${newRecord.id}`);
 
-    return new Response(JSON.stringify({ message: 'Upload successful', fileName: encodedFileName, storagePath: storagePath }), {
+    return new Response(JSON.stringify({ 
+      message: 'Upload successful', 
+      fileName: encodedFileName, 
+      originalFileName: originalFileName,
+      storagePath: storagePath,
+      recordId: newRecord.id,
+      fileSize: file.size,
+      fileType: file.type
+    }), {
       status: 201,
       headers: corsHeaders,
     })

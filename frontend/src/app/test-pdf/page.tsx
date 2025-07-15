@@ -74,8 +74,13 @@ export default function TestPDFPage() {
       formData.append('file', file);
       formData.append('originalFileName', file.name);
 
-      addLog('Sending upload request to /api/upload-manual...');
-      const uploadResponse = await fetch('/api/upload-manual', {
+      addLog('Sending upload request to Supabase Edge Function...');
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured');
+      }
+      const uploadUrl = `${supabaseUrl}/functions/v1/upload-manual-function`;
+      const uploadResponse = await fetch(uploadUrl, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

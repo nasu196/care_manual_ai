@@ -371,8 +371,12 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         console.error('[DEBUG] Failed to parse JWT for debugging:', debugError);
       }
 
-      // ★ Vercel Functions APIでアップロード
-      const uploadFunctionUrl = '/api/upload-manual';
+      // ★ Supabase Edge Function APIでアップロード（4.5MB制限回避）
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured');
+      }
+      const uploadFunctionUrl = `${supabaseUrl}/functions/v1/upload-manual-function`;
       const formData = new FormData();
       formData.append('file', file);
       formData.append('originalFileName', originalFileName);
@@ -407,13 +411,13 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         return;
       }
 
-      // Vercel Functions APIからのレスポンスをパース
+      // Edge Functionからのレスポンスをパース
       const uploadResult = await uploadResponse.json();
-      const storagePath = uploadResult.fileName; // `userId/encodedFileName` 形式のパス
+      const storagePath = uploadResult.storagePath; // `userId/encodedFileName` 形式のパス
       const recordId = uploadResult.recordId; // 作成されたレコードID
 
       if (!storagePath || !recordId) {
-        console.error('[handleUpload] fileName or recordId not found in upload-manual API response:', uploadResult);
+        console.error('[handleUpload] storagePath or recordId not found in upload-manual API response:', uploadResult);
         updateUploadStatus(uploadId, {
           status: 'error',
           error: 'アップロード処理は成功しましたが、サーバーからの応答が不正です。',
