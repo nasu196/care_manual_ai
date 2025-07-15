@@ -398,6 +398,36 @@ async function downloadAndProcessFile(fileName: string, supabaseClient: Supabase
           console.warn(`Failed to delete temporary file ${tmpFilePath}:`, unlinkError);
         }
       }
+    } else if (fileExtension === '.txt') {
+      console.log("Processing text file...");
+      
+      try {
+        // テキストファイルを文字列として読み込み
+        const textContent = fileBuffer.toString('utf8');
+        
+        if (!textContent || textContent.trim().length === 0) {
+          throw new Error("Text file is empty or contains no readable content");
+        }
+        
+        console.log(`Text file processing completed: ${textContent.length} characters`);
+        
+        docs = [{
+          pageContent: textContent,
+          metadata: {
+            source: fileName,
+            type: 'text',
+            pages: 1,
+            totalPages: 1,
+            processing_status: 'success'
+          }
+        }];
+        
+        numPages = 1;
+        
+      } catch (txtError) {
+        console.error("Text file processing error:", txtError);
+        throw new Error(`Text file processing failed: ${txtError instanceof Error ? txtError.message : 'Unknown error'}`);
+      }
     } else {
       console.warn(`Unsupported file format: ${fileExtension}`);
       return null;

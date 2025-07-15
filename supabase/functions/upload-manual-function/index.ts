@@ -72,6 +72,24 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: 'Missing file or originalFileName' }), { status: 400, headers: corsHeaders })
     }
 
+    // ファイル形式チェック
+    const allowedTypes = [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain'
+    ];
+
+    if (!allowedTypes.includes(file.type)) {
+      return new Response(JSON.stringify({ 
+        error: 'Unsupported file type. Please upload PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX, or TXT files.' 
+      }), { status: 400, headers: corsHeaders });
+    }
+
     // ファイル名エンコード（フロントと同じロジック）
     const encodedFileName = encodeFileName(originalFileName)
 

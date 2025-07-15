@@ -270,7 +270,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         if (fileSizeMB > premiumStatus.fileSizeLimit) {
           setMessageWithAutoHide({ 
             type: 'error', 
-            text: `ファイル "${file.name}" のサイズ (${fileSizeMB.toFixed(1)}MB) が制限 (${premiumStatus.fileSizeLimit}MB) を超えています。${!premiumStatus.isPremium ? ' 有料プランにアップグレードすると100MBまでアップロード可能です。' : ''}` 
+            text: `ファイル "${file.name}" のサイズ (${fileSizeMB.toFixed(1)}MB) が制限 (${premiumStatus.fileSizeLimit}MB) を超えています。` 
           });
           return;
         }
@@ -279,7 +279,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         if (sourceFiles.length >= premiumStatus.fileLimit) {
           setMessageWithAutoHide({ 
             type: 'error', 
-            text: `ファイル数の制限 (${premiumStatus.fileLimit}ファイル) に達しています。${!premiumStatus.isPremium ? ' 有料プランにアップグレードすると無制限でアップロード可能です。' : ''}` 
+            text: `ファイル数の制限 (${premiumStatus.fileLimit}ファイル) に達しています。` 
           });
           return;
         }
