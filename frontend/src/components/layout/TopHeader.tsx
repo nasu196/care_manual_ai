@@ -49,8 +49,7 @@ const TopHeader: React.FC<TopHeaderProps> = ({ selectedRecordIds = [] }) => {
   };
 
   const handleTerms = () => {
-    console.log("利用規約がクリックされました");
-    // TODO: 利用規約ページへの遷移など
+    window.open('https://www.t-north.jp/complete-terms-page', '_blank', 'noopener,noreferrer');
   };
 
   const handleShare = () => {
