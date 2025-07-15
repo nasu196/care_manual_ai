@@ -67,7 +67,6 @@ function HomePageContent() {
       if (savedSources) {
         try {
           const parsedSources = JSON.parse(savedSources);
-          console.log('[page.tsx] localStorageから復元:', parsedSources);
           setSelectedSourceNames(parsedSources);
         } catch (error) {
           console.error('[page.tsx] localStorage解析エラー:', error);
@@ -185,10 +184,7 @@ function HomePageContent() {
 
   // ★ SourceManager側でレコードID選択状態が変更されたときに呼び出される関数
   const handleRecordSelectionChange = (newSelectedRecordIds: string[]) => {
-    console.log('[page.tsx] handleRecordSelectionChange called with:', newSelectedRecordIds);
-    console.log('[page.tsx] Previous selectedRecordIds:', selectedRecordIds);
     setSelectedRecordIds(newSelectedRecordIds);
-    console.log('[page.tsx] selectedRecordIds updated to:', newSelectedRecordIds);
   };
 
   // 共有データ読み込み中

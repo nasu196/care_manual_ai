@@ -28,19 +28,12 @@ const TopHeader: React.FC<TopHeaderProps> = ({ selectedRecordIds = [] }) => {
   const hasEditPermission = useMemoStore((state) => state.hasEditPermission);
   const setEditPermission = useMemoStore((state) => state.setEditPermission);
 
-  // ★ デバッグログを追加
-  useEffect(() => {
-    console.log('[TopHeader] selectedRecordIds changed:', selectedRecordIds);
-    console.log('[TopHeader] selectedRecordIds length:', selectedRecordIds?.length);
-  }, [selectedRecordIds]);
-
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const mode = urlParams.get('mode');
     
     if (mode === 'readonly') {
       setEditPermission(false);
-      console.log('[TopHeader] URLパラメータにより閲覧専用モードに設定しました');
     }
   }, [setEditPermission]); // setEditPermissionを依存配列に追加
 

@@ -237,7 +237,6 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
 
   const handleMemoMessage = (message: Message) => {
     if (message.isStreaming) {
-        console.log("Cannot memoize a message that is still streaming.");
         alert("AIの回答が完了してからメモを作成してください。");
         return;
     }
@@ -246,12 +245,10 @@ export default function ChatInterfaceMain({ selectedSourceNames }: ChatInterface
     const htmlContent = marked.parse(message.text) as string;
     setNewMemoRequest({ title, content: htmlContent });
     setMemoViewExpanded(true);
-    console.log('New memo request set to store:', { title, content: htmlContent });
   };
 
   const handleVerbosityChange = (value: string) => {
     const newVerbosity = value as AiVerbosity;
-    console.log('[ChatInterfaceMain] Verbosity changed from', aiVerbosity, 'to', newVerbosity);
     setAiVerbosity(newVerbosity);
     // localStorageに保存
     localStorage.setItem('aiVerbosity', newVerbosity);

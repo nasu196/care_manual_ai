@@ -119,7 +119,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
   // ★ 親からのselectedRecordIdsと内部状態を同期
   useEffect(() => {
-    console.log('[SourceManager] propSelectedRecordIds changed:', propSelectedRecordIds);
     setSelectedRecordIds(propSelectedRecordIds);
   }, [propSelectedRecordIds]);
 
@@ -212,37 +211,25 @@ const SourceManager: React.FC<SourceManagerProps> = ({
 
   // 初回のみ親コンポーネントのselectedSourceNamesをselectedRecordIdsに変換
   useEffect(() => {
-    console.log('[SourceManager] 初期化チェック:', {
-      isInitialized,
-      sourceFilesLength: sourceFiles.length,
-      selectedSourceNames,
-      selectedRecordIds
-    });
-    
     if (!isInitialized && sourceFiles.length > 0) {
-      console.log('[SourceManager] 初期化開始');
       // 初回のみ親からの選択状態を反映（重複排除）
       const uniqueSelectedNames = [...new Set(selectedSourceNames)];
-      console.log('[SourceManager] uniqueSelectedNames:', uniqueSelectedNames);
       
       const recordIds: string[] = [];
       
       // 各ファイル名について、最初に見つかったレコードのみを選択
       uniqueSelectedNames.forEach(fileName => {
         const file = sourceFiles.find(f => f.name === fileName);
-        console.log('[SourceManager] fileName:', fileName, 'found file:', file);
         if (file) {
           recordIds.push(file.recordId);
         }
       });
       
-      console.log('[SourceManager] 初期化で設定するrecordIds:', recordIds);
       setSelectedRecordIds(recordIds);
       setIsInitialized(true);
       
       // 親コンポーネントにも通知
       if (recordIds.length > 0) {
-        console.log('[SourceManager] 初期化時に親コンポーネントに通知');
         onRecordSelectionChange?.(recordIds);
       }
     }
@@ -357,19 +344,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         return;
       }
 
-      // ★ JWTトークンの内容をデバッグ出力
-      try {
-        const parts = token.split('.');
-        if (parts.length === 3) {
-          const payload = JSON.parse(atob(parts[1]));
-          console.log('[DEBUG] JWT Payload:', payload);
-          console.log('[DEBUG] user_metadata:', payload.user_metadata);
-          console.log('[DEBUG] user_id from user_metadata:', payload.user_metadata?.user_id);
-          console.log('[DEBUG] sub:', payload.sub);
-        }
-      } catch (debugError) {
-        console.error('[DEBUG] Failed to parse JWT for debugging:', debugError);
-      }
+
 
       // ★ Supabase Edge Function APIでアップロード（4.5MB制限回避）
       const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -477,8 +452,7 @@ const SourceManager: React.FC<SourceManagerProps> = ({
           message: `完了`
         });
 
-        // デバッグログ追加
-        console.log('[DEBUG] Upload result:', uploadResult);
+
 
         // アップロード成功通知を表示
         setMessageWithAutoHide({ 
@@ -502,7 +476,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
         await fetchUploadedFiles();
         
         // 更新フラグは削除され、アップロード後にファイルリストを再取得するのみ
-        console.log('[DEBUG] Upload completed, refreshing file list');
 
         // 3秒後にキューから削除
         setTimeout(() => {
@@ -557,9 +530,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
   };
 
   const handleSourceSelectionChange = (recordId: string, checked: boolean) => {
-    console.log('[SourceManager] handleSourceSelectionChange called:', { recordId, checked });
-    console.log('[SourceManager] current selectedRecordIds:', selectedRecordIds);
-    
     let newSelectedIds: string[];
     if (checked) {
       newSelectedIds = [...selectedRecordIds, recordId];
@@ -567,9 +537,6 @@ const SourceManager: React.FC<SourceManagerProps> = ({
       newSelectedIds = selectedRecordIds.filter(id => id !== recordId);
     }
     setSelectedRecordIds(newSelectedIds);
-    
-    console.log('[SourceManager] new selectedRecordIds:', newSelectedIds);
-    console.log('[SourceManager] calling onRecordSelectionChange with:', newSelectedIds);
     
     // 親コンポーネントに新しい選択状態を通知（重複除去）
     const newSelectedNames = sourceFiles
