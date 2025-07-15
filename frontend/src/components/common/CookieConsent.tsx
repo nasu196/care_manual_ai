@@ -5,6 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { X } from 'lucide-react';
 
+// Window型の拡張
+declare global {
+  interface Window {
+    cookieConsentAccepted?: boolean;
+  }
+}
+
 interface CookieConsentProps {
   domain?: string;
   subdomains?: string[];
@@ -130,7 +137,7 @@ export default function CookieConsent({
     if (typeof window === 'undefined') return;
     
     // グローバル状態を更新
-    (window as any).cookieConsentAccepted = accepted;
+    window.cookieConsentAccepted = accepted;
     
     // カスタムイベントを発火
     window.dispatchEvent(new CustomEvent('cookieConsentChanged', {
@@ -146,49 +153,6 @@ export default function CookieConsent({
       deleteAnalyticsCookies();
     }
   }, [deleteAnalyticsCookies]);
-
-  // 同意状態の保存（リファレンス準拠版）
-  const saveCookieConsent = useCallback((accepted: boolean) => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    
-    try {
-      const consentValue = accepted ? 'accepted' : 'declined';
-      
-      // 1. LocalStorageに保存
-      localStorage.setItem('cookieConsent', consentValue);
-      
-      // 2. 同意履歴を保存
-      const history = JSON.parse(localStorage.getItem('consentHistory') || '[]');
-      history.push({
-        action: consentValue,
-        timestamp: new Date().toISOString(),
-        origin: window.location.origin
-      });
-      localStorage.setItem('consentHistory', JSON.stringify(history));
-      
-      // 3. 親ドメインCookieに保存
-      const hostname = window.location.hostname;
-      const domain = hostname.includes('.') 
-        ? '.' + hostname.split('.').slice(-2).join('.')
-        : hostname;
-      
-      document.cookie = `cookieConsent=${consentValue}; path=/; domain=${domain}; max-age=31536000; SameSite=Lax`;
-      
-      // 4. サブドメインに同期
-      syncToSubdomains(consentValue);
-      
-      // 5. 分析ツールの制御
-      toggleAnalytics(accepted);
-      
-      // 6. バナーを非表示
-      setShowBanner(false);
-      
-    } catch (error) {
-      console.error('❌ Error saving cookie consent:', error);
-    }
-  }, [subdomains]);
 
   // サブドメインに同期（改善版）
   const syncToSubdomains = useCallback((consentValue: string) => {
@@ -246,6 +210,49 @@ export default function CookieConsent({
       }, 5000);
     });
   }, []);
+
+  // 同意状態の保存（リファレンス準拠版）
+  const saveCookieConsent = useCallback((accepted: boolean) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    
+    try {
+      const consentValue = accepted ? 'accepted' : 'declined';
+      
+      // 1. LocalStorageに保存
+      localStorage.setItem('cookieConsent', consentValue);
+      
+      // 2. 同意履歴を保存
+      const history = JSON.parse(localStorage.getItem('consentHistory') || '[]');
+      history.push({
+        action: consentValue,
+        timestamp: new Date().toISOString(),
+        origin: window.location.origin
+      });
+      localStorage.setItem('consentHistory', JSON.stringify(history));
+      
+      // 3. 親ドメインCookieに保存
+      const hostname = window.location.hostname;
+      const domain = hostname.includes('.') 
+        ? '.' + hostname.split('.').slice(-2).join('.')
+        : hostname;
+      
+      document.cookie = `cookieConsent=${consentValue}; path=/; domain=${domain}; max-age=31536000; SameSite=Lax`;
+      
+      // 4. サブドメインに同期
+      syncToSubdomains(consentValue);
+      
+      // 5. 分析ツールの制御
+      toggleAnalytics(accepted);
+      
+      // 6. バナーを非表示
+      setShowBanner(false);
+      
+    } catch (error) {
+      console.error('❌ Error saving cookie consent:', error);
+    }
+  }, [syncToSubdomains, toggleAnalytics]);
 
   // クロスドメイン通信のリスナー（改善版）
   useEffect(() => {
