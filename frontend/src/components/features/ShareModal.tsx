@@ -44,6 +44,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
   const [existingShares, setExistingShares] = useState<ShareConfig[]>([]);
   const [isLoadingShares, setIsLoadingShares] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showCopyToast, setShowCopyToast] = useState(false);
   
   const { getToken, userId } = useAuth();
 
@@ -253,7 +254,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
     try {
       await navigator.clipboard.writeText(urlToCopy);
       setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
+      setShowCopyToast(true);
+      setTimeout(() => {
+        setIsCopied(false);
+        setShowCopyToast(false);
+      }, 2000);
     } catch (error) {
       console.error('クリップボードへのコピーに失敗しました:', error);
       alert('クリップボードへのコピーに失敗しました。');
@@ -272,6 +277,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
@@ -457,5 +463,19 @@ export const ShareModal: React.FC<ShareModalProps> = ({ isOpen, onOpenChange, se
         </div>
       </DialogContent>
     </Dialog>
+    
+    {/* コピー完了トースト */}
+    {showCopyToast && (
+      <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-[9999] 
+                      bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg">
+        <div className="flex items-center space-x-2">
+          <Check className="h-4 w-4" />
+          <span className="text-sm font-medium">
+            コピーしました
+          </span>
+        </div>
+      </div>
+    )}
+    </>
   );
 }; 
