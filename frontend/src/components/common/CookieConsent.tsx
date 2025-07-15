@@ -17,7 +17,6 @@ export default function CookieConsent({
   allowedOrigins = []
 }: CookieConsentProps) {
   const [showBanner, setShowBanner] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
 
   // localhost環境の判定
   const isLocalhost = typeof window !== 'undefined' && (
@@ -148,11 +147,11 @@ export default function CookieConsent({
     }
   }, [deleteAnalyticsCookies]);
 
-  // 同意状態の保存（改善版）
+  // 同意状態の保存（リファレンス準拠版）
   const saveCookieConsent = useCallback((accepted: boolean) => {
-    if (typeof window === 'undefined') return;
-    
-    setIsLoading(true);
+    if (typeof window === 'undefined') {
+      return;
+    }
     
     try {
       const consentValue = accepted ? 'accepted' : 'declined';
@@ -171,15 +170,11 @@ export default function CookieConsent({
       
       // 3. 親ドメインCookieに保存
       const hostname = window.location.hostname;
-      const cookieDomain = hostname.includes('.') 
+      const domain = hostname.includes('.') 
         ? '.' + hostname.split('.').slice(-2).join('.')
         : hostname;
       
-      if (isLocalhost) {
-        document.cookie = `cookieConsent=${consentValue}; path=/; max-age=31536000; SameSite=Lax`;
-      } else {
-        document.cookie = `cookieConsent=${consentValue}; path=/; domain=${cookieDomain}; max-age=31536000; SameSite=Lax`;
-      }
+      document.cookie = `cookieConsent=${consentValue}; path=/; domain=${domain}; max-age=31536000; SameSite=Lax`;
       
       // 4. サブドメインに同期
       syncToSubdomains(consentValue);
@@ -191,11 +186,9 @@ export default function CookieConsent({
       setShowBanner(false);
       
     } catch (error) {
-      console.error('Error saving cookie consent:', error);
-    } finally {
-      setIsLoading(false);
+      console.error('❌ Error saving cookie consent:', error);
     }
-  }, [isLocalhost, toggleAnalytics]);
+  }, [subdomains]);
 
   // サブドメインに同期（改善版）
   const syncToSubdomains = useCallback((consentValue: string) => {
@@ -222,8 +215,6 @@ export default function CookieConsent({
     domainsToSync.forEach(targetDomain => {
       const syncUrl = `https://${targetDomain}/cookie-sync?consent=${consentValue}&from=${currentHostname}`;
       
-      console.log(`Syncing cookie consent to: ${targetDomain}`);
-      
       // 隠しiframeで同期
       const iframe = document.createElement('iframe');
       iframe.src = syncUrl;
@@ -234,7 +225,7 @@ export default function CookieConsent({
       
       // エラーハンドリング
       iframe.onload = () => {
-        console.log(`Cookie sync completed for: ${targetDomain}`);
+        // Sync completed
       };
       
       iframe.onerror = () => {
@@ -285,7 +276,9 @@ export default function CookieConsent({
 
   // 初期化
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined') {
+      return;
+    }
     
     const consentStatus = getCookieConsentStatus();
     
@@ -300,7 +293,9 @@ export default function CookieConsent({
     }
   }, [getCookieConsentStatus, toggleAnalytics]);
 
-  if (!showBanner) return null;
+  if (!showBanner) {
+    return null;
+  }
 
   return (
     <div className="fixed bottom-4 left-4 right-4 z-50 md:left-auto md:right-4 md:max-w-md">
@@ -328,14 +323,12 @@ export default function CookieConsent({
               <div className="flex gap-2 flex-wrap">
                 <Button
                   onClick={() => saveCookieConsent(true)}
-                  disabled={isLoading}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 text-sm"
                 >
-                  {isLoading ? '処理中...' : '同意する'}
+                  同意する
                 </Button>
                 <Button
                   onClick={() => saveCookieConsent(false)}
-                  disabled={isLoading}
                   variant="outline"
                   className="px-4 py-2 text-sm"
                 >
