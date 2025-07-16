@@ -135,7 +135,7 @@ serve(async (req: Request, _connInfo: ConnInfo): Promise<Response> => {
         // まず、選択されたrecordIdがどのようなデータを持っているか確認
         const { data: recordDebugData, error: recordDebugError } = await supabase
             .from('manuals')
-            .select('id, user_id, file_name, original_file_name, summary, created_at')
+            .select('id, user_id, file_name, original_file_name, summary, uploaded_at')
             .in('id', selectedRecordIds);
         
         console.log("Record debug data:", { recordDebugData, recordDebugError });
