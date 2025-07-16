@@ -306,8 +306,8 @@ export default function CookieConsent({
       
       toggleAnalytics(true);
       setShowBanner(false);
-    } else if (consentStatus === 'declined') {
-      // LocalStorageが空の場合は同期
+    } else if (consentStatus === 'declined' || consentStatus === 'rejected') {
+      // LocalStorageが空の場合は同期（後方互換性のため'rejected'も対応）
       const localConsent = checkCookieConsentFromLocal();
       if (!localConsent) {
         console.log('🔧 Syncing LocalStorage from parent cookie...');
