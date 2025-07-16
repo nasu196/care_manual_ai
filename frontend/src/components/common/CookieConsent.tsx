@@ -290,15 +290,43 @@ export default function CookieConsent({
     const consentStatus = getCookieConsentStatus();
     
     if (consentStatus === 'accepted') {
+      // LocalStorageが空の場合は同期
+      const localConsent = checkCookieConsentFromLocal();
+      if (!localConsent) {
+        console.log('🔧 Syncing LocalStorage from parent cookie...');
+        localStorage.setItem('cookieConsent', 'accepted');
+        const history = [{
+          action: 'accepted',
+          timestamp: new Date().toISOString(),
+          origin: window.location.origin,
+          source: 'auto_sync_from_parent_cookie'
+        }];
+        localStorage.setItem('consentHistory', JSON.stringify(history));
+      }
+      
       toggleAnalytics(true);
       setShowBanner(false);
     } else if (consentStatus === 'declined') {
+      // LocalStorageが空の場合は同期
+      const localConsent = checkCookieConsentFromLocal();
+      if (!localConsent) {
+        console.log('🔧 Syncing LocalStorage from parent cookie...');
+        localStorage.setItem('cookieConsent', 'declined');
+        const history = [{
+          action: 'declined',
+          timestamp: new Date().toISOString(),
+          origin: window.location.origin,
+          source: 'auto_sync_from_parent_cookie'
+        }];
+        localStorage.setItem('consentHistory', JSON.stringify(history));
+      }
+      
       toggleAnalytics(false);
       setShowBanner(false);
     } else {
       setShowBanner(true);
     }
-  }, [getCookieConsentStatus, toggleAnalytics]);
+  }, [getCookieConsentStatus, toggleAnalytics, checkCookieConsentFromLocal]);
 
   if (!showBanner) {
     return null;
