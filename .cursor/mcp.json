@@ -11,8 +11,7 @@
       "args": [
         "-y",
         "@supabase/mcp-server-supabase@latest",
-        "--read-only",
-        "--project-ref=rgvygxptjkjfsgfkmlwl"
+        "--read-only"
       ],
       "env": {
         "SUPABASE_ACCESS_TOKEN": "sbp_0121826ea0a160c468f982ef2fb154806d514b54"
