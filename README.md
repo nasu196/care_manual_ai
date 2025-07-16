@@ -1,6 +1,41 @@
 # care_manual_ai
 介護施設向けAIマニュアルツール
 
+## 🌿 開発環境
+
+### Supabase環境構成
+
+**本番環境 (Production)**
+- Project ID: `rgvygxptjkjfsgfkmlwl`
+- Branch: `main` (default)
+- URL: https://rgvygxptjkjfsgfkmlwl.supabase.co
+
+**開発環境 (Development)**
+- Project ID: `axfcggmldezzvhpowtwn`
+- Branch: `develop`
+- Parent: `rgvygxptjkjfsgfkmlwl` (production)
+- Status: Preview Branch
+
+### GitHub環境構成
+
+**現在のブランチ**: `develop`
+- 開発作業は`develop`ブランチで実施
+- 本番リリース時は`main`ブランチにマージ
+
+### 開発ワークフロー
+
+```bash
+# Supabaseブランチでの開発
+1. develop環境 (axfcggmldezzvhpowtwn) で機能開発
+2. MCP/CLIで自由に調整・実験
+3. 完了後にmainブランチにマージして本番適用
+
+# GitHubブランチとの連携
+1. GitHub develop ブランチで開発
+2. Supabase develop ブランチと並行して作業
+3. 両方の変更をmainにマージ
+```
+
 ---
 
 ## 認証方式の変更履歴
