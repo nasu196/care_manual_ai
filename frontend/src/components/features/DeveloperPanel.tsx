@@ -45,8 +45,8 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
     onPremiumStatusChange(premiumStatus);
   }, [isPremium, onPremiumStatusChange]);
 
-  // 本番環境または明示的に非表示設定されている場合は何も表示しない
-  if (process.env.NODE_ENV === 'production' || hidden) {
+  // 明示的に非表示設定されている場合は何も表示しない
+  if (hidden) {
     return null;
   }
 

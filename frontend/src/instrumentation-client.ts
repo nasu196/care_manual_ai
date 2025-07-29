@@ -15,7 +15,7 @@ Sentry.init({
   ],
 
   // Send tracing data to Sentry dashboard (not console)
-  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 0.1,
+  tracesSampleRate: 0.1,
 
   // Define how likely Replay events are sampled.
   replaysSessionSampleRate: 0.1,
