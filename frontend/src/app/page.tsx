@@ -228,7 +228,7 @@ function HomePageContent() {
             premiumStatus={premiumStatus} // ★ プレミアム状態を渡す
           />
           {/* ★ 開発用パネルを追加（共有モードでは非表示） */}
-          {!shareId && (
+          {!shareId && typeof window !== 'undefined' && window.location.hostname !== 'manual.t-north.jp' && (
             <div className="p-4 border-t">
               <DeveloperPanel onPremiumStatusChange={handlePremiumStatusChange}  />
             </div>

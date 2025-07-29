@@ -45,8 +45,9 @@ export const DeveloperPanel: React.FC<DeveloperPanelProps> = ({
     onPremiumStatusChange(premiumStatus);
   }, [isPremium, onPremiumStatusChange]);
 
-  // 明示的に非表示設定されている場合は何も表示しない
-  if (hidden) {
+  // 本番環境または明示的に非表示設定されている場合は何も表示しない
+  const isProduction = typeof window !== 'undefined' && window.location.hostname === 'manual.t-north.jp';
+  if (isProduction || hidden) {
     return null;
   }
 

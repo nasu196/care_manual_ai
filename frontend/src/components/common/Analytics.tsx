@@ -57,8 +57,10 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
       
       gtag('js', new Date());
       gtag('config', gaMeasurementId, {
+        // GA4のデフォルト設定を使用
+        send_page_view: true,
         page_title: document.title,
-        page_location: window.location.href,
+        page_location: window.location.href
       });
 
       // グローバルにGA IDを保存してanalyticsライブラリから参照できるようにする
