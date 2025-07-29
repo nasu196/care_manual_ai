@@ -23,7 +23,7 @@ export const trackEvent = (action: string, category: string, label?: string, val
 
 // ページビュー追跡
 export const trackPageView = (url: string, gaId?: string) => {
-  const measurementId = gaId || (typeof window !== 'undefined' && (window as any).__GA_MEASUREMENT_ID__);
+  const measurementId = gaId || (typeof window !== 'undefined' && (window as Window & { __GA_MEASUREMENT_ID__?: string }).__GA_MEASUREMENT_ID__);
   if (measurementId) {
     gtag('config', measurementId, {
       page_title: document.title,
