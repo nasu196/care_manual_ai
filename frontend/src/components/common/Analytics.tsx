@@ -60,6 +60,9 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
         page_title: document.title,
         page_location: window.location.href,
       });
+
+      // グローバルにGA IDを保存してanalyticsライブラリから参照できるようにする
+      (window as any).__GA_MEASUREMENT_ID__ = gaMeasurementId;
     };
   }, [gaMeasurementId]);
 
