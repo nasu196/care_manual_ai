@@ -70,13 +70,10 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
 
   // Clarityスクリプトの動的追加
   const loadClarity = useCallback(() => {
-    // ★デバッグログ追加
-    console.log('Attempting to load Clarity. Project ID:', clarityProjectId);
     if (!clarityProjectId) {
-      console.warn('Clarity Project ID is not set, skipping load.');
+      console.warn('Clarity Project ID is not set:', clarityProjectId);
       return;
     }
-    console.log('Loading Clarity with ID:', clarityProjectId);
 
     // Clarityスクリプトの追加（改良版）
     const script = document.createElement('script');
@@ -90,7 +87,6 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     script.id = 'clarity-script';
     document.head.appendChild(script);
     
-    console.log('Clarity script added with ID:', clarityProjectId);
   }, [clarityProjectId]);
 
   // 分析ツールの有効化
@@ -136,8 +132,6 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
   // カスタムイベントリスナー
   useEffect(() => {
     const handleEnableAnalytics = () => {
-      // ★デバッグログ追加
-      console.log('✅ "enableAnalytics" event received. Loading scripts...');
       loadGoogleAnalytics();
       loadClarity();
       setScriptsLoaded(true);
