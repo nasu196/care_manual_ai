@@ -281,52 +281,24 @@ export default function CookieConsent({
     return () => window.removeEventListener('message', handleMessage);
   }, [finalAllowedOrigins, toggleAnalytics]);
 
-  // 初期化
+  // 初期化（最終版）
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
-    
+
     const consentStatus = getCookieConsentStatus();
-    
-    if (consentStatus === 'accepted') {
-      // LocalStorageが空の場合は同期
-      const localConsent = checkCookieConsentFromLocal();
-      if (!localConsent) {
-        console.log('🔧 Syncing LocalStorage from parent cookie...');
-        localStorage.setItem('cookieConsent', 'accepted');
-        const history = [{
-          action: 'accepted',
-          timestamp: new Date().toISOString(),
-          origin: window.location.origin,
-          source: 'auto_sync_from_parent_cookie'
-        }];
-        localStorage.setItem('consentHistory', JSON.stringify(history));
-      }
-      
-      toggleAnalytics(true);
-      setShowBanner(false);
-    } else if (consentStatus === 'declined' || consentStatus === 'rejected') {
-      // LocalStorageが空の場合は同期（後方互換性のため'rejected'も対応）
-      const localConsent = checkCookieConsentFromLocal();
-      if (!localConsent) {
-        console.log('🔧 Syncing LocalStorage from parent cookie...');
-        localStorage.setItem('cookieConsent', 'declined');
-        const history = [{
-          action: 'declined',
-          timestamp: new Date().toISOString(),
-          origin: window.location.origin,
-          source: 'auto_sync_from_parent_cookie'
-        }];
-        localStorage.setItem('consentHistory', JSON.stringify(history));
-      }
-      
-      toggleAnalytics(false);
+
+    // シンプルなロジックに変更：未決定の場合のみバナー表示
+    if (consentStatus === 'accepted' || consentStatus === 'declined' || consentStatus === 'rejected') {
+      // 既に同意/拒否済み
+      toggleAnalytics(consentStatus === 'accepted');
       setShowBanner(false);
     } else {
+      // 未決定の場合
       setShowBanner(true);
     }
-  }, [getCookieConsentStatus, toggleAnalytics, checkCookieConsentFromLocal]);
+  }, [getCookieConsentStatus, toggleAnalytics]);
 
   if (!showBanner) {
     return null;

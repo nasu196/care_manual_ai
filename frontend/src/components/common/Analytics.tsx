@@ -70,19 +70,27 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
 
   // Clarityスクリプトの動的追加
   const loadClarity = useCallback(() => {
-    if (!clarityProjectId) return;
+    // ★デバッグログ追加
+    console.log('Attempting to load Clarity. Project ID:', clarityProjectId);
+    if (!clarityProjectId) {
+      console.warn('Clarity Project ID is not set, skipping load.');
+      return;
+    }
+    console.log('Loading Clarity with ID:', clarityProjectId);
 
-    // Clarityスクリプトの追加
+    // Clarityスクリプトの追加（改良版）
     const script = document.createElement('script');
     script.innerHTML = `
       (function(c,l,a,r,i,t,y){
         c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i+"?ref=bwt";
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
       })(window, document, "clarity", "script", "${clarityProjectId}");
     `;
     script.id = 'clarity-script';
     document.head.appendChild(script);
+    
+    console.log('Clarity script added with ID:', clarityProjectId);
   }, [clarityProjectId]);
 
   // 分析ツールの有効化
@@ -128,7 +136,11 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
   // カスタムイベントリスナー
   useEffect(() => {
     const handleEnableAnalytics = () => {
-      enableAnalytics();
+      // ★デバッグログ追加
+      console.log('✅ "enableAnalytics" event received. Loading scripts...');
+      loadGoogleAnalytics();
+      loadClarity();
+      setScriptsLoaded(true);
     };
 
     const handleDisableAnalytics = () => {
@@ -142,7 +154,7 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
       window.removeEventListener('enableAnalytics', handleEnableAnalytics);
       window.removeEventListener('disableAnalytics', handleDisableAnalytics);
     };
-  }, [enableAnalytics, disableAnalytics]);
+  }, [enableAnalytics, disableAnalytics, loadGoogleAnalytics, loadClarity]);
 
   // 初期化時にCookie同意状態を確認
   useEffect(() => {
