@@ -5,12 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { X } from 'lucide-react';
 
-// Window型の拡張
-declare global {
-  interface Window {
-    cookieConsentAccepted?: boolean;
-  }
-}
+// Window型はlayout.tsxで定義済み
 
 interface CookieConsentProps {
   domain?: string;
@@ -144,12 +139,8 @@ export default function CookieConsent({
       detail: { accepted: accepted }
     }));
 
-    if (accepted) {
-      // 分析許可時は有効化
-      window.dispatchEvent(new CustomEvent('enableAnalytics'));
-    } else {
-      // 分析拒否時は無効化とCookie削除
-      window.dispatchEvent(new CustomEvent('disableAnalytics'));
+    if (!accepted) {
+      // 分析拒否時はCookie削除
       deleteAnalyticsCookies();
     }
   }, [deleteAnalyticsCookies]);
