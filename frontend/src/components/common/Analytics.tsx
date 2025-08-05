@@ -49,8 +49,14 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     if (!gaMeasurementId) return;
     if (typeof window === 'undefined') return;
 
+    // 型安全なwindow拡張
+    const w = window as Window & {
+      __GA_INITIALIZED__?: string;
+      dataLayer?: unknown[];
+      gtag?: (...args: unknown[]) => void;
+    };
+    
     // より詳細な重複チェック
-    const w = window as any;
     if (w.__GA_INITIALIZED__ === gaMeasurementId) {
       console.log('GA4 already initialized for this measurement ID');
       return;
@@ -60,7 +66,7 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     w.dataLayer = w.dataLayer || [];
     if (!w.gtag) {
       w.gtag = function(...args: unknown[]) {
-        w.dataLayer.push(args);
+        w.dataLayer?.push(args);
       };
     }
 
@@ -72,6 +78,8 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     
     // 3. スクリプト読み込み完了後に初期化（公式準拠）
     script.onload = () => {
+      if (!w.gtag) return;
+      
       // 基本初期化
       w.gtag('js', new Date());
       w.gtag('config', gaMeasurementId, {
@@ -172,14 +180,16 @@ export default function Analytics({ gaMeasurementId, clarityProjectId }: Analyti
     
     // グローバル変数の削除
     if (typeof window !== 'undefined') {
-      const w = window as unknown as {
+      const w = window as Window & {
         gtag?: (...args: unknown[]) => void;
         clarity?: (command: string, ...args: unknown[]) => void;
         dataLayer?: unknown[];
+        __GA_INITIALIZED__?: string;
       };
-      delete w.gtag;
-      delete w.clarity;
-      delete w.dataLayer;
+      (w as { gtag?: unknown }).gtag = undefined;
+      (w as { clarity?: unknown }).clarity = undefined;
+      (w as { dataLayer?: unknown }).dataLayer = undefined;
+      (w as { __GA_INITIALIZED__?: unknown }).__GA_INITIALIZED__ = undefined;
     }
     
     setScriptsLoaded(false);
