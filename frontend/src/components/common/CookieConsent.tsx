@@ -220,6 +220,11 @@ export default function CookieConsent({
     try {
       const consentValue = accepted ? 'accepted' : 'declined';
       
+      // 開発環境でのみログ出力（安全な方法）
+      if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+        console.log('Cookie consent saved:', consentValue);
+      }
+      
       // 1. LocalStorageに保存
       localStorage.setItem('cookieConsent', consentValue);
       
@@ -298,7 +303,7 @@ export default function CookieConsent({
       // 未決定の場合
       setShowBanner(true);
     }
-  }, [getCookieConsentStatus, toggleAnalytics]);
+  }, [getCookieConsentStatus, toggleAnalytics, isLocalhost, actualDomain]);
 
   if (!showBanner) {
     return null;
